@@ -1,4 +1,4 @@
-"""agenthatch hello — 验证安装成功。"""
+"""agenthatch hello — Verify installation."""
 
 import sys
 

@@ -1,6 +1,6 @@
-"""agenthatch CLI 层。
+"""agenthatch CLI layer.
 
-子命令按功能拆分到 commands/ 目录。
+Subcommands are organized by function under the commands/ directory.
 """
 from rich.console import Console
 from rich.theme import Theme

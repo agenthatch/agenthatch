@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 dependencies = [
-    "typer[all]>=0.15.0",
+    "typer>=0.15.0",
     "packaging>=24.0",
 ]
 

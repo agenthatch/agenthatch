@@ -1,9 +1,9 @@
-"""配置校验器（v0.1 核心逻辑在 config/__init__.py 中完成）。
+"""Configuration validators (v0.1 core logic lives in config/__init__.py).
 
-此文件为 v0.2+ 预留，届时实现：
-- provider/model 枚举校验
-- API Key 存在性检查
-- 路径有效性检查
+This file is a placeholder for v0.2+, where it will implement:
+- Provider/model enum validation
+- API key existence check
+- Path validity check
 """
 
 __all__: list[str] = []

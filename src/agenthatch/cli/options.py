@@ -1,7 +1,7 @@
-"""全局选项定义。
+"""Global option definitions.
 
-v0.1 预留文件。v0.2 起，init 和 build 会共享 --provider 选项，
-届时在此处定义可复用选项函数。
+v0.1 placeholder file. Starting in v0.2, init and build will share the
+--provider option. Reusable option functions will be defined here at that time.
 """
 
 __all__: list[str] = []

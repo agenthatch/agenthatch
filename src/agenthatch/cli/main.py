@@ -1,6 +1,6 @@
-"""agenthatch CLI 入口。
+"""agenthatch CLI entry point.
 
-定义 Typer app、全局选项、子命令注册。
+Defines the Typer app, global options, and subcommand registration.
 """
 import logging
 from pathlib import Path
@@ -24,11 +24,11 @@ app = typer.Typer(
 
 
 def _on_version_callback(value: bool) -> None:
-    """处理 --version 选项的回调。
+    """Handle --version option callback.
 
-    参考 Typer 自身 print_version 实现：
-    - not value: 选项未触发，直接返回
-    - ctx.resilient_parsing: shell 补全模式，不输出版本
+    Based on Typer's own print_version implementation:
+    - not value: option not triggered, return immediately
+    - ctx.resilient_parsing: shell completion mode, skip version output
     """
     if not value:
         return
@@ -74,7 +74,7 @@ def _global_callback(
 
 
 def _handle_agenthatch_error(e: AgentHatchError) -> None:
-    """统一处理 AgentHatchError，输出错误信息并按 exit_code 退出。"""
+    """Unified AgentHatchError handler — prints error message and exits with exit_code."""
     console.print(f"[red]Error: {e}[/red]")
     raise typer.Exit(code=e.exit_code)
 
@@ -123,10 +123,11 @@ app.command(name="init")(init_command)
 
 
 def main() -> Any:
-    """CLI 入口函数。
+    """CLI entry point function.
 
-    统一入口点，方便在全局异常处理、信号处理等逻辑中扩展。
-    pyproject.toml [project.scripts] 和 __main__.py 都指向此函数。
+    Single entry point, convenient for extending global exception handling,
+    signal handling, etc. Both pyproject.toml [project.scripts] and __main__.py
+    point to this function.
     """
     try:
         return app()

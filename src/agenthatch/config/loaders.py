@@ -1,9 +1,9 @@
-"""配置加载器（v0.1 核心逻辑在 config/__init__.py 中完成）。
+"""Configuration loaders (v0.1 core logic lives in config/__init__.py).
 
-此文件为 v0.2+ 预留，届时实现：
-- 多 Provider 配置加载
-- SecretRef 解析
-- 配置文件合并
+This file is a placeholder for v0.2+, where it will implement:
+- Multi-provider config loading
+- SecretRef resolution
+- Config file merging
 """
 
 __all__: list[str] = []

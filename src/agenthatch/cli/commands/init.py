@@ -1,4 +1,4 @@
-"""agenthatch init — 生成默认配置文件。"""
+"""agenthatch init — Generate default config file."""
 
 import typer
 from rich.prompt import Confirm

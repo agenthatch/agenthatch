@@ -31,7 +31,7 @@ class TestInit:
         result = runner.invoke(app, ["init", "--force"])
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()
-        assert "agenthatch 配置文件" in content
+        assert "agenthatch configuration file" in content
 
     def test_confirm_overwrite(self, runner, app, tmp_agenthatch_home):
         tmp_agenthatch_home.joinpath("config.toml").write_text("# old")
@@ -39,4 +39,4 @@ class TestInit:
             result = runner.invoke(app, ["init"])
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()
-        assert "agenthatch 配置文件" in content
+        assert "agenthatch configuration file" in content

@@ -1,4 +1,4 @@
-"""agenthatch doctor — 环境健康检查。"""
+"""agenthatch doctor — Environment health check."""
 
 import sys
 from dataclasses import dataclass
