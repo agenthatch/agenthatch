@@ -1,5 +1,7 @@
 """Shared fixtures for agenthatch tests."""
 
+from __future__ import annotations
+
 import pytest
 from typer import rich_utils
 from typer.testing import CliRunner
@@ -17,6 +19,25 @@ def _fix_rich_output():
     """
     rich_utils.MAX_WIDTH = 3000
     rich_utils.FORCE_TERMINAL = False
+
+
+@pytest.fixture(autouse=True)
+def _fix_prompt_password(monkeypatch):
+    """Monkeypatch Prompt.ask to not use getpass in tests.
+
+    Rich Prompt.ask(password=True) uses getpass.getpass() which reads
+    from /dev/tty directly, bypassing CliRunner's stdin simulation.
+    Stripping password=True lets CliRunner's input= parameter work.
+    """
+    import rich.prompt
+
+    _original_ask = rich.prompt.Prompt.ask
+
+    @staticmethod
+    def _ask(prompt="", *, password=False, **kwargs):  # noqa: B008
+        return _original_ask(prompt, password=False, **kwargs)
+
+    monkeypatch.setattr(rich.prompt.Prompt, "ask", _ask)
 
 
 @pytest.fixture
@@ -54,4 +75,33 @@ def tmp_agenthatch_home(tmp_path, monkeypatch):
     monkeypatch.setattr("agenthatch.cli.commands.init.CONFIG_FILE", temp_config)
     monkeypatch.setattr("agenthatch.cli.commands.doctor.CONFIG_FILE", temp_config)
     monkeypatch.setattr("agenthatch.cli.commands.hello.CONFIG_FILE", temp_config)
+    monkeypatch.setattr("agenthatch.providers.CONFIG_FILE", temp_config)
     return tmp_path
+
+
+@pytest.fixture
+def mock_httpx_success(monkeypatch):
+    """Mock httpx to return success for API key verification."""
+
+    class _MockResponse:
+        status_code = 200
+        is_success = True
+
+    def _mock_get(*args, **kwargs):
+        return _MockResponse()
+
+    monkeypatch.setattr("agenthatch.providers.httpx.get", _mock_get)
+
+
+@pytest.fixture
+def mock_httpx_unauthorized(monkeypatch):
+    """Mock httpx to return 401 for API key verification."""
+
+    class _MockResponse:
+        status_code = 401
+        is_success = False
+
+    def _mock_get(*args, **kwargs):
+        return _MockResponse()
+
+    monkeypatch.setattr("agenthatch.providers.httpx.get", _mock_get)

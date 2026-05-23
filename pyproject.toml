@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.1.1"
+version = "0.2.0"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
     "typer>=0.15.0",
     "packaging>=24.0",
+    "httpx>=0.28.0",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +53,7 @@ packages = ["src/agenthatch"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-    "designv0.1.md",
+    "design/",
     "tests/",
 ]
 

@@ -1,5 +1,7 @@
 """agenthatch doctor — Environment health check."""
 
+from __future__ import annotations
+
 import sys
 from dataclasses import dataclass
 
@@ -7,6 +9,13 @@ import typer
 
 from agenthatch.cli import console
 from agenthatch.config import CONFIG_FILE
+from agenthatch.providers import (
+    ProviderInfo,
+    get_default_provider,
+    get_provider,
+    resolve_api_key,
+    verify_api_key,
+)
 
 
 @dataclass
@@ -19,15 +28,18 @@ class _Check:
 def doctor_command() -> None:
     """Run environment health checks.
 
-    Checks Python version, core dependencies, and config file status.
+    v0.2 adds API key connectivity check on top of v0.1 checks.
     Exits with code 1 if any check fails.
     """
-    console.print("\n[bold]agenthatch Health Check[/bold]\n")
+    console.print()
+    console.print("[bold]agenthatch Health Check[/bold]")
+    console.print()
 
     checks = [
         _check_python_version,
         _check_dependencies,
         _check_config_file,
+        _check_api_key,
     ]
 
     all_passed = True
@@ -43,7 +55,7 @@ def doctor_command() -> None:
 
     console.print()
     if all_passed:
-        console.print("[bold green]All checks passed. You are ready to go.[/bold green]")
+        console.print("[bold green]All checks passed. You are ready to build.[/bold green]")
     else:
         console.print("[bold red]Some checks failed. See above for fixes.[/bold red]")
         raise typer.Exit(code=1)
@@ -69,13 +81,13 @@ def _check_python_version() -> _Check:
 def _check_dependencies() -> _Check:
     """Check core dependencies are installed."""
     missing: list[str] = []
-    for pkg in ("typer", "rich"):
+    for pkg in ("typer", "rich", "httpx"):
         try:
             __import__(pkg)
         except ImportError:
             missing.append(pkg)
     if not missing:
-        return _Check(passed=True, message="Core dependencies: typer, rich")
+        return _Check(passed=True, message="Core dependencies: typer, rich, httpx")
     return _Check(
         passed=False,
         message=f"Missing packages: {', '.join(missing)}",
@@ -91,4 +103,57 @@ def _check_config_file() -> _Check:
         passed=False,
         message="No config file found",
         fix="agenthatch init",
+    )
+
+
+def _check_api_key() -> _Check:
+    """Check API key is configured and can reach the provider.
+
+    Steps:
+    1. Read default provider from config
+    2. Resolve API key using priority chain
+    3. Verify connectivity with a lightweight HTTP request
+
+    This check is skipped if no config file exists (handled by _check_config_file).
+    """
+    if not CONFIG_FILE.exists():
+        return _Check(
+            passed=True,
+            message="API key — skipping (no config file yet)",
+        )
+
+    try:
+        provider_name = get_default_provider()
+        info: ProviderInfo = get_provider(provider_name)
+    except Exception as e:
+        return _Check(
+            passed=False,
+            message=f"Provider resolution failed: {e}",
+            fix="agenthatch init",
+        )
+
+    if not info.env_key and info.kind == "builtin" and info.name == "ollama":
+        return _Check(
+            passed=True,
+            message=f"Provider: {provider_name} (local, no key needed)",
+        )
+
+    key = resolve_api_key(provider_name, prompt=False)
+    if not key:
+        return _Check(
+            passed=False,
+            message=f"API key not configured for '{provider_name}'",
+            fix=f"export {info.env_key}=<key>  or  agenthatch init",
+        )
+
+    ok, detail = verify_api_key(provider_name, key, info.base_url)
+    if ok:
+        return _Check(
+            passed=True,
+            message=f"Provider: {provider_name} — {detail}",
+        )
+    return _Check(
+        passed=False,
+        message=f"Provider: {provider_name} — {detail}",
+        fix=f"Check your {info.env_key} environment variable or API key",
     )

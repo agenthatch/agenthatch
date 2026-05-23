@@ -10,6 +10,8 @@ _theme = Theme(
         "version": "bold magenta",
         "accent": "bold cyan",
         "ok": "bold green",
+        "warn": "bold yellow",
+        "muted": "dim white",
     }
 )
 console = Console(theme=_theme, highlight=False)
