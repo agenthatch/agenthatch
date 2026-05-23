@@ -289,8 +289,8 @@ def verify_api_key(
 # ---------------------------------------------------------------------------
 
 def list_builtin_providers() -> list[ProviderInfo]:
-    """Return all built-in providers sorted by name."""
-    return sorted(BUILTIN_PROVIDERS.values(), key=lambda p: p.name)
+    """Return all built-in providers in registry order."""
+    return list(BUILTIN_PROVIDERS.values())
 
 
 def list_custom_providers(config: dict[str, Any] | None = None) -> list[ProviderInfo]:

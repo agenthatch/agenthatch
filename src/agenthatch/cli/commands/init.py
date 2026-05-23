@@ -222,9 +222,10 @@ def _gather_api_key(info: ProviderInfo) -> str:
         console.print(
             f"  [warn]Warning: API key will be stored in {CONFIG_FILE}[/warn]"
         )
-        console.print(
-            f"  [warn]  Using {info.env_key} env var is recommended instead.[/warn]"
-        )
+        if info.env_key:
+            console.print(
+                f"  [warn]  Using {info.env_key} env var is recommended instead.[/warn]"
+            )
     return key.strip()
 
 

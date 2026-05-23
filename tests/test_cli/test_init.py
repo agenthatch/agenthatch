@@ -12,6 +12,8 @@ class TestInitInteractive:
             input="1\nsk-test-key\ngpt-4o\n",
         )
         assert result.exit_code == 0
+        content = tmp_agenthatch_home.joinpath("config.toml").read_text()
+        assert 'default = "openai"' in content
 
     def test_select_anthropic(self, runner, app, tmp_agenthatch_home):
         result = runner.invoke(
@@ -20,6 +22,18 @@ class TestInitInteractive:
             input="2\nsk-ant-test-key\nclaude-sonnet-4-20250514\n",
         )
         assert result.exit_code == 0
+        content = tmp_agenthatch_home.joinpath("config.toml").read_text()
+        assert 'default = "anthropic"' in content
+
+    def test_select_deepseek(self, runner, app, tmp_agenthatch_home):
+        result = runner.invoke(
+            app,
+            ["init"],
+            input="3\nsk-deepseek-key\ndeepseek-chat\n",
+        )
+        assert result.exit_code == 0
+        content = tmp_agenthatch_home.joinpath("config.toml").read_text()
+        assert 'default = "deepseek"' in content
 
     def test_select_ollama_no_key(self, runner, app, tmp_agenthatch_home):
         result = runner.invoke(
@@ -28,6 +42,8 @@ class TestInitInteractive:
             input="4\n\nllama3\n",
         )
         assert result.exit_code == 0
+        content = tmp_agenthatch_home.joinpath("config.toml").read_text()
+        assert 'default = "ollama"' in content
 
     def test_refuses_overwrite_without_force(
         self, runner, app, tmp_agenthatch_home
@@ -45,6 +61,8 @@ class TestInitInteractive:
             input="1\nsk-overwrite-key\ngpt-4o\n",
         )
         assert result.exit_code == 0
+        content = tmp_agenthatch_home.joinpath("config.toml").read_text()
+        assert 'default = "openai"' in content
 
     def test_custom_provider(self, runner, app, tmp_agenthatch_home):
         result = runner.invoke(
@@ -117,3 +135,4 @@ class TestInitConfigContent:
         assert "[providers.anthropic]" in content
         assert "[providers.deepseek]" in content
         assert "[providers.ollama]" in content
+        assert 'default = "openai"' in content
