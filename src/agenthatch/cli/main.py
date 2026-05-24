@@ -26,9 +26,9 @@ app = typer.Typer(
 def _on_version_callback(value: bool) -> None:
     """Handle --version option callback.
 
-    Based on Typer's own print_version implementation:
-    - not value: option not triggered, return immediately
-    - ctx.resilient_parsing: shell completion mode, skip version output
+    When --version is passed, prints the version and exits.
+    No resilient_parsing check needed — is_eager=True ensures Typer
+    handles shell completion internally without invoking this callback.
     """
     if not value:
         return
