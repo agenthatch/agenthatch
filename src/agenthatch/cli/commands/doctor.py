@@ -40,6 +40,7 @@ def doctor_command() -> None:
         _check_dependencies,
         _check_config_file,
         _check_api_key,
+        _check_skillhouse,
     ]
 
     all_passed = True
@@ -157,3 +158,43 @@ def _check_api_key() -> _Check:
         message=f"Provider: {provider_name} — {detail}",
         fix=f"Check your {info.env_key} environment variable or API key",
     )
+
+
+def _check_skillhouse() -> _Check:
+    """Check skillhouse.json integrity and accessibility.
+
+    v0.3 health check: verifies the skillhouse.json file exists
+    and is valid JSON with the expected structure.
+    """
+    import json
+
+    from agenthatch.config import CONFIG_DIR
+
+    skillhouse_path = CONFIG_DIR / "skillhouse.json"
+
+    if not skillhouse_path.exists():
+        return _Check(
+            passed=True,
+            message="skillhouse.json — not yet created (run hatch to populate)",
+        )
+
+    try:
+        data = json.loads(skillhouse_path.read_text(encoding="utf-8"))
+        version = data.get("version", "unknown")
+        entries = len(data.get("entries", {}))
+        return _Check(
+            passed=True,
+            message=f"skillhouse.json — v{version}, {entries} skills indexed",
+        )
+    except json.JSONDecodeError as e:
+        return _Check(
+            passed=False,
+            message=f"skillhouse.json — invalid JSON: {e}",
+            fix="Delete .agenthatch/skillhouse.json and re-hatch skills",
+        )
+    except OSError as e:
+        return _Check(
+            passed=False,
+            message=f"skillhouse.json — read error: {e}",
+            fix="Check file permissions",
+        )

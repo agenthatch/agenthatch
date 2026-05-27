@@ -56,6 +56,39 @@ default_model = "llama3"
 # api_key = ""
 # base_url = "http://localhost:8000/v1"
 # default_model = "mixtral-8x7b"
+
+# ── v0.3: Skillhouse index ──
+[skillhouse]
+# Path to skillhouse.json (relative or absolute)
+path = ".agenthatch/skillhouse.json"
+# Auto-register skills to index after hatch
+auto_index = true
+# Embedding model for semantic search (sentence-transformers)
+embedding_model = "all-MiniLM-L6-v2"
+
+# ── v0.3: Skill search directories ──
+[skills]
+# Global skill search roots (comma-separated, for skill discovery)
+search_dirs = "~/.agenthatch/skills,./skills,~/skills"
+
+# ── v0.3 enhancement: Hatch file reading ──
+[hatch]
+# Max chars per-file when reading skill directory contents
+max_file_chars = 10000
+# Max file size in bytes (files larger are skipped)
+max_file_bytes = 1000000
+# Set to false to only collect file metadata (not contents)
+read_file_contents = true
+
+# ── v0.3: Harness model tiers ──
+[harness]
+# Large model (for Harness C and D — interface inference + base detection)
+# Leave empty to fall back to provider's default_model
+large_model = ""
+
+# Small model (for Harness A, B, E — identity, intent, assembly)
+# Leave empty to fall back to provider's default_model
+small_model = ""
 """
 
 
@@ -98,6 +131,9 @@ class Config:
             "AGENTHATCH_VERBOSE": ("core", "verbose"),
             "AGENTHATCH_PROVIDER": ("providers", "default"),
             "AGENTHATCH_LLM_PROVIDER": ("providers", "default"),
+            # v0.3 extensions
+            "AGENTHATCH_SKILLHOUSE_PATH": ("skillhouse", "path"),
+            "AGENTHATCH_SKILL_DIRS": ("skills", "search_dirs"),
         }
         _bool_keys: set[str] = {"verbose"}
         for env_key, (section, key) in env_map.items():

@@ -1,0 +1,54 @@
+identity:
+  id: minimal-skill
+  display_name: My Simple Skill
+  version: 0.1.0
+  license: null
+  author: null
+  meta: {}
+intent:
+  triggers:
+  - format
+  - formatting
+  - text
+  - text format
+  - format text
+  - output
+  - transform
+  - style text
+  - text output
+  satisfies:
+  - format {text}
+  - format text output
+  - apply formatting to {content}
+  - transform text
+  summary: A minimal skill that helps format and transform text output for various
+    purposes.
+interface:
+  provides:
+  - capability: text_format
+    type: transform
+    input_schema: {}
+  requires: []
+  compatible_with: []
+base:
+  runtime: python
+  sandbox: true
+  timeout: 60s
+  env: []
+  dependencies: []
+instructions:
+  workflow: []
+  rules: []
+  safety:
+    confirmation_required_for: []
+    plan_required: false
+    max_rows_default: null
+    parameterized_only: false
+  output_template: null
+resources:
+  scripts: []
+  references: []
+  assets: []
+modes: null
+composition:
+  event_listeners: []

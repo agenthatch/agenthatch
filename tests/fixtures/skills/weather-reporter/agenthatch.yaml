@@ -1,0 +1,105 @@
+identity:
+  id: weather-reporter
+  display_name: Weather Reporter
+  version: 1.0.0
+  license: null
+  author: agenthatch-labs
+  meta:
+    description: Query current weather and forecast data from OpenWeatherMap API.
+      Use when the user asks about weather, temperature, forecast, humidity, wind,
+      or precipitation for any location.
+    compatibility: Requires OPENWEATHER_API_KEY environment variable and internet
+      access
+    allowed-tools: Bash(curl:*) Bash(jq:*) Read
+intent:
+  triggers:
+  - weather
+  - forecast
+  - temperature
+  - humidity
+  - wind
+  - precipitation
+  - climate
+  - conditions
+  - meteorological
+  - OpenWeatherMap
+  satisfies:
+  - get weather for {city}
+  - check temperature in {city}
+  - get forecast for {city}
+  - check humidity in {city}
+  - get weather conditions for {location}
+  - get multi-day forecast for {city}
+  summary: Queries current weather conditions and multi-day forecasts from OpenWeatherMap
+    API for any city, providing temperature, humidity, wind speed, and precipitation
+    data.
+interface:
+  provides:
+  - capability: weather_current
+    type: data
+    input_schema:
+      city: string
+  - capability: weather_forecast
+    type: data
+    input_schema:
+      city: string
+      days: number
+  requires:
+  - capability: http_client
+    type: transport
+    input_schema: {}
+  - capability: json_parser
+    type: utility
+    input_schema: {}
+  - capability: bash_runtime
+    type: runtime
+    input_schema: {}
+  compatible_with:
+  - slack-notifier
+  - dashboard-builder
+  - alert-system
+base:
+  runtime: bash
+  sandbox: true
+  timeout: 120s
+  env:
+  - name: OPENWEATHER_API_KEY
+    required: true
+    description: OpenWeatherMap API key for authentication
+  dependencies:
+  - curl
+  - jq
+instructions:
+  workflow:
+  - step: 1
+    description: Extract city name from user query
+    script: null
+  - step: 2
+    description: Call the API with scripts/query_weather.sh <city>
+    script: scripts/query_weather.sh
+  - step: 3
+    description: Parse JSON response and format as human-readable text
+    script: null
+  - step: 4
+    description: For forecasts, use scripts/forecast_weather.sh <city> <days>
+    script: scripts/forecast_weather.sh
+  rules:
+  - City names with spaces must be URL-encoded (e.g., "New York" → "New%20York")
+  - Always specify units=metric unless user explicitly requests imperial
+  - Never expose API key in output
+  - Respect API rate limit of 60 calls/min on free tier
+  safety:
+    confirmation_required_for: []
+    plan_required: false
+    max_rows_default: null
+    parameterized_only: false
+  output_template: "Weather in {city}, {country}:\n  Temperature: {temp}°C (feels\
+    \ like {feels_like}°C)\n  Condition: {description}\n  Humidity: {humidity}%\n\
+    \  Wind: {wind_speed} m/s"
+resources:
+  scripts: []
+  references: []
+  assets: []
+modes: null
+composition:
+  event_listeners: []

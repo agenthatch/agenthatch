@@ -11,8 +11,11 @@ import typer
 from agenthatch import __version__
 from agenthatch.cli import console
 from agenthatch.cli.commands.doctor import doctor_command
+from agenthatch.cli.commands.hatch import hatch_command
 from agenthatch.cli.commands.hello import hello_command
 from agenthatch.cli.commands.init import init_command
+from agenthatch.cli.commands.search import search_command
+from agenthatch.cli.commands.skills import skills_command
 from agenthatch.exceptions import AgentHatchError
 
 app = typer.Typer(
@@ -59,6 +62,12 @@ def _global_callback(
         "-c",
         help="Path to config file (default: ~/.agenthatch/config.toml)",
         envvar="AGENTHATCH_CONFIG",
+    ),
+    trace: bool = typer.Option(  # noqa: B008
+        False,
+        "--trace",
+        help="Show Harness reasoning traces (for hatch command)",
+        envvar="AGENTHATCH_TRACE",
     ),
     version: bool = typer.Option(  # noqa: B008
         False,
@@ -120,6 +129,9 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
 app.command(name="hello")(hello_command)
 app.command(name="doctor")(doctor_command)
 app.command(name="init")(init_command)
+app.command(name="hatch")(hatch_command)
+app.command(name="search")(search_command)
+app.command(name="skills")(skills_command)
 
 
 def main() -> Any:

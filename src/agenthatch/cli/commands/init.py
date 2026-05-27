@@ -157,6 +157,9 @@ def _configure_builtin_provider(name: str, force: bool) -> None:
     console.print()
     console.print("Next: run [bold]agenthatch doctor[/bold] to verify connectivity.")
 
+    # v0.3: Silent skillhouse initialization
+    _init_skillhouse()
+
 
 def _configure_custom_provider(
     force: bool, preset_name: str | None = None
@@ -203,6 +206,78 @@ def _configure_custom_provider(
     console.print(f"  Use with: agenthatch --provider custom.{name}")
     console.print()
     console.print("Next: run [bold]agenthatch doctor[/bold] to verify connectivity.")
+
+    # v0.3: Silent skillhouse initialization
+    _init_skillhouse()
+
+
+def _init_skillhouse() -> None:
+    """v0.3: Silently initialize skillhouse.json AND scan for existing skills.
+
+    Non-interactive, no user prompts.
+    Three sources of search roots (see _resolve_search_roots):
+      1. [skills].search_dirs from config
+      2. Known AI tool directories (~/.claude/skills, ~/.codex/skills, etc.)
+      3. Project-level .agents/skills/
+
+    Each discovered skill is registered as a placeholder in skillhouse.json.
+    """
+    # Import shared search root resolver
+    from agenthatch.cli.commands.hatch import _resolve_search_roots
+    from agenthatch.house.index import SkillhouseIndex
+    from agenthatch.skill.parser import _is_skill_md
+
+    # Determine skillhouse.json path from config or default
+    skillhouse_path = CONFIG_DIR / "skillhouse.json"
+
+    # Load config to get search roots
+    try:
+        from agenthatch.config import Config
+        config = Config.load()
+    except Exception:
+        config = {}
+
+    search_roots = _resolve_search_roots(config)
+
+    skillhouse_path.parent.mkdir(parents=True, exist_ok=True)
+    idx = SkillhouseIndex(str(skillhouse_path))
+
+    # Scan all roots for skills
+    discovered = 0
+    seen_dirs: set[Path] = set()
+
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+
+        root_count = 0
+        for skill_dir in _discover_all_skills(root, _is_skill_md):
+            if skill_dir.resolve() in seen_dirs:
+                continue
+            seen_dirs.add(skill_dir.resolve())
+
+            skill_id = skill_dir.name
+            idx.register_placeholder(skill_id=skill_id, skill_dir=str(skill_dir))
+            discovered += 1
+            root_count += 1
+
+        if root_count > 0:
+            console.print(f"      Root: {root} ({root_count} found)")
+
+    idx._save()
+
+    if discovered > 0:
+        console.print()
+        console.print(f"  [ok]Discovered {discovered} skills:[/ok]")
+        for d in sorted(seen_dirs, key=lambda p: p.name):
+            console.print(f"      - {d.name:30s} →  {d}")
+        console.print(f"  [ok]Index:[/ok] {skillhouse_path} ({discovered} skills)")
+    else:
+        console.print(f"  [ok]Skillhouse initialized at {skillhouse_path}[/ok]")
+        console.print(
+            "  [dim]No skills discovered. "
+            "Run [bold]agenthatch hatch <path>[/bold] to register.[/dim]",
+        )
 
 
 def _gather_api_key(info: ProviderInfo) -> str:
@@ -398,3 +473,84 @@ def _init_non_interactive(force: bool) -> None:
 
     console.print(f"  Config: [accent]{CONFIG_FILE}[/accent]")
     console.print("  API key: [ok]read from environment variables[/ok]")
+
+    # v0.3: Silent skillhouse initialization
+    _init_skillhouse()
+
+
+def _discover_all_skills(
+    search_root: Path,
+    _is_skill_md_fn,
+) -> list[Path]:
+    """BFS scan a search root, discover ALL directories containing SKILL.md.
+
+    Pattern: codex discover_skills_under_root():
+      - BFS with deque
+      - MAX_SCAN_DEPTH limit
+      - MAX_DIRS_PER_ROOT upper bound
+      - Skip dot-prefixed directories
+      - Deduplication via canonical path set
+
+    Returns:
+        List of skill directories (ordered by discovery).
+    """
+    from collections import deque
+
+    results: list[Path] = []
+    visited: set[Path] = set()
+    queue: deque[tuple[Path, int]] = deque()
+
+    try:
+        search_root = search_root.resolve(strict=True)
+    except (OSError, FileNotFoundError):
+        return results
+    if not search_root.is_dir():
+        return results
+
+    visited.add(search_root)
+    queue.append((search_root, 0))
+    dirs_visited = 0
+
+    _MAX_INIT_SCAN_DEPTH = 5    # deeper than name scan (init is one-time)
+    _MAX_INIT_DIRS = 1000       # more generous than name scan
+    _EXCLUDED = frozenset(
+        {".git", "__pycache__", "node_modules", ".venv", "venv",
+         ".mypy_cache", ".pytest_cache", ".tox", ".eggs", "dist", "build"}
+    )
+
+    while queue:
+        current_dir, depth = queue.popleft()
+        dirs_visited += 1
+        if dirs_visited > _MAX_INIT_DIRS:
+            console.print(f"[yellow]Warning:[/yellow] Scan truncated at "
+                          f"{_MAX_INIT_DIRS} directories in {search_root}")
+            break
+
+        try:
+            entries = list(current_dir.iterdir())
+        except (OSError, PermissionError):
+            continue
+
+        has_skill_md = False
+        subdirs: list[Path] = []
+
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+
+            if entry.is_file() and _is_skill_md_fn(entry.name):
+                has_skill_md = True
+            elif entry.is_dir() and depth < _MAX_INIT_SCAN_DEPTH:
+                if not entry.name.startswith(".") and entry.name not in _EXCLUDED:
+                    resolved = entry.resolve()
+                    if resolved not in visited:
+                        subdirs.append(resolved)
+
+        if has_skill_md:
+            results.append(current_dir)
+
+        for subdir in subdirs:
+            visited.add(subdir)
+            queue.append((subdir, depth + 1))
+
+    return results

@@ -254,7 +254,9 @@ def verify_api_key(
     """Verify an API key by making a lightweight HTTP request.
 
     Strategy:
-    - For most providers: GET {base_url}/models with Bearer token
+    - GET {base_url}[/v1]/models with appropriate auth header
+    - OpenAI-compatible providers: Bearer token auth
+    - Anthropic: x-api-key header auth
     - 200/2xx = key is valid
     - 401/403 = key is invalid
     - Timeout/connection error = cannot verify (treated as uncertain, not failure)
@@ -265,9 +267,22 @@ def verify_api_key(
         - ok=False: key verification failed (detail explains why)
     """
     try:
+        # Build auth headers: Anthropic uses x-api-key, others use Bearer
+        auth_headers = (
+            {"x-api-key": api_key}
+            if provider == "anthropic"
+            else {"Authorization": f"Bearer {api_key}"}
+        )
+        # Build models endpoint: ensure /v1 prefix for providers that need it
+        stripped = base_url.rstrip("/")
+        if "/v1" in stripped:
+            url = f"{stripped}/models"
+        else:
+            url = f"{stripped}/v1/models"
+
         r = httpx.get(
-            f"{base_url.rstrip('/')}/models",
-            headers={"Authorization": f"Bearer {api_key}"},
+            url,
+            headers=auth_headers,
             timeout=timeout,
             follow_redirects=True,
         )
