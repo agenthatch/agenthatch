@@ -49,7 +49,7 @@ class FileManifest:
 @dataclass
 class ContextPack:
     """Phase 1 output — ephemeral, zero semantic transformation."""
-    frontmatter: dict | None
+    frontmatter: dict[str, Any] | None
     body: str
     file_manifest: FileManifest
     dir_name: str
@@ -61,7 +61,7 @@ class ContextPack:
 @dataclass
 class HarnessOutput:
     """Unified output contract for all 5 AgentHarnesses."""
-    result: dict
+    result: dict[str, Any]
     confidence: float
     reasoning_trace: list[str]
     self_check_passed: bool

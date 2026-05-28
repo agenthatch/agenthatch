@@ -61,7 +61,7 @@ class LLMClient:
 
     def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
@@ -69,7 +69,7 @@ class LLMClient:
         """Simple chat completion. Returns response text."""
         response = self._client.chat.completions.create(
             model=model or self._model,
-            messages=messages,
+            messages=messages,  # type: ignore[arg-type]
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -79,7 +79,7 @@ class LLMClient:
 
     def chat_structured(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         response_model: type,
         model: str | None = None,
         max_retries: int = 2,
@@ -97,7 +97,7 @@ class LLMClient:
         client = instructor.from_openai(self._client, mode=instructor.Mode.JSON)
         return client.chat.completions.create(
             model=model or self._model,
-            messages=messages,
+            messages=messages,  # type: ignore[arg-type]
             response_model=response_model,
             max_retries=max_retries,
         )

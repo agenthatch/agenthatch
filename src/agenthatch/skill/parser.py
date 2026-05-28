@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -220,7 +221,7 @@ def _find_markdown_file(skill_dir: Path) -> Path:
     return sorted(md_files)[0]
 
 
-def _best_effort_parse_yaml(skill_dir: Path) -> tuple[dict | None, str, list[str]]:
+def _best_effort_parse_yaml(skill_dir: Path) -> tuple[dict[str, Any] | None, str, list[str]]:
     """Best-effort YAML frontmatter parsing.
 
     Strategy (descending priority):

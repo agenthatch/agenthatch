@@ -6,13 +6,16 @@ Draws from semantic-router's HybridRouter double-layer matching.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.table import Table
 
 from agenthatch.cli import console
 from agenthatch.config import Config
+
+if TYPE_CHECKING:
+    from agenthatch.house.index import SearchResult
 
 
 def search_command(
@@ -65,7 +68,7 @@ def search_command(
 
     # Apply type filter if specified
     if type_filter and results:
-        filtered: list = []
+        filtered: list[SearchResult] = []
         for r in results:
             entry = idx._data.get("entries", {}).get(r.skill_id, {})
             provides = entry.get("interface", {}).get("provides", [])

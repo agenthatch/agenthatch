@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.table import Table
@@ -51,7 +51,7 @@ def skills_command(
 
     # Apply type filter if specified
     if type_filter:
-        filtered: list[dict] = []
+        filtered: list[dict[str, Any]] = []
         for e in entries:
             sid = e["id"]
             raw_entry = idx._data.get("entries", {}).get(sid, {})

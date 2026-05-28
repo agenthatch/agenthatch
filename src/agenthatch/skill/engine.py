@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from agenthatch.skill.llm_client import LLMClient
 from agenthatch.skill.prompts import (
@@ -72,6 +73,8 @@ def _format_file_contents_for_harness(
     for f in file_contents:
         path = f["path"]
         content = f["content"]
+        if path is None:
+            continue
         if content is None:
             parts.append(f"- {path} (binary or unreadable)")
             continue
@@ -116,12 +119,12 @@ class AgentHarness:
     def build_user_message(self, **inputs: object) -> str:
         raise NotImplementedError
 
-    def validate_output(self, result: dict) -> tuple[bool, str]:
+    def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         raise NotImplementedError
 
     def correct_on_failure(
-        self, result: dict, failure_reason: str, **inputs: object
-    ) -> dict:
+        self, result: dict[str, Any], failure_reason: str, **inputs: object
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     # ── Core loop ──────────────────────────────────────────────────
@@ -180,12 +183,12 @@ class AgentHarness:
             internal_retries=retries,
         )
 
-    def _infer(self, messages: list[dict[str, str]]) -> dict:
+    def _infer(self, messages: list[dict[str, Any]]) -> Any:
         """Call LLM for structured output. Override in subclasses."""
         raise NotImplementedError
 
     def _estimate_confidence(
-        self, result: dict, degradations: list[str], retries: int
+        self, result: dict[str, Any], degradations: list[str], retries: int
     ) -> float:
         """Default: degrade 0.15 per retry, min 0.5."""
         base = 1.0
@@ -205,17 +208,23 @@ class ExtractIdentityHarness(AgentHarness):
     def build_system_prompt(self) -> str:
         return IDENTITY_HARNESS_PERSONA + "\n\n" + IDENTITY_FEW_SHOT
 
-    def build_user_message(
-        self, frontmatter: object, dir_name: object, body_first_50_lines: object
-    ) -> str:
+    def build_user_message(self, **inputs: object) -> str:
+        frontmatter = inputs["frontmatter"]
+        dir_name = inputs["dir_name"]
+        body_first_50_lines = inputs["body_first_50_lines"]
+        file_contents = inputs.get("file_contents", [])
+        files_str = _format_file_contents_for_harness(
+            file_contents if isinstance(file_contents, list) else []
+        )
         return f"""Extract identity from the following skill:
 
 dir_name: {dir_name}
 frontmatter: {frontmatter}
 body (first 50 lines):
-{body_first_50_lines}"""
+{body_first_50_lines}
+{files_str}"""
 
-    def _infer(self, messages: list[dict[str, str]]) -> dict:
+    def _infer(self, messages: list[dict[str, Any]]) -> Any:
         result = self.client.chat_structured(
             messages=messages,
             response_model=IdentityOutput,
@@ -223,7 +232,7 @@ body (first 50 lines):
         )
         return result.model_dump()
 
-    def validate_output(self, result: dict) -> tuple[bool, str]:
+    def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         import re
 
         identity = result.get("identity", {})
@@ -239,19 +248,17 @@ body (first 50 lines):
         return True, ""
 
     def correct_on_failure(
-        self,
-        result: dict,
-        failure_reason: str,
-        frontmatter: object,
-        dir_name: object,
-        body_first_50_lines: object,
-    ) -> dict:
+        self, result: dict[str, Any], failure_reason: str, **inputs: object
+    ) -> dict[str, Any]:
+        frontmatter = inputs["frontmatter"]
+        dir_name = inputs["dir_name"]
+        body_first_50_lines = inputs["body_first_50_lines"]
         correction_prompt = (
             f"Your previous output failed validation: {failure_reason}\n\n"
             "Please fix and return corrected identity:\n"
             f"{self.build_user_message(frontmatter=frontmatter, dir_name=dir_name, body_first_50_lines=str(body_first_50_lines)[:500])}"  # noqa: E501
         )
-        result = self.client.chat_structured(
+        corrected_result = self.client.chat_structured(
             messages=[
                 {"role": "system", "content": self.build_system_prompt()},
                 {"role": "user", "content": correction_prompt},
@@ -259,7 +266,7 @@ body (first 50 lines):
             response_model=IdentityOutput,
             model=self.model,
         )
-        return result.model_dump()
+        return cast("dict[str, Any]", corrected_result.model_dump())
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -272,23 +279,26 @@ class InferIntentHarness(AgentHarness):
     def build_system_prompt(self) -> str:
         return INTENT_HARNESS_PERSONA + "\n\n" + INTENT_FEW_SHOT
 
-    def build_user_message(
-        self,
-        description: object,
-        body: object,
-        frontmatter_name: object,
-    ) -> str:
+    def build_user_message(self, **inputs: object) -> str:
+        description = inputs["description"]
+        body = inputs["body"]
+        frontmatter_name = inputs["frontmatter_name"]
+        file_contents = inputs.get("file_contents", [])
         desc = description or "(not provided)"
         name = frontmatter_name or "(not provided)"
         body_preview = str(body)[:3000]
+        files_str = _format_file_contents_for_harness(
+            file_contents if isinstance(file_contents, list) else []
+        )
         return f"""Infer intent for this skill:
 
 description: {desc}
 frontmatter_name: {name}
 body:
-{body_preview}"""
+{body_preview}
+{files_str}"""
 
-    def _infer(self, messages: list[dict[str, str]]) -> dict:
+    def _infer(self, messages: list[dict[str, Any]]) -> Any:
         result = self.client.chat_structured(
             messages=messages,
             response_model=IntentOutput,
@@ -296,7 +306,7 @@ body:
         )
         return result.model_dump()
 
-    def validate_output(self, result: dict) -> tuple[bool, str]:
+    def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         intent = result.get("intent", {})
         triggers = intent.get("triggers", [])
         satisfies = intent.get("satisfies", [])
@@ -311,19 +321,17 @@ body:
         return True, ""
 
     def correct_on_failure(
-        self,
-        result: dict,
-        failure_reason: str,
-        description: object,
-        body: object,
-        frontmatter_name: object,
-    ) -> dict:
+        self, result: dict[str, Any], failure_reason: str, **inputs: object
+    ) -> dict[str, Any]:
+        description = inputs["description"]
+        body = inputs["body"]
+        frontmatter_name = inputs["frontmatter_name"]
         correction_prompt = (
             f"Your previous output failed validation: {failure_reason}\n\n"
             "Please fix and return corrected intent:\n"
             f"{self.build_user_message(description=description, body=str(body)[:2000], frontmatter_name=frontmatter_name)}"  # noqa: E501
         )
-        result = self.client.chat_structured(
+        corrected_result = self.client.chat_structured(
             messages=[
                 {"role": "system", "content": self.build_system_prompt()},
                 {"role": "user", "content": correction_prompt},
@@ -331,7 +339,7 @@ body:
             response_model=IntentOutput,
             model=self.model,
         )
-        return result.model_dump()
+        return cast("dict[str, Any]", corrected_result.model_dump())
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -351,12 +359,10 @@ class InferInterfaceHarness(AgentHarness):
             + INTERFACE_FEW_SHOT
         )
 
-    def build_user_message(
-        self,
-        body: object,
-        file_contents: object,
-        frontmatter_allowed_tools: object,
-    ) -> str:
+    def build_user_message(self, **inputs: object) -> str:
+        body = inputs["body"]
+        file_contents = inputs["file_contents"]
+        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
         files_text = _format_file_contents_for_harness(
             file_contents if isinstance(file_contents, list) else []
         )
@@ -369,7 +375,7 @@ body:
 
 {files_text}"""
 
-    def _infer(self, messages: list[dict[str, str]]) -> dict:
+    def _infer(self, messages: list[dict[str, Any]]) -> Any:
         result = self.client.chat_structured(
             messages=messages,
             response_model=InterfaceOutput,
@@ -377,7 +383,7 @@ body:
         )
         return result.model_dump()
 
-    def validate_output(self, result: dict) -> tuple[bool, str]:
+    def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         interface = result.get("interface", {})
         provides = interface.get("provides", [])
 
@@ -403,19 +409,17 @@ body:
         return True, ""
 
     def correct_on_failure(
-        self,
-        result: dict,
-        failure_reason: str,
-        body: object,
-        file_contents: object,
-        frontmatter_allowed_tools: object,
-    ) -> dict:
+        self, result: dict[str, Any], failure_reason: str, **inputs: object
+    ) -> dict[str, Any]:
+        body = inputs["body"]
+        file_contents = inputs["file_contents"]
+        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
         correction_prompt = (
             f"Your previous output failed validation: {failure_reason}\n\n"
             "Please fix and return corrected interface:\n"
             f"{self.build_user_message(body=str(body)[:2000], file_contents=file_contents, frontmatter_allowed_tools=frontmatter_allowed_tools)}"  # noqa: E501
         )
-        result = self.client.chat_structured(
+        corrected_result = self.client.chat_structured(
             messages=[
                 {"role": "system", "content": self.build_system_prompt()},
                 {"role": "user", "content": correction_prompt},
@@ -423,7 +427,7 @@ body:
             response_model=InterfaceOutput,
             model=self.model,
         )
-        return result.model_dump()
+        return cast("dict[str, Any]", corrected_result.model_dump())
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -436,13 +440,11 @@ class DetectBaseHarness(AgentHarness):
     def build_system_prompt(self) -> str:
         return BASE_HARNESS_PERSONA + "\n\n" + BASE_FEW_SHOT
 
-    def build_user_message(
-        self,
-        body: object,
-        file_contents: object,
-        frontmatter_compatibility: object,
-        frontmatter_allowed_tools: object,
-    ) -> str:
+    def build_user_message(self, **inputs: object) -> str:
+        body = inputs["body"]
+        file_contents = inputs["file_contents"]
+        frontmatter_compatibility = inputs["frontmatter_compatibility"]
+        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
         files_text = _format_file_contents_for_harness(
             file_contents if isinstance(file_contents, list) else []
         )
@@ -457,7 +459,7 @@ body:
 
 {files_text}"""
 
-    def _infer(self, messages: list[dict[str, str]]) -> dict:
+    def _infer(self, messages: list[dict[str, Any]]) -> Any:
         result = self.client.chat_structured(
             messages=messages,
             response_model=BaseAndInstructionsOutput,
@@ -465,7 +467,7 @@ body:
         )
         return result.model_dump()
 
-    def validate_output(self, result: dict) -> tuple[bool, str]:
+    def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         valid_runtimes = {"python3.11", "bash", "node20", None}
         runtime = result.get("base", {}).get("runtime")
         instructions = result.get("instructions", {})
@@ -477,20 +479,18 @@ body:
         return True, ""
 
     def correct_on_failure(
-        self,
-        result: dict,
-        failure_reason: str,
-        body: object,
-        file_contents: object,
-        frontmatter_compatibility: object,
-        frontmatter_allowed_tools: object,
-    ) -> dict:
+        self, result: dict[str, Any], failure_reason: str, **inputs: object
+    ) -> dict[str, Any]:
+        body = inputs["body"]
+        file_contents = inputs["file_contents"]
+        frontmatter_compatibility = inputs["frontmatter_compatibility"]
+        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
         correction_prompt = (
             f"Your previous output failed validation: {failure_reason}\n\n"
             "Please fix and return corrected base and instructions:\n"
             f"{self.build_user_message(body=str(body)[:2000], file_contents=file_contents, frontmatter_compatibility=frontmatter_compatibility, frontmatter_allowed_tools=frontmatter_allowed_tools)}"  # noqa: E501
         )
-        result = self.client.chat_structured(
+        corrected_result = self.client.chat_structured(
             messages=[
                 {"role": "system", "content": self.build_system_prompt()},
                 {"role": "user", "content": correction_prompt},
@@ -498,7 +498,7 @@ body:
             response_model=BaseAndInstructionsOutput,
             model=self.model,
         )
-        return result.model_dump()
+        return cast("dict[str, Any]", corrected_result.model_dump())
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -511,16 +511,14 @@ class AssembleHarness(AgentHarness):
     def build_system_prompt(self) -> str:
         return ASSEMBLE_HARNESS_PERSONA + "\n\n" + ASSEMBLE_FEW_SHOT
 
-    def build_user_message(
-        self,
-        identity: object,
-        intent: object,
-        interface: object,
-        base: object,
-        instructions: object,
-        resources: object,
-        dir_name: object,
-    ) -> str:
+    def build_user_message(self, **inputs: object) -> str:
+        identity = inputs["identity"]
+        intent = inputs["intent"]
+        interface = inputs["interface"]
+        base = inputs["base"]
+        instructions = inputs["instructions"]
+        resources = inputs["resources"]
+        dir_name = inputs["dir_name"]
         import json
 
         return f"""Assemble the final AHSSPEC from these harness outputs:
@@ -535,7 +533,7 @@ dir_name: {dir_name}
 
 Cross-check and return the assembled ahs_spec with confidence_report."""
 
-    def _infer(self, messages: list[dict[str, str]]) -> dict:
+    def _infer(self, messages: list[dict[str, Any]]) -> Any:
         """Harness E uses simple chat (not structured) for flexible assembly."""
         response = self.client.chat(
             messages=messages,
@@ -553,7 +551,7 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             text = text.split("```")[1].split("```")[0].strip()
         return json.loads(text)
 
-    def validate_output(self, result: dict) -> tuple[bool, str]:
+    def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         if not result.get("ahs_spec"):
             return False, "ahs_spec is missing"
         if "identity" not in result.get("ahs_spec", {}):
@@ -565,17 +563,15 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
         return True, ""
 
     def correct_on_failure(
-        self,
-        result: dict,
-        failure_reason: str,
-        identity: object,
-        intent: object,
-        interface: object,
-        base: object,
-        instructions: object,
-        resources: object,
-        dir_name: object,
-    ) -> dict:
+        self, result: dict[str, Any], failure_reason: str, **inputs: object
+    ) -> dict[str, Any]:
+        identity = inputs["identity"]
+        intent = inputs["intent"]
+        interface = inputs["interface"]
+        base = inputs["base"]
+        instructions = inputs["instructions"]
+        resources = inputs["resources"]
+        dir_name = inputs["dir_name"]
         correction_prompt = (
             f"Your previous output failed validation: {failure_reason}\n\n"
             "Please fix and return the corrected ahs_spec:\n"
@@ -597,12 +593,11 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
-        return json.loads(text)
+        return cast("dict[str, Any]", json.loads(text))
 
 
 # ─────────────────────────────────────────────────────────────────────────
 # Orchestrator
-# ─────────────────────────────────────────────────────────────────────────
 
 class Orchestrator:
     """Phase 2 orchestration agent.
@@ -615,7 +610,7 @@ class Orchestrator:
       5. Finalize: if validation fails, enter targeted repair loop
     """
 
-    def __init__(self, config: dict, large_model: str = "", small_model: str = ""):
+    def __init__(self, config: dict[str, Any], large_model: str = "", small_model: str = ""):
         """Initialize Orchestrator from config.
 
         Args:
@@ -665,6 +660,7 @@ class Orchestrator:
                 frontmatter=context.frontmatter,
                 dir_name=context.dir_name,
                 body_first_50_lines=context.body[:2500],
+                file_contents=file_contents,
             )
 
         if tier_map.get("B") != "skip":
@@ -672,6 +668,7 @@ class Orchestrator:
                 description=context.frontmatter.get("description") if context.frontmatter else None,
                 body=context.body,
                 frontmatter_name=context.frontmatter.get("name") if context.frontmatter else None,
+                file_contents=file_contents,
             )
 
         if tier_map.get("C") != "skip":
@@ -809,7 +806,7 @@ class Orchestrator:
 
         return {"scripts": scripts, "references": references, "assets": assets}
 
-    def _dict_to_ahspec(self, ahs_dict: dict) -> AHSSpec:
+    def _dict_to_ahspec(self, ahs_dict: dict[str, Any]) -> AHSSpec:
         """Convert raw dict from Harness E into validated AHSSpec."""
         from agenthatch.skill.spec import (
             Composition,

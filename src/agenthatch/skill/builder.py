@@ -9,6 +9,7 @@ Ties together the complete agenthatch v0.3 flow:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from agenthatch.skill.engine import Orchestrator
 from agenthatch.skill.parser import assemble_context as parser_assemble_context
@@ -19,7 +20,7 @@ logger = logging.getLogger("agenthatch")
 
 def build_ahspec_from_path(
     skill_path: str,
-    config: dict | None = None,
+    config: dict[str, Any] | None = None,
     large_model: str = "",
     small_model: str = "",
 ) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
@@ -54,7 +55,7 @@ def build_ahspec_from_path(
 
 def build_ahspec(
     context: ContextPack,
-    config: dict,
+    config: dict[str, Any],
     large_model: str = "",
     small_model: str = "",
 ) -> tuple[AHSSpec, dict[str, HarnessOutput]]:

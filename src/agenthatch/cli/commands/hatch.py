@@ -17,7 +17,7 @@ import json
 import logging
 from collections import deque
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import yaml
@@ -242,7 +242,7 @@ def _resolve_skill_dir(path: Path) -> Path:
 
 # ── Name Resolution (3-layer fallback) ─────────────────────────────────────
 
-def _resolve_skill_name(skill_input: str, config: dict) -> tuple[Path, bool]:
+def _resolve_skill_name(skill_input: str, config: dict[str, Any]) -> tuple[Path, bool]:
     """Resolve a skill name or path to a skill directory.
 
     Three-layer strategy:
@@ -289,7 +289,7 @@ def _resolve_skill_name(skill_input: str, config: dict) -> tuple[Path, bool]:
     return _resolve_from_filesystem(skill_input, config), False
 
 
-def _resolve_from_index(name: str, config: dict) -> Path | None:
+def _resolve_from_index(name: str, config: dict[str, Any]) -> Path | None:
     """Exact-match lookup in skillhouse.json."""
     from agenthatch.house.index import SkillhouseIndex
 
@@ -324,7 +324,7 @@ def _resolve_from_index(name: str, config: dict) -> Path | None:
     return skill_dir
 
 
-def _resolve_from_filesystem(name: str, config: dict) -> Path:
+def _resolve_from_filesystem(name: str, config: dict[str, Any]) -> Path:
     """BFS scan search_dirs for a directory named 'name' containing SKILL.md.
 
     Pattern: codex discover_skills_under_root() — BFS with depth/dir limits,
@@ -440,7 +440,7 @@ def _scan_for_skill(root: Path, target_name: str) -> list[Path]:
     return results
 
 
-def _auto_register_to_index(skill_dir: Path, config: dict) -> None:
+def _auto_register_to_index(skill_dir: Path, config: dict[str, Any]) -> None:
     """Silently register a newly discovered skill to skillhouse.json.
 
     Called after successful filesystem scan (Layer 3).
@@ -506,7 +506,7 @@ _KNOWN_SKILL_HOST_DIRS: list[str] = [
 ]
 
 
-def _resolve_search_roots(config: dict) -> list[Path]:
+def _resolve_search_roots(config: dict[str, Any]) -> list[Path]:
     """Resolve all skill search roots from three sources.
 
     Sources:

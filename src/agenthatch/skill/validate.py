@@ -76,7 +76,7 @@ _HARNESS_LABEL: dict[str, str] = {
 
 
 def validate_and_repair(
-    ahs_dict: dict,
+    ahs_dict: dict[str, Any],
     outputs: dict[str, HarnessOutput],
     harnesses: dict[str, Any],
     context: ContextPack,
@@ -106,7 +106,9 @@ def validate_and_repair(
     from agenthatch.exceptions import SchemaValidationError
 
     # Extract the ahs_spec dict
-    spec_dict: dict = ahs_dict.get("ahs_spec", ahs_dict) if isinstance(ahs_dict, dict) else ahs_dict
+    spec_dict: dict[str, Any] = (
+        ahs_dict.get("ahs_spec", ahs_dict) if isinstance(ahs_dict, dict) else ahs_dict
+    )
 
     total_saved = 0
     retries = 0
@@ -187,7 +189,7 @@ def validate_and_repair(
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────
 
-def _try_validate(spec_dict: dict) -> tuple[AHSSpec | None, list[dict]]:
+def _try_validate(spec_dict: dict[str, Any]) -> tuple[AHSSpec | None, list[dict[str, Any]]]:
     """Attempt Pydantic validation. Returns (AHSSpec, []) on success, (None, errors) on failure."""
     try:
         identity = Identity(**spec_dict.get("identity", {}))
@@ -225,7 +227,7 @@ def _try_validate(spec_dict: dict) -> tuple[AHSSpec | None, list[dict]]:
         return None, [{"loc": ["__root__"], "msg": str(e), "type": "parse_error"}]
 
 
-def _map_errors_to_harnesses(errors: list[dict]) -> list[str]:
+def _map_errors_to_harnesses(errors: list[dict[str, Any]]) -> list[str]:
     """Map validation error locations to affected harness keys."""
     harnesses: set[str] = set()
     for err in errors:
@@ -328,7 +330,7 @@ def _estimate_token_savings(harness_key: str) -> int:
     return estimates.get(harness_key, 0)
 
 
-def _format_errors(errors: list[dict]) -> str:
+def _format_errors(errors: list[dict[str, Any]]) -> str:
     """Format validation errors for display."""
     lines: list[str] = []
     for err in errors:

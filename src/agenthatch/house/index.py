@@ -55,7 +55,7 @@ class SkillhouseIndex:
             embedding_model_name: sentence-transformers model for embeddings.
         """
         self._path = Path(store_path).expanduser().resolve()
-        self._data: dict = self._load()
+        self._data: dict[str, Any] = self._load()
         self._embedding_model_name = embedding_model_name
 
         # Lazy-init caches
@@ -67,7 +67,7 @@ class SkillhouseIndex:
 
     # ── I/O ───────────────────────────────────────────────────────────
 
-    def _load(self) -> dict:
+    def _load(self) -> Any:
         """Load skillhouse.json or return empty skeleton."""
         if self._path.exists():
             try:
@@ -98,7 +98,7 @@ class SkillhouseIndex:
         """Lazy-init BM25 index from triggers."""
         if self._bm25 is not None:
             return
-        from rank_bm25 import BM25Okapi
+        from rank_bm25 import BM25Okapi  # type: ignore[import-untyped]
 
         self._bm25_docs = []
         self._bm25_ids = []
@@ -234,14 +234,14 @@ class SkillhouseIndex:
             "hash": _compute_ahs_hash(ahs_spec),
         }
         # Generate embedding from satisfies + summary
-        entry["embedding"] = self._compute_entry_embedding(entry)
+        entry["embedding"] = self._compute_entry_embedding(entry)  # type: ignore[assignment]
 
         self._data["entries"][skill_id] = entry
         self._update_topology(skill_id, ahs_spec)
         self._bm25 = None  # invalidate BM25 cache
         self._save()
 
-    def _compute_entry_embedding(self, entry: dict) -> list[float]:
+    def _compute_entry_embedding(self, entry: dict[str, Any]) -> list[float]:
         """Compute embedding for a new entry from its intent fields.
 
         If embedder is unavailable (offline), stores a zero-vector placeholder.
@@ -255,7 +255,7 @@ class SkillhouseIndex:
         text = " ".join(text_parts)
         import numpy as np
         emb: np.ndarray = self._embedder.encode(text, normalize_embeddings=True)
-        return emb.tolist()
+        return emb.tolist()  # type: ignore[no-any-return]
 
     def remove_entry(self, skill_id: str) -> None:
         """Remove a skill from the index."""
@@ -266,7 +266,7 @@ class SkillhouseIndex:
 
     # ── Query ─────────────────────────────────────────────────────────
 
-    def list_all(self) -> list[dict]:
+    def list_all(self) -> list[dict[str, Any]]:
         """Return all indexed skills (for `skills` CLI command)."""
         return [
             {
@@ -279,9 +279,9 @@ class SkillhouseIndex:
             for sid, e in self._data["entries"].items()
         ]
 
-    def find_by_name(self, name: str) -> dict | None:
+    def find_by_name(self, name: str) -> dict[str, Any] | None:
         """Exact match lookup by skill ID. Returns entry dict or None."""
-        return self._data.get("entries", {}).get(name)
+        return self._data.get("entries", {}).get(name)  # type: ignore[no-any-return]
 
     def get_entry_path(self, skill_id: str) -> str | None:
         """Get the ahs_path for a skill by ID. Returns None if not found."""

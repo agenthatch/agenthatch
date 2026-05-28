@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.3.0"
+version = "0.3.1"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -98,4 +98,19 @@ exclude_lines = [
     "@overload",
     'if __name__ == "__main__":',
     "if TYPE_CHECKING:",
+]
+
+# ── CI Quality Gate (v0.3.1) ──
+# Run with: hatch run quality:check
+# This ensures ruff + mypy + pytest are all executed before release.
+# mypy --strict was previously declared (line 87) but never enforced;
+# this section closes that gap per v0.3.1 release checklist.
+[tool.hatch.envs.quality]
+features = ["dev"]
+
+[tool.hatch.envs.quality.scripts]
+check = [
+    "ruff check src/",
+    "mypy --strict src/agenthatch",
+    "pytest",
 ]

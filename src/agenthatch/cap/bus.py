@@ -39,7 +39,7 @@ class CapBus:
         self,
         name: str,
         cap_type: str,
-        schema: dict | None = None,
+        schema: dict[str, Any] | None = None,
         source_skill: str = "",
     ) -> None:
         """Register a capability on the bus. (v0.4 implementation)"""

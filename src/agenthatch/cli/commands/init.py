@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.prompt import Confirm, Prompt
@@ -480,7 +481,7 @@ def _init_non_interactive(force: bool) -> None:
 
 def _discover_all_skills(
     search_root: Path,
-    _is_skill_md_fn,
+    _is_skill_md_fn: Any,
 ) -> list[Path]:
     """BFS scan a search root, discover ALL directories containing SKILL.md.
 
