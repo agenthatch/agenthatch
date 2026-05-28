@@ -33,6 +33,7 @@ from agenthatch.skill.spec import (
     Instructions,
     Intent,
     Interface,
+    _coerce_base_data,
 )
 
 logger = logging.getLogger("agenthatch")
@@ -195,7 +196,7 @@ def _try_validate(spec_dict: dict[str, Any]) -> tuple[AHSSpec | None, list[dict[
         identity = Identity(**spec_dict.get("identity", {}))
         intent = Intent(**spec_dict.get("intent", {}))
         interface = Interface(**spec_dict.get("interface", {}))
-        base = BaseSpec(**spec_dict.get("base", {}))
+        base = BaseSpec(**_coerce_base_data(spec_dict.get("base", {})))
         instructions = Instructions(**spec_dict.get("instructions", {}))
         composition = (
             Composition(**spec_dict.get("composition", {}))

@@ -113,7 +113,7 @@ def hatch_command(
         console.print()
         console.print("[bold]Phase 2: Agentic Inference[/bold]")
 
-    harness_cfg = config.get("config", {}).get("harness", {}) if "config" in config else {}
+    harness_cfg = config.get("harness", {})
     large_model = harness_cfg.get("large_model", "") if isinstance(harness_cfg, dict) else ""
     small_model = harness_cfg.get("small_model", "") if isinstance(harness_cfg, dict) else ""
 

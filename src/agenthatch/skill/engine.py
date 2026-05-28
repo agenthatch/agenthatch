@@ -49,6 +49,7 @@ from agenthatch.skill.spec import (
     Instructions,
     IntentOutput,
     InterfaceOutput,
+    _coerce_base_data,
 )
 
 logger = logging.getLogger("agenthatch")
@@ -818,7 +819,7 @@ class Orchestrator:
         identity = Identity(**ahs_dict.get("identity", {}))
         intent = Intent(**ahs_dict.get("intent", {}))
         interface = Interface(**ahs_dict.get("interface", {}))
-        base = BaseSpec(**ahs_dict.get("base", {}))
+        base = BaseSpec(**_coerce_base_data(ahs_dict.get("base", {})))
         instructions = Instructions(**ahs_dict.get("instructions", {}))
         composition = Composition(**ahs_dict.get("composition", {})) if ahs_dict.get("composition") else Composition()  # noqa: E501
 

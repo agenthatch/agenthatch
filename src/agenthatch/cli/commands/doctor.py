@@ -167,19 +167,32 @@ def _check_skillhouse() -> _Check:
     and is valid JSON with the expected structure.
     """
     import json
+    from pathlib import Path
 
-    from agenthatch.config import CONFIG_DIR
+    from agenthatch.config import Config
 
-    skillhouse_path = CONFIG_DIR / "skillhouse.json"
+    try:
+        config = Config.load()
+    except Exception:
+        config = {}
 
-    if not skillhouse_path.exists():
+    skillhouse_cfg = config.get("skillhouse", {}) if "skillhouse" in config else {}
+    skillhouse_path = skillhouse_cfg.get(
+        "path", ".agenthatch/skillhouse.json"
+    ) if isinstance(skillhouse_cfg, dict) else ".agenthatch/skillhouse.json"
+
+    sh_path = Path(skillhouse_path)
+    if not sh_path.is_absolute():
+        sh_path = Path.cwd() / sh_path
+
+    if not sh_path.exists():
         return _Check(
             passed=True,
             message="skillhouse.json — not yet created (run hatch to populate)",
         )
 
     try:
-        data = json.loads(skillhouse_path.read_text(encoding="utf-8"))
+        data = json.loads(sh_path.read_text(encoding="utf-8"))
         version = data.get("version", "unknown")
         entries = len(data.get("entries", {}))
         return _Check(

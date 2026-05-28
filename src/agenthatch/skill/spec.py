@@ -141,6 +141,27 @@ class BaseSpec(BaseModel):
     dependencies: list[str] = []
 
 
+def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
+    """Coerce raw dict values to BaseSpec-compatible types.
+
+    Harness E uses unstructured chat() — LLM may output "sandbox": "False"
+    (string) or "timeout": 60 (int), which Pydantic strict validation rejects.
+    This normalizes common type mismatches before BaseSpec(**data).
+    """
+    data = base_data.copy() if base_data else {}
+
+    if "sandbox" in data and isinstance(data["sandbox"], str):
+        data["sandbox"] = data["sandbox"].lower() in ("true", "yes", "1")
+
+    if "timeout" in data and isinstance(data["timeout"], (int, float)):
+        data["timeout"] = f"{int(data['timeout'])}s"
+
+    if "runtime" in data and isinstance(data["runtime"], (int, float, bool)):
+        data["runtime"] = str(data["runtime"])
+
+    return data
+
+
 class Modes(BaseModel):
     """Multi-mode skill configuration."""
     modes: dict[str, dict[str, Any]] = {}
