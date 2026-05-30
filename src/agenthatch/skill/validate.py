@@ -155,7 +155,7 @@ def validate_and_repair(
                 harness_key, harnesses, outputs, context
             )
             outputs[harness_key] = new_output
-            total_saved += _estimate_token_savings(harness_key)
+            total_saved += tokens
 
             # Update spec_dict with repaired field
             if harness_key == "A":
@@ -174,7 +174,7 @@ def validate_and_repair(
                 "E", harnesses, outputs, context
             )
             outputs["E"] = new_output
-            total_saved += _estimate_token_savings("E")
+            total_saved += tokens
             spec_dict = new_output.result.get("ahs_spec", spec_dict)
 
         retries += 1
@@ -273,12 +273,14 @@ def _retarget_harness(
             frontmatter=context.frontmatter,
             dir_name=context.dir_name,
             body_first_50_lines=context.body[:2500],
+            file_contents=context.file_manifest.content_bundle(),
         )
     elif harness_key == "B":
         output = h.run(
             description=context.frontmatter.get("description") if context.frontmatter else None,
             body=context.body,
             frontmatter_name=context.frontmatter.get("name") if context.frontmatter else None,
+            file_contents=context.file_manifest.content_bundle(),
         )
     elif harness_key == "C":
         file_contents = context.file_manifest.content_bundle()

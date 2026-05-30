@@ -594,7 +594,11 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
-        return cast("dict[str, Any]", json.loads(text))
+        try:
+            return cast("dict[str, Any]", json.loads(text))
+        except json.JSONDecodeError as e:
+            logger.warning(f"Harness E correction JSON parse failed: {e}")
+            return cast("dict[str, Any]", result)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -702,15 +706,20 @@ class Orchestrator:
             )
 
         # Step 5: Assemble (E)
-        outputs["E"] = harnesses["E"].run(
-            identity=outputs["A"].result if "A" in outputs else {},
-            intent=outputs["B"].result if "B" in outputs else {},
-            interface=outputs["C"].result if "C" in outputs else {},
-            base=outputs["D"].result.get("base", {}) if "D" in outputs else {},
-            instructions=outputs["D"].result.get("instructions", {}) if "D" in outputs else {},
-            resources=resources,
-            dir_name=context.dir_name,
-        )
+        try:
+            outputs["E"] = harnesses["E"].run(
+                identity=outputs["A"].result if "A" in outputs else {},
+                intent=outputs["B"].result if "B" in outputs else {},
+                interface=outputs["C"].result if "C" in outputs else {},
+                base=outputs["D"].result.get("base", {}) if "D" in outputs else {},
+                instructions=outputs["D"].result.get("instructions", {}) if "D" in outputs else {},
+                resources=resources,
+                dir_name=context.dir_name,
+            )
+        except Exception as e:
+            logger.error(f"Harness E assembly failed: {e}")
+            from agenthatch.skill.validate import validate_and_repair
+            return validate_and_repair({}, outputs, harnesses, context)
 
         # Step 6: Build AHSSpec from Harness E assembly output
         try:

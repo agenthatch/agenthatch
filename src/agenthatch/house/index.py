@@ -237,6 +237,7 @@ class SkillhouseIndex:
         entry["embedding"] = self._compute_entry_embedding(entry)  # type: ignore[assignment]
 
         self._data["entries"][skill_id] = entry
+        self._remove_from_topology(skill_id)
         self._update_topology(skill_id, ahs_spec)
         self._bm25 = None  # invalidate BM25 cache
         self._save()

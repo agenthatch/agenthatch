@@ -253,6 +253,12 @@ def _best_effort_parse_yaml(skill_dir: Path) -> tuple[dict[str, Any] | None, str
         # Check if --- at end of file
         idx = rest.find("\n---")
         if idx == -1:
+            # Special case: empty frontmatter (---\n---)
+            if rest.startswith("---\n"):
+                body_start = len("---\n")
+                return {}, rest[body_start:].strip(), []
+            if rest.startswith("---"):
+                return {}, rest[len("---"):].strip(), []
             return None, raw, ["Unclosed frontmatter delimiter"]
 
     fm_text = rest[:idx]

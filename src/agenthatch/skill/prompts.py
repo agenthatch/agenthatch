@@ -229,7 +229,7 @@ frontmatter_compatibility: null
 frontmatter_allowed_tools: null
 ```
 Output:
-{""base"": {""runtime"": ""none"", ""sandbox"": false, ""timeout"": null, ""env"": [], ""dependencies"": []}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Review code against style rules"", ""script"": null}], ""rules"": [""Always use camelCase for variables"", ""Never commit directly to main"", ""Ensure all functions have docstrings""], ""safety"": {""confirmation_required_for"": [""committing code""], ""plan_required"": true, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
+{""base"": {""runtime"": null, ""sandbox"": false, ""timeout"": null, ""env"": [], ""dependencies"": []}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Review code against style rules"", ""script"": null}], ""rules"": [""Always use camelCase for variables"", ""Never commit directly to main"", ""Ensure all functions have docstrings""], ""safety"": {""confirmation_required_for"": [""committing code""], ""plan_required"": true, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
 """
 
 
