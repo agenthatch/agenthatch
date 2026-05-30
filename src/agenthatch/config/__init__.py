@@ -56,6 +56,11 @@ default_model = "llama3"
 # api_key = ""
 # base_url = "http://localhost:8000/v1"
 # default_model = "mixtral-8x7b"
+#
+# v0.4: Capability flags (omit to use defaults = all True)
+# [providers.custom.my-llm.features]
+# supports_stream_tools = false
+# supports_parallel_tool_calls = false
 
 # ── v0.3: Skillhouse index ──
 [skillhouse]

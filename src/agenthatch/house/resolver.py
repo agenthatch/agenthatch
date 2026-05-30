@@ -79,3 +79,19 @@ def is_builtin(capability: str) -> bool:
     """
     from agenthatch.skill.prompts import FLAT_CATALOG
     return capability in FLAT_CATALOG
+
+
+def wire(
+    capability: str,
+    source_skill: str,
+    dependency_graph: dict[str, list[str]],
+) -> None:
+    """Wire a capability dependency between skills.
+
+    v0.4: Records that `capability` is provided by `source_skill` in the
+    dependency graph, enabling runtime cross-skill tool routing.
+    """
+    if source_skill not in dependency_graph:
+        dependency_graph[source_skill] = []
+    if capability not in dependency_graph[source_skill]:
+        dependency_graph[source_skill].append(capability)

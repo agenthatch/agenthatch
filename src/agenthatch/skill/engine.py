@@ -598,7 +598,7 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             return cast("dict[str, Any]", json.loads(text))
         except json.JSONDecodeError as e:
             logger.warning(f"Harness E correction JSON parse failed: {e}")
-            return cast("dict[str, Any]", result)
+            return result
 
 
 # ─────────────────────────────────────────────────────────────────────────

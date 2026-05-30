@@ -192,6 +192,23 @@ class ConfidenceReport(BaseModel):
     per_harness: dict[str, float] = {}
 
 
+# ─── v0.4 Agent Runtime Config ──────────────────────────────────────────
+
+class AgentRuntimeConfig(BaseModel):
+    """Skill 级别的 Agent 运行时配置 (v0.4 新增)."""
+    provider: str | None = None
+    model: str | None = None
+    env: dict[str, str] = {}
+    temperature: float = 0.7
+    max_tokens: int = 4096
+    features: dict[str, bool] = {}
+
+
+class AgentConfig(BaseModel):
+    """Agent 段 (v0.4 新增)."""
+    runtime: AgentRuntimeConfig = AgentRuntimeConfig()
+
+
 class AHSSpec(BaseModel):
     """Complete AHSSPEC v1.1 — the single middleware artifact.
 
@@ -205,6 +222,7 @@ class AHSSpec(BaseModel):
     resources: Resources = Resources()
     modes: Modes | None = None
     composition: Composition = Composition()
+    agent: AgentConfig | None = None   # v0.4 新增
 
     confidence_report: ConfidenceReport | None = None
     harness_traces: list[HarnessOutput] = []

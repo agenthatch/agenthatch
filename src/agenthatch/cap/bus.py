@@ -1,39 +1,31 @@
-"""Capability Bus — interface definition for v0.4 runtime brick communication.
+"""Capability Bus — v0.4 runtime capability registry and router.
 
-v0.3 defines the protocol contract (DD-008) between AHSSPEC.interface.provides/requires
-and v0.4's CapBus runtime. v0.4 will register, match, and route capabilities.
-
-Protocol:
-  v0.3 AHSSPEC.interface.provides[i].capability
-    ≡ v0.4 CapBus.register(name=...) 第一个参数
-
-  v0.3 AHSSPEC.interface.requires[i].capability
-    ≡ v0.4 Resolver.match_builtin(name) 或 skillhouse.find_provider(name) 的查询 key
+Provides complete register/match/route/inject_builtin/list_tool_definitions.
 """
 
 from dataclasses import dataclass, field
 from typing import Any
+
+from agenthatch.cap.marshal import fuzzy_match
 
 
 @dataclass
 class CapabilityRegistration:
     """A capability registered on the bus."""
     name: str
-    type: str  # data, analysis, media, transform, action, event, knowledge, renderer
+    type: str
     schema: dict[str, Any] = field(default_factory=dict)
     source_skill: str = ""
+    executor: Any = None
 
 
 @dataclass
 class CapBus:
-    """Capability Bus — stub for v0.4 runtime implementation.
-
-    v0.4 will provide complete register/match/route/invoke implementations.
-    v0.3 only defines the interface contract.
-    """
+    """Capability Bus — v0.4 real implementation."""
 
     capabilities: dict[str, CapabilityRegistration] = field(default_factory=dict)
-    builtins: set[str] = field(default_factory=set)
+    builtins: dict[str, Any] = field(default_factory=dict)
+    unavailable: set[str] = field(default_factory=set)
 
     def register(
         self,
@@ -41,14 +33,99 @@ class CapBus:
         cap_type: str,
         schema: dict[str, Any] | None = None,
         source_skill: str = "",
+        executor: Any = None,
     ) -> None:
-        """Register a capability on the bus. (v0.4 implementation)"""
-        pass
-
-    def match(self, required: str) -> CapabilityRegistration | None:
-        """Match a required capability to a registered provider. (v0.4 implementation)"""
-        return None
+        """Register a capability on the bus."""
+        self.capabilities[name] = CapabilityRegistration(
+            name=name,
+            type=cap_type,
+            schema=schema or {},
+            source_skill=source_skill,
+            executor=executor,
+        )
 
     def inject_builtin(self, name: str) -> None:
-        """Inject a builtin capability. (v0.4 implementation)"""
-        pass
+        """Inject a builtin capability."""
+        from agenthatch.agent.builtins import BUILTIN_REGISTRY
+        if name in BUILTIN_REGISTRY:
+            self.builtins[name] = BUILTIN_REGISTRY[name]()
+
+    def match(self, required: str) -> CapabilityRegistration | None:
+        """Match a requirement to a registered capability."""
+        if required in self.capabilities:
+            return self.capabilities[required]
+        return fuzzy_match(required, self.capabilities)
+
+    def route(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        """Execute routing: tool_call → capability execution."""
+
+        cap = self.capabilities.get(tool_name)
+        if cap and cap.executor:
+            if hasattr(cap.executor, "execute"):
+                return cap.executor.execute(**arguments)
+            if hasattr(cap.executor, "execute_script"):
+                script_name = arguments.pop("script_name", "")
+                return cap.executor.execute_script(
+                    script_name, **arguments
+                )
+
+        builtin = self.builtins.get(tool_name)
+        if builtin:
+            return builtin.execute(**arguments)
+
+        return f"Error: capability '{tool_name}' not available"
+
+    def mark_unavailable(self, name: str) -> None:
+        """Mark a required capability as unavailable."""
+        self.unavailable.add(name)
+
+    def list_tool_definitions(self) -> list[dict[str, Any]]:
+        """Generate OpenAI function calling tool definitions."""
+        tools: list[dict[str, Any]] = []
+        for cap in self.capabilities.values():
+            schema = cap.schema
+            if not schema.get("type"):
+                schema = {
+                    "type": "object",
+                    "properties": {
+                        k: {"type": _json_type(v)} for k, v in schema.items()
+                    },
+                    "required": list(schema.keys()),
+                }
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": cap.name,
+                    "description": f"[{cap.type}] from {cap.source_skill}",
+                    "parameters": schema,
+                },
+            })
+        for name, builtin in self.builtins.items():
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": f"[builtin] {builtin.__class__.__name__}",
+                    "parameters": builtin.schema,
+                },
+            })
+        return tools
+
+
+def _json_type(python_type_str: str) -> str:
+    """Map AHSSPEC type shorthand to JSON Schema type."""
+    mapping = {
+        "string": "string",
+        "number": "number",
+        "integer": "integer",
+        "boolean": "boolean",
+        "array": "array",
+        "object": "object",
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "list": "array",
+        "dict": "object",
+    }
+    return mapping.get(python_type_str, "string")

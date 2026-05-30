@@ -12,6 +12,16 @@ _theme = Theme(
         "ok": "bold green",
         "warn": "bold yellow",
         "muted": "dim white",
+        "agent": "bold bright_blue",
+        "user": "bold green",
+        "assistant": "bright_white",
+        "tool": "bold yellow",
+        "tool_result": "dim cyan",
+        "error": "bold red",
+        "streaming": "italic bright_white",
+        "divider": "dim",
+        "capability": "bold magenta",
+        "brick": "bold cyan",
     }
 )
 console = Console(theme=_theme, highlight=False)

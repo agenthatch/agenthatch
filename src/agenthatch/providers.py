@@ -32,6 +32,20 @@ ProviderKind = Literal["builtin", "custom"]
 
 
 @dataclass(frozen=True)
+class ProviderFeatures:
+    """Capability flags for a provider's API surface.
+
+    Defaults assume OpenAI-compatible behavior (all features enabled).
+    Custom providers can override specific flags via config.toml.
+    """
+
+    supports_tools: bool = True
+    supports_stream_tools: bool = True
+    supports_json_mode: bool = True
+    supports_parallel_tool_calls: bool = True
+
+
+@dataclass(frozen=True)
 class ProviderInfo:
     """Metadata for one LLM provider.
 
@@ -44,6 +58,7 @@ class ProviderInfo:
     env_key: str = ""
     base_url: str = ""
     default_model: str = ""
+    features: ProviderFeatures = ProviderFeatures()
 
 
 BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
@@ -125,12 +140,20 @@ def _resolve_custom_provider(name: str, config: dict[str, Any]) -> ProviderInfo:
             f"Custom provider '{name}' not found in config.\n"
             f"Add [providers.custom.{custom_key}] to {CONFIG_FILE}"
         )
+    features_cfg = custom_section.get("features", {})
+    features = ProviderFeatures(
+        supports_tools=features_cfg.get("supports_tools", True),
+        supports_stream_tools=features_cfg.get("supports_stream_tools", True),
+        supports_json_mode=features_cfg.get("supports_json_mode", True),
+        supports_parallel_tool_calls=features_cfg.get("supports_parallel_tool_calls", True),
+    )
     return ProviderInfo(
         name=name,
         kind="custom",
         env_key=custom_section.get("env_key", ""),
         base_url=custom_section.get("base_url", ""),
         default_model=custom_section.get("default_model", ""),
+        features=features,
     )
 
 
@@ -318,6 +341,13 @@ def list_custom_providers(config: dict[str, Any] | None = None) -> list[Provider
         return result
     for name, cfg in custom_section.items():
         if isinstance(cfg, dict):
+            features_cfg = cfg.get("features", {})
+            features = ProviderFeatures(
+                supports_tools=features_cfg.get("supports_tools", True),
+                supports_stream_tools=features_cfg.get("supports_stream_tools", True),
+                supports_json_mode=features_cfg.get("supports_json_mode", True),
+                supports_parallel_tool_calls=features_cfg.get("supports_parallel_tool_calls", True),
+            )
             result.append(
                 ProviderInfo(
                     name=f"custom.{name}",
@@ -325,6 +355,7 @@ def list_custom_providers(config: dict[str, Any] | None = None) -> list[Provider
                     env_key=cfg.get("env_key", ""),
                     base_url=cfg.get("base_url", ""),
                     default_model=cfg.get("default_model", ""),
+                    features=features,
                 )
             )
     return sorted(result, key=lambda p: p.name)

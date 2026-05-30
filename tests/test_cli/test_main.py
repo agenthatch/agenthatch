@@ -27,6 +27,9 @@ class TestHelp:
         assert "hello" in result.output
         assert "doctor" in result.output
         assert "init" in result.output
+        assert "hatch" in result.output
+        assert "run" in result.output
+        assert "assemble" in result.output
         assert "--version" in result.output
 
     def test_no_args_shows_help(self, runner, app):

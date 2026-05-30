@@ -56,3 +56,30 @@ class SchemaValidationError(AgentHatchError):
 class SkillhouseError(AgentHatchError):
     """skillhouse.json operation failed."""
     exit_code = 6
+
+
+# ── v0.4 Exception Classes ───────────────────────────────────────────────
+
+class AgentRuntimeError(AgentHatchError):
+    """SkillAgent runtime error."""
+    exit_code = 7
+
+
+class CapBusError(AgentHatchError):
+    """CapBus route or execution error."""
+    exit_code = 8
+
+
+class ToolCallError(AgentHatchError):
+    """LLM tool call execution failed."""
+    exit_code = 9
+
+
+class ProviderCapabilityError(AgentHatchError):
+    """Provider does not support a required capability.
+
+    Raised when:
+    - A Skill requires tool calling but the provider declares supports_tools=False
+    - A Skill requires streaming but no fallback is possible
+    """
+    exit_code = 10
