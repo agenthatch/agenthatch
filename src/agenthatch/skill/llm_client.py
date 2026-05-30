@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any
 
-from agenthatch.exceptions import ApiKeyError
+from agenthatch.exceptions import ApiKeyError, ProviderCapabilityError
 from agenthatch.providers import ProviderFeatures, get_default_provider, get_provider, resolve_api_key
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,14 @@ class LLMClient:
         self._provider_name = name
         self._model = model or self._info.default_model
         self._features = self._info.features
+
+        # BUG-04-06: Anthropic uses Messages API, not Chat Completions
+        if self._features.requires_anthropic_adapter:
+            raise ProviderCapabilityError(
+                f"Provider '{name}' requires an Anthropic API adapter which is "
+                f"not yet implemented. Track progress at: "
+                f"github.com/agenthatch/agenthatch/issues/anthropic-adapter"
+            )
 
         import openai
 
@@ -84,7 +92,14 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        return response.choices[0].message.content or ""
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            logger.warning(
+                "Response truncated by max_tokens limit. "
+                "Consider increasing max_tokens in agenthatch.yaml "
+                "or via --max-tokens CLI flag."
+            )
+        return self._extract_content(choice.message, self._features)
 
     # ── Structured output (Instructor pattern) ───────────────────────
 
@@ -141,7 +156,13 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        return ToolCallResponse.from_openai(response)
+        result = ToolCallResponse.from_openai(response)
+        # BUG-04-01: Apply content extraction for reasoning/content split
+        msg = response.choices[0].message
+        extracted = self._extract_content(msg, self._features)
+        if extracted:
+            result.text = extracted
+        return result
 
     _SYNTHETIC_CHUNK_SIZE = 4
 
@@ -179,6 +200,9 @@ class LLMClient:
                     supports_stream_tools=False,
                     supports_json_mode=self._features.supports_json_mode,
                     supports_parallel_tool_calls=self._features.supports_parallel_tool_calls,
+                    supports_reasoning_content=self._features.supports_reasoning_content,
+                    requires_anthropic_adapter=self._features.requires_anthropic_adapter,
+                    available_models=self._features.available_models,
                 )
                 return self._stream_synthetic_fallback(messages, tools, model, temperature, max_tokens)
             raise
@@ -326,8 +350,72 @@ class LLMClient:
 
         return False
 
+    @staticmethod
+    def _extract_content(message: Any, provider_features: ProviderFeatures) -> str:
+        """Extract user-visible content from a provider response message.
+
+        Handles the reasoning/content splitting pattern across providers:
+        - DeepSeek V4: message.content may be empty; fallback to message.reasoning_content
+        - Anthropic: content is an array of typed blocks; filter type="text" blocks
+        - OpenAI: standard message.content
+        - Ollama: depends on loaded model
+
+        Returns:
+            Extracted text content, never None (returns "" if nothing found).
+        """
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content.strip():
+            return content
+
+        if isinstance(content, list):
+            text_blocks = [
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            if text_blocks:
+                return "\n".join(text_blocks)
+
+        if provider_features.supports_reasoning_content:
+            reasoning = getattr(message, "reasoning_content", None)
+            if reasoning and isinstance(reasoning, str) and reasoning.strip():
+                logger.warning(
+                    "Model returned empty content; falling back to "
+                    "reasoning_content (%d chars)", len(reasoning)
+                )
+                return reasoning
+
+        return ""
+
 
 # ── v0.4 Tool Calling Data Classes ──────────────────────────────────
+
+
+@dataclass
+class UsageInfo:
+    """Token usage breakdown from LLM API response."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    reasoning_tokens: int = 0
+    cached_tokens: int = 0
+
+    @classmethod
+    def from_openai_response(cls, response: Any) -> UsageInfo:
+        """Extract usage from OpenAI-compatible response."""
+        usage = getattr(response, "usage", None)
+        if not usage:
+            return cls()
+        details = getattr(usage, "completion_tokens_details", None)
+        prompt_details = getattr(usage, "prompt_tokens_details", None)
+        return cls(
+            prompt_tokens=getattr(usage, "prompt_tokens", 0),
+            completion_tokens=getattr(usage, "completion_tokens", 0),
+            total_tokens=getattr(usage, "total_tokens", 0),
+            reasoning_tokens=getattr(details, "reasoning_tokens", 0) if details else 0,
+            cached_tokens=getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0,
+        )
 
 
 @dataclass
@@ -343,6 +431,7 @@ class ToolCallResponse:
     """LLM 响应：可能包含文本、tool calls、或两者皆有."""
     text: str | None = None
     tool_calls: list[ToolCall] = dc_field(default_factory=list)
+    usage: UsageInfo | None = None
 
     @property
     def has_tool_calls(self) -> bool:
@@ -367,7 +456,11 @@ class ToolCallResponse:
                     name=tc.function.name,
                     arguments=args,
                 ))
-        return cls(text=text, tool_calls=tool_calls)
+        return cls(
+            text=text,
+            tool_calls=tool_calls,
+            usage=UsageInfo.from_openai_response(response),
+        )
 
 
 @dataclass

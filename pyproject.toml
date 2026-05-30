@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.4.0"
+version = "0.4.1"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -47,6 +47,9 @@ dev = [
     "mypy>=1.10",
     "build>=1.0",
     "twine>=5.0",
+]
+compat = [
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.urls]

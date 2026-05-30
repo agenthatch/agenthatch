@@ -66,6 +66,21 @@ def _render_status(agent: Any) -> str:
         f"[bold]Model:[/bold] {agent.llm.model}",
         f"[bold]Skill:[/bold] {agent.spec.identity.id} v{agent.spec.identity.version}",
     ]
+    features = agent.llm.features
+    caps: list[str] = []
+    if features.supports_tools:
+        caps.append("tools")
+    if features.supports_stream_tools:
+        caps.append("stream+tools")
+    if features.supports_json_mode:
+        caps.append("json_mode")
+    if features.supports_reasoning_content:
+        caps.append("reasoning")
+    lines.append(f"[bold]Capabilities:[/bold] {', '.join(caps) if caps else 'none'}")
+    if features.available_models:
+        lines.append(f"[bold]Available models:[/bold] {', '.join(features.available_models)}")
+    estimated_tokens = agent.ctx.estimate_input_tokens()
+    lines.append(f"[bold]Est. input tokens:[/bold] {estimated_tokens}")
     return "\n".join(lines)
 
 

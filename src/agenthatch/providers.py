@@ -14,9 +14,16 @@ from __future__ import annotations
 
 import os
 import sys
-import tomllib
 from dataclasses import dataclass
 from typing import Any, Literal
+
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
 
 import httpx
 
@@ -43,6 +50,9 @@ class ProviderFeatures:
     supports_stream_tools: bool = True
     supports_json_mode: bool = True
     supports_parallel_tool_calls: bool = True
+    supports_reasoning_content: bool = False
+    requires_anthropic_adapter: bool = False
+    available_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -68,6 +78,12 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         env_key="OPENAI_API_KEY",
         base_url="https://api.openai.com/v1",
         default_model="gpt-4o",
+        features=ProviderFeatures(
+            supports_tools=True,
+            supports_stream_tools=True,
+            supports_json_mode=True,
+            supports_parallel_tool_calls=True,
+        ),
     ),
     "anthropic": ProviderInfo(
         name="anthropic",
@@ -75,6 +91,14 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         env_key="ANTHROPIC_API_KEY",
         base_url="https://api.anthropic.com",
         default_model="claude-sonnet-4-20250514",
+        features=ProviderFeatures(
+            supports_tools=True,
+            supports_stream_tools=False,
+            supports_json_mode=False,
+            supports_parallel_tool_calls=True,
+            supports_reasoning_content=True,
+            requires_anthropic_adapter=True,
+        ),
     ),
     "deepseek": ProviderInfo(
         name="deepseek",
@@ -82,13 +106,31 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         env_key="DEEPSEEK_API_KEY",
         base_url="https://api.deepseek.com",
         default_model="deepseek-chat",
+        features=ProviderFeatures(
+            supports_tools=True,
+            supports_stream_tools=True,
+            supports_json_mode=True,
+            supports_parallel_tool_calls=True,
+            supports_reasoning_content=True,
+            available_models=(
+                "deepseek-chat",
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+            ),
+        ),
     ),
     "ollama": ProviderInfo(
         name="ollama",
         kind="builtin",
-        env_key="",  # local — no API key required
+        env_key="",
         base_url="http://localhost:11434/v1",
         default_model="llama3",
+        features=ProviderFeatures(
+            supports_tools=False,
+            supports_stream_tools=False,
+            supports_json_mode=False,
+            supports_parallel_tool_calls=False,
+        ),
     ),
 }
 
@@ -146,6 +188,9 @@ def _resolve_custom_provider(name: str, config: dict[str, Any]) -> ProviderInfo:
         supports_stream_tools=features_cfg.get("supports_stream_tools", True),
         supports_json_mode=features_cfg.get("supports_json_mode", True),
         supports_parallel_tool_calls=features_cfg.get("supports_parallel_tool_calls", True),
+        supports_reasoning_content=features_cfg.get("supports_reasoning_content", False),
+        requires_anthropic_adapter=features_cfg.get("requires_anthropic_adapter", False),
+        available_models=tuple(features_cfg.get("available_models", ())),
     )
     return ProviderInfo(
         name=name,
@@ -195,6 +240,10 @@ def resolve_api_key(
     info = get_provider(provider, config)
     if config is None:
         config = _load_config_safe()
+
+    # BUG-04-07: Providers without env_key (e.g. Ollama) don't need API keys
+    if not info.env_key:
+        return "local-no-key"
 
     # Level 1: Provider-specific env var
     if info.env_key:
@@ -347,6 +396,9 @@ def list_custom_providers(config: dict[str, Any] | None = None) -> list[Provider
                 supports_stream_tools=features_cfg.get("supports_stream_tools", True),
                 supports_json_mode=features_cfg.get("supports_json_mode", True),
                 supports_parallel_tool_calls=features_cfg.get("supports_parallel_tool_calls", True),
+                supports_reasoning_content=features_cfg.get("supports_reasoning_content", False),
+                requires_anthropic_adapter=features_cfg.get("requires_anthropic_adapter", False),
+                available_models=tuple(features_cfg.get("available_models", ())),
             )
             result.append(
                 ProviderInfo(

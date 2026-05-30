@@ -10,6 +10,8 @@ from agenthatch.skill.spec import AHSSpec
 class ContextManager:
     """Constructs system prompt and manages conversation history window."""
 
+    _CHARS_PER_TOKEN_ESTIMATE: int = 4
+
     def __init__(self, ahs_spec: AHSSpec):
         self.spec = ahs_spec
         self.history: list[dict[str, Any]] = []
@@ -107,3 +109,16 @@ class ContextManager:
     def compress(self) -> str:
         """Context compression stub for v0.5."""
         return "(context_compressor not yet available)"
+
+    def estimate_input_tokens(self) -> int:
+        """Estimate total input tokens for current context.
+
+        Uses 4 chars/token heuristic. Not exact, but sufficient
+        for dynamic max_tokens adjustment (< 20% error margin).
+        """
+        system_len = len(self.build_system_prompt())
+        history_len = sum(
+            len(str(msg.get("content", "") or ""))
+            for msg in self.history
+        )
+        return (system_len + history_len) // self._CHARS_PER_TOKEN_ESTIMATE

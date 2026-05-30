@@ -68,6 +68,9 @@ class SkillBrick:
         return "\n".join(lines)
 
 
+MIN_GENERATION_TOKENS = 1024
+
+
 class SkillAgent:
     """Base Brick — the entry point for v0.4 Agent runtime."""
 
@@ -141,8 +144,22 @@ class SkillAgent:
             supports_stream_tools=agent_features.get("supports_stream_tools", provider_features.supports_stream_tools),
             supports_json_mode=agent_features.get("supports_json_mode", provider_features.supports_json_mode),
             supports_parallel_tool_calls=agent_features.get("supports_parallel_tool_calls", provider_features.supports_parallel_tool_calls),
+            supports_reasoning_content=agent_features.get("supports_reasoning_content", provider_features.supports_reasoning_content),
+            requires_anthropic_adapter=agent_features.get("requires_anthropic_adapter", provider_features.requires_anthropic_adapter),
+            available_models=provider_features.available_models,
         )
         resolved["features"] = merged_features
+
+        # BUG-04-02: Dynamic max_tokens based on estimated input tokens
+        requested_max = resolved["max_tokens"]
+        estimated_input = self.ctx.estimate_input_tokens()
+        safe_max = max(MIN_GENERATION_TOKENS, requested_max - estimated_input)
+        if safe_max < requested_max:
+            logger.info(
+                "Adjusted max_tokens: %d -> %d (input estimate: %d tokens)",
+                requested_max, safe_max, estimated_input,
+            )
+        resolved["max_tokens"] = safe_max
         return resolved
 
     def _assemble(self) -> None:

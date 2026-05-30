@@ -149,10 +149,11 @@ def _check_api_key() -> _Check:
 
     ok, detail = verify_api_key(provider_name, key, info.base_url)
     if ok:
-        return _Check(
-            passed=True,
-            message=f"Provider: {provider_name} — {detail}",
-        )
+        msg = f"Provider: {provider_name} — {detail}"
+        if info.features.available_models:
+            models_str = ", ".join(info.features.available_models)
+            msg += f"\n        Available models: {models_str}"
+        return _Check(passed=True, message=msg)
     return _Check(
         passed=False,
         message=f"Provider: {provider_name} — {detail}",
