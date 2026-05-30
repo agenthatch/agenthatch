@@ -228,15 +228,15 @@ def _init_skillhouse() -> None:
     from agenthatch.house.index import SkillhouseIndex
     from agenthatch.skill.parser import _is_skill_md
 
-    # Determine skillhouse.json path from config or default
-    skillhouse_path = CONFIG_DIR / "skillhouse.json"
-
-    # Load config to get search roots
+    # Load config for skillhouse path and search roots
     try:
         from agenthatch.config import Config
         config = Config.load()
     except Exception:
         config = {}
+
+    skillhouse_cfg = config.get("skillhouse", {}) if "skillhouse" in config else {}
+    skillhouse_path = Path(skillhouse_cfg.get("path", str(CONFIG_DIR / "skillhouse.json")))
 
     search_roots = _resolve_search_roots(config)
 
@@ -264,8 +264,6 @@ def _init_skillhouse() -> None:
 
         if root_count > 0:
             console.print(f"      Root: {root} ({root_count} found)")
-
-    idx._save()
 
     if discovered > 0:
         console.print()
@@ -366,6 +364,17 @@ def _write_multi_provider_config(
     lines.append('# default_model = "mixtral-8x7b"')
     lines.append("")
 
+    lines.append("[harness]")
+    lines.append('large_model = ""')
+    lines.append('small_model = ""')
+    lines.append("")
+    lines.append("[skillhouse]")
+    lines.append('path = ".agenthatch/skillhouse.json"')
+    lines.append("auto_index = true")
+    lines.append("")
+    lines.append("[skills]")
+    lines.append("search_dirs = []")
+
     content = "\n".join(lines)
     CONFIG_FILE.write_text(content, encoding="utf-8")
 
@@ -413,6 +422,17 @@ def _write_custom_provider_config(
     if env_key:
         lines.append(f'env_key = "{env_key}"')
     lines.append("")
+
+    lines.append("[harness]")
+    lines.append('large_model = ""')
+    lines.append('small_model = ""')
+    lines.append("")
+    lines.append("[skillhouse]")
+    lines.append('path = ".agenthatch/skillhouse.json"')
+    lines.append("auto_index = true")
+    lines.append("")
+    lines.append("[skills]")
+    lines.append("search_dirs = []")
 
     CONFIG_FILE.write_text("\n".join(lines), encoding="utf-8")
     _chmod_owner_only(CONFIG_FILE)

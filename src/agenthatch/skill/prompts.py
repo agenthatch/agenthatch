@@ -169,7 +169,7 @@ script_paths: ["scripts/query_weather.sh"]
 frontmatter_allowed_tools: null
 ```
 Output:
-{""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data"", ""schema"": {""city"": ""string"", ""temp"": ""number"", ""condition"": ""string""}}, {""capability"": ""weather_forecast"", ""type"": ""data"", ""schema"": {""city"": ""string"", ""daily"": [{}]}}, {""capability"": ""weather_alert"", ""type"": ""event"", ""schema"": {""alert_type"": ""string"", ""severity"": ""string"", ""message"": ""string""}}], ""requires"": [{""capability"": ""http_client"", ""type"": ""transport"", ""optional"": false}, {""capability"": ""json_parser"", ""type"": ""utility"", ""optional"": false}], ""compatible_with"": [""slack-notifier"", ""dashboard-builder""]}}  # noqa: E501
+{""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data"", ""input_schema"": {""city"": ""string"", ""temp"": ""number"", ""condition"": ""string""}}, {""capability"": ""weather_forecast"", ""type"": ""data"", ""input_schema"": {""city"": ""string"", ""daily"": [{}]}}, {""capability"": ""weather_alert"", ""type"": ""event"", ""input_schema"": {""alert_type"": ""string"", ""severity"": ""string"", ""message"": ""string""}}], ""requires"": [{""capability"": ""http_client"", ""type"": ""transport"", ""optional"": false}, {""capability"": ""json_parser"", ""type"": ""utility"", ""optional"": false}], ""compatible_with"": [""slack-notifier"", ""dashboard-builder""]}}  # noqa: E501
 
 Example — PDF Editor multi-mode:
 ```
@@ -178,7 +178,7 @@ script_paths: ["scripts/edit_pdf.py"]
 frontmatter_allowed_tools: ["pdf_tool"]
 ```
 Output:
-{""interface"": {""provides"": [{""capability"": ""pdf_edit"", ""type"": ""transform"", ""schema"": {}}, {""capability"": ""pdf_merge"", ""type"": ""transform"", ""schema"": {}}, {""capability"": ""pdf_split"", ""type"": ""transform"", ""schema"": {}}], ""requires"": [{""capability"": ""file_reader"", ""type"": ""io"", ""optional"": false}, {""capability"": ""file_writer"", ""type"": ""io"", ""optional"": false}], ""compatible_with"": [""report-generator""]}}  # noqa: E501
+{""interface"": {""provides"": [{""capability"": ""pdf_edit"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_merge"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_split"", ""type"": ""transform"", ""input_schema"": {}}], ""requires"": [{""capability"": ""file_reader"", ""type"": ""io"", ""optional"": false}, {""capability"": ""file_writer"", ""type"": ""io"", ""optional"": false}], ""compatible_with"": [""report-generator""]}}  # noqa: E501
 """
 
 
