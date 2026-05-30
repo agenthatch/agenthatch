@@ -236,7 +236,7 @@ def _init_skillhouse() -> None:
         config = {}
 
     skillhouse_cfg = config.get("skillhouse", {}) if "skillhouse" in config else {}
-    skillhouse_path = Path(skillhouse_cfg.get("path", str(CONFIG_DIR / "skillhouse.json")))
+    skillhouse_path = Path(skillhouse_cfg.get("path", ".agenthatch/skillhouse.json"))
 
     search_roots = _resolve_search_roots(config)
 

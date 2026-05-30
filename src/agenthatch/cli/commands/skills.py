@@ -54,7 +54,7 @@ def skills_command(
         filtered: list[dict[str, Any]] = []
         for e in entries:
             sid = e["id"]
-            raw_entry = idx._data.get("entries", {}).get(sid, {})
+            raw_entry = idx.get_entry(sid) or {}
             provides = raw_entry.get("interface", {}).get("provides", [])
             if any(c.get("type") == type_filter for c in provides):
                 filtered.append(e)

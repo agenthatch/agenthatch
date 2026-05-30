@@ -93,3 +93,8 @@ class CapabilityNotFoundError(AgentHatchError):
     and inject a proper tool error response for the LLM to self-correct.
     """
     exit_code = 11
+
+
+class DependencyCycleError(AgentHatchError):
+    """Circular dependency detected in skill topology graph."""
+    exit_code = 12

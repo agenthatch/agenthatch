@@ -3,6 +3,7 @@
 Defines the Typer app, global options, and subcommand registration.
 """
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -149,3 +150,8 @@ def main() -> Any:
         return app()
     except AgentHatchError as e:
         _handle_agenthatch_error(e)
+    except Exception as e:
+        console.print(f"[red]Unexpected error: {e}[/red]")
+        if os.environ.get("AGENTHATCH_DEBUG"):
+            raise
+        raise typer.Exit(code=1) from None

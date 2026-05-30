@@ -70,7 +70,7 @@ def search_command(
     if type_filter and results:
         filtered: list[SearchResult] = []
         for r in results:
-            entry = idx._data.get("entries", {}).get(r.skill_id, {})
+            entry = idx.get_entry(r.skill_id) or {}
             provides = entry.get("interface", {}).get("provides", [])
             if any(c.get("type") == type_filter for c in provides):
                 filtered.append(r)

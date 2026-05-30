@@ -143,6 +143,14 @@ def validate_and_repair(
             f"{len(errors)} validation errors → harnesses {affected_harnesses}"
         )
 
+        if not affected_harnesses:
+            raise SchemaValidationError(
+                f"Validation errors in non-Harness-mapped fields cannot be auto-repaired:\n"
+                f"{_format_errors(errors)}\n"
+                f"Manual AHSSPEC fix required for: "
+                f"{[e.get('loc', 'unknown') for e in errors]}"
+            )
+
         if retries >= max_targeted_retries:
             raise SchemaValidationError(
                 f"AHSSPEC validation failed after {max_targeted_retries} targeted repair rounds.\n"

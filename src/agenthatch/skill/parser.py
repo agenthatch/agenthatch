@@ -125,7 +125,7 @@ def _discover_files(skill_dir: Path) -> FileManifest:
 
     for root, dirs, files in os.walk(skill_dir):
         # Prune excluded dirs in-place (os.walk convention)
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in _EXCLUDED_DIRS]
+        dirs[:] = [d for d in dirs if d not in _EXCLUDED_DIRS]
 
         for fname in files:
             fpath = Path(root) / fname

@@ -550,7 +550,10 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {}
 
     def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         if not result.get("ahs_spec"):

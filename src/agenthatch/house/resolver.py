@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from agenthatch.exceptions import DependencyCycleError
+
 
 def resolve_dependencies(
     required_capabilities: list[str],
@@ -69,6 +71,11 @@ def resolve_dependencies(
             if in_degree[dependent] == 0:
                 queue.append(dependent)
 
+    if len(result) != len(needed_skills):
+        missing = set(needed_skills) - set(result)
+        raise DependencyCycleError(
+            f"Circular dependency detected among skills: {missing}"
+        )
     return result
 
 
