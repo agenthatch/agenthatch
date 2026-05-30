@@ -149,7 +149,7 @@ def ahs_yaml_path(tmp_path, minimal_spec) -> Path:
 
 def _make_patches(stack):
     """Create the standard set of patches for SkillAgent tests."""
-    return (
+    patches = (
         stack.enter_context(patch("agenthatch.agent.runtime.LLMClient")),
         stack.enter_context(patch("agenthatch.agent.runtime.Sandbox")),
         stack.enter_context(patch("agenthatch.agent.runtime.CapBus")),
@@ -159,6 +159,37 @@ def _make_patches(stack):
             patch("agenthatch.agent.runtime.is_builtin", return_value=False)
         ),
     )
+    # v0.4.1: mock get_default_provider and get_provider for config resolution
+    stack.enter_context(
+        patch(
+            "agenthatch.agent.runtime.get_default_provider",
+            return_value="openai",
+        )
+    )
+    stack.enter_context(
+        patch(
+            "agenthatch.agent.runtime.get_provider",
+            return_value=_make_mock_provider_info(),
+        )
+    )
+    return patches
+
+
+def _make_mock_provider_info():
+    """Create a mock ProviderInfo with ProviderFeatures for tests."""
+    from unittest.mock import MagicMock
+
+    features = MagicMock()
+    features.supports_tools = True
+    features.supports_stream_tools = True
+    features.supports_json_mode = True
+    features.supports_parallel_tool_calls = True
+    features.supports_reasoning_content = False
+    features.requires_anthropic_adapter = False
+    features.available_models = ()
+    info = MagicMock()
+    info.features = features
+    return info
 
 
 class TestSkillAgentConfigResolution:
@@ -219,6 +250,14 @@ class TestSkillAgentAssemble:
             patch("agenthatch.agent.runtime.ContextManager"),
             patch("agenthatch.agent.runtime.ConversationLoop"),
             patch("agenthatch.agent.runtime.is_builtin", return_value=True),
+            patch(
+                "agenthatch.agent.runtime.get_default_provider",
+                return_value="openai",
+            ),
+            patch(
+                "agenthatch.agent.runtime.get_provider",
+                return_value=_make_mock_provider_info(),
+            ),
         ):
             agent = SkillAgent(spec_with_capabilities, skill_dir=Path("/tmp"))
             caps = agent.capbus.capabilities
@@ -233,6 +272,14 @@ class TestSkillAgentAssemble:
             patch("agenthatch.agent.runtime.ContextManager"),
             patch("agenthatch.agent.runtime.ConversationLoop"),
             patch("agenthatch.agent.runtime.is_builtin", return_value=False),
+            patch(
+                "agenthatch.agent.runtime.get_default_provider",
+                return_value="openai",
+            ),
+            patch(
+                "agenthatch.agent.runtime.get_provider",
+                return_value=_make_mock_provider_info(),
+            ),
         ):
             agent = SkillAgent(spec_with_scripts, skill_dir=tmp_path)
             assert "run_skill_script" in agent.capbus.capabilities
@@ -244,6 +291,14 @@ class TestSkillAgentAssemble:
             patch("agenthatch.agent.runtime.ContextManager"),
             patch("agenthatch.agent.runtime.ConversationLoop"),
             patch("agenthatch.agent.runtime.is_builtin", return_value=False),
+            patch(
+                "agenthatch.agent.runtime.get_default_provider",
+                return_value="openai",
+            ),
+            patch(
+                "agenthatch.agent.runtime.get_provider",
+                return_value=_make_mock_provider_info(),
+            ),
         ):
             agent = SkillAgent(spec_with_capabilities, skill_dir=Path("/tmp"))
             assert "http_client" in agent.capbus.unavailable

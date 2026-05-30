@@ -139,13 +139,30 @@ class SkillAgent:
         provider_features = getattr(
             get_provider(resolved["provider"]), "features", ProviderFeatures()
         )
+        def _getf(key: str, default: bool) -> bool:
+            val = agent_features.get(key, default)
+            return val if isinstance(val, bool) else default
+
         merged_features = ProviderFeatures(
-            supports_tools=agent_features.get("supports_tools", provider_features.supports_tools),
-            supports_stream_tools=agent_features.get("supports_stream_tools", provider_features.supports_stream_tools),
-            supports_json_mode=agent_features.get("supports_json_mode", provider_features.supports_json_mode),
-            supports_parallel_tool_calls=agent_features.get("supports_parallel_tool_calls", provider_features.supports_parallel_tool_calls),
-            supports_reasoning_content=agent_features.get("supports_reasoning_content", provider_features.supports_reasoning_content),
-            requires_anthropic_adapter=agent_features.get("requires_anthropic_adapter", provider_features.requires_anthropic_adapter),
+            supports_tools=_getf("supports_tools", provider_features.supports_tools),
+            supports_stream_tools=_getf(
+                "supports_stream_tools", provider_features.supports_stream_tools
+            ),
+            supports_json_mode=_getf(
+                "supports_json_mode", provider_features.supports_json_mode
+            ),
+            supports_parallel_tool_calls=_getf(
+                "supports_parallel_tool_calls",
+                provider_features.supports_parallel_tool_calls,
+            ),
+            supports_reasoning_content=_getf(
+                "supports_reasoning_content",
+                provider_features.supports_reasoning_content,
+            ),
+            requires_anthropic_adapter=_getf(
+                "requires_anthropic_adapter",
+                provider_features.requires_anthropic_adapter,
+            ),
             available_models=provider_features.available_models,
         )
         resolved["features"] = merged_features

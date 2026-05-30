@@ -6,13 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
-from rich.spinner import Spinner
 
-from agenthatch.agent.loop import RichToolCallEvent as RichTCEvent
 from agenthatch.cli import console
 
 

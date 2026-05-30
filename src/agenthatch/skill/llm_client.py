@@ -18,7 +18,12 @@ from dataclasses import field as dc_field
 from typing import Any
 
 from agenthatch.exceptions import ApiKeyError, ProviderCapabilityError
-from agenthatch.providers import ProviderFeatures, get_default_provider, get_provider, resolve_api_key
+from agenthatch.providers import (
+    ProviderFeatures,
+    get_default_provider,
+    get_provider,
+    resolve_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +150,12 @@ class LLMClient:
         call chat() and return a text-only ToolCallResponse.
         """
         if not self._features.supports_tools:
-            text = self.chat(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens)
+            text = self.chat(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
             return ToolCallResponse(text=text, tool_calls=[])
 
         response = self._client.chat.completions.create(
@@ -204,7 +214,9 @@ class LLMClient:
                     requires_anthropic_adapter=self._features.requires_anthropic_adapter,
                     available_models=self._features.available_models,
                 )
-                return self._stream_synthetic_fallback(messages, tools, model, temperature, max_tokens)
+                return self._stream_synthetic_fallback(
+                    messages, tools, model, temperature, max_tokens
+                )
             raise
 
     def _stream_native(
@@ -314,7 +326,8 @@ class LLMClient:
 
         if response.text:
             for i in range(0, len(response.text), self._SYNTHETIC_CHUNK_SIZE):
-                yield StreamDelta(type="text", content=response.text[i:i + self._SYNTHETIC_CHUNK_SIZE])
+                chunk = response.text[i : i + self._SYNTHETIC_CHUNK_SIZE]
+                yield StreamDelta(type="text", content=chunk)
 
         for i, tc in enumerate(response.tool_calls):
             yield StreamDelta(
