@@ -10,6 +10,7 @@ from typing import Any
 
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.cap.bus import CapBus
+from agenthatch.exceptions import CapabilityNotFoundError
 from agenthatch.skill.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -82,12 +83,17 @@ class ConversationLoop:
             messages.append(assistant_msg)
 
             for tc in response.tool_calls:
-                result = self.capbus.route(tc.name, tc.arguments)
+                try:
+                    result = self.capbus.route(tc.name, tc.arguments)
+                except CapabilityNotFoundError as e:
+                    logger.warning("Tool call failed: %s", e)
+                    result = f"Error: {e}"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": result,
                 })
+                self.ctx.add_to_history("tool", f"[{tc.name}]: {str(result)[:500]}")
 
             response = self.llm.chat_with_tools(messages, tools)
 
@@ -142,7 +148,11 @@ class ConversationLoop:
 
             for tc in response.tool_calls:
                 t0 = time.time()
-                result = self.capbus.route(tc.name, tc.arguments)
+                try:
+                    result = self.capbus.route(tc.name, tc.arguments)
+                except CapabilityNotFoundError as e:
+                    logger.warning("Tool call failed: %s", e)
+                    result = f"Error: {e}"
                 elapsed = time.time() - t0
 
                 yield RichToolCallEvent(
@@ -157,6 +167,7 @@ class ConversationLoop:
                     "tool_call_id": tc.id,
                     "content": result,
                 })
+                self.ctx.add_to_history("tool", f"[{tc.name}]: {str(result)[:500]}")
 
             assistant_tool_calls = [
                 {

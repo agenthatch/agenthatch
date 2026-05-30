@@ -60,7 +60,7 @@ class Sandbox:
 
     def run(
         self,
-        command: str,
+        command: str | list[str],
         env: dict[str, str] | None = None,
         timeout: int | None = None,
     ) -> str:
@@ -94,7 +94,12 @@ class Sandbox:
                 timeout=timeout_sec,
                 env=merged_env,
             )
-            return result.stdout or result.stderr or "(no output)"
+            if result.returncode != 0:
+                return (
+                    f"Error (exit {result.returncode}): "
+                    f"{result.stderr.strip() or result.stdout.strip() or '(no output)'}"
+                )
+            return result.stdout.strip() or "(no output)"
         except subprocess.TimeoutExpired:
             return f"Error: command timed out after {timeout_sec}s"
         except FileNotFoundError:

@@ -3,9 +3,13 @@
 Configuration priority: CLI args > environment variables > config file > defaults
 """
 import os
-import tomllib
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from agenthatch.exceptions import ConfigError
 

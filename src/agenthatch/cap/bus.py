@@ -3,10 +3,16 @@
 Provides complete register/match/route/inject_builtin/list_tool_definitions.
 """
 
+from __future__ import annotations
+
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from agenthatch.cap.marshal import fuzzy_match
+from agenthatch.exceptions import CapabilityNotFoundError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,16 +70,20 @@ class CapBus:
             if hasattr(cap.executor, "execute"):
                 return cap.executor.execute(**arguments)
             if hasattr(cap.executor, "execute_script"):
-                script_name = arguments.pop("script_name", "")
+                script_name = arguments.get("script_name", "")
+                filtered_args = {k: v for k, v in arguments.items() if k != "script_name"}
                 return cap.executor.execute_script(
-                    script_name, **arguments
+                    script_name, **filtered_args
                 )
 
         builtin = self.builtins.get(tool_name)
         if builtin:
             return builtin.execute(**arguments)
 
-        return f"Error: capability '{tool_name}' not available"
+        raise CapabilityNotFoundError(
+            f"Capability '{tool_name}' is not registered. "
+            f"Available: {list(self.capabilities.keys()) + list(self.builtins.keys())}"
+        )
 
     def mark_unavailable(self, name: str) -> None:
         """Mark a required capability as unavailable."""
@@ -128,4 +138,8 @@ def _json_type(python_type_str: str) -> str:
         "list": "array",
         "dict": "object",
     }
-    return mapping.get(python_type_str, "string")
+    result = mapping.get(python_type_str)
+    if result is None:
+        logger.debug("Unknown type '%s', falling back to 'string'", python_type_str)
+        return "string"
+    return result

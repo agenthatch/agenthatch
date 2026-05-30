@@ -172,7 +172,7 @@ class SkillAgent:
         estimated_input = self.ctx.estimate_input_tokens()
         safe_max = max(MIN_GENERATION_TOKENS, requested_max - estimated_input)
         if safe_max < requested_max:
-            logger.info(
+            logger.warning(
                 "Adjusted max_tokens: %d -> %d (input estimate: %d tokens)",
                 requested_max, safe_max, estimated_input,
             )

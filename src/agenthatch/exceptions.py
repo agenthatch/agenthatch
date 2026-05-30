@@ -83,3 +83,13 @@ class ProviderCapabilityError(AgentHatchError):
     - A Skill requires streaming but no fallback is possible
     """
     exit_code = 10
+
+
+class CapabilityNotFoundError(AgentHatchError):
+    """Requested capability not registered on the CapBus.
+
+    Raised by CapBus.route() when the LLM requests a tool that is
+    not available on the bus. The ConversationLoop should catch this
+    and inject a proper tool error response for the LLM to self-correct.
+    """
+    exit_code = 11

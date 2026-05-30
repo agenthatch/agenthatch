@@ -421,6 +421,19 @@ class SkillhouseIndex:
         """List of all indexed skill IDs."""
         return list(self._data.get("entries", {}).keys())
 
+    def get_topology(self) -> dict[str, Any]:
+        """Return a snapshot of the topology graph.
+
+        Returns dict with keys: providers, dependency_graph, entries.
+        This is the public API replacing direct _data access.
+        """
+        topo = self._data.get("topology", {})
+        return {
+            "providers": topo.get("providers", {}),
+            "dependency_graph": topo.get("dependency_graph", {}),
+            "entries": self._data.get("entries", {}),
+        }
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Internal helpers

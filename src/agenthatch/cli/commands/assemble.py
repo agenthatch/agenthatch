@@ -56,10 +56,9 @@ def _print_assembly_plan(skill_specs: list[dict[str, Any]], idx: Any) -> None:
     """Print the assembly plan for --dry-run."""
     from agenthatch.house.resolver import is_builtin
 
-    providers: dict[str, list[str]] = idx._data.get("providers", {})
-    dep_graph: dict[str, list[str]] = idx._data.get("topology", {}).get(
-        "dependency_graph", {}
-    )
+    topo = idx.get_topology()
+    providers: dict[str, list[str]] = topo["providers"]
+    dep_graph: dict[str, list[str]] = topo["dependency_graph"]
 
     all_caps: list[str] = []
     for s in skill_specs:
@@ -68,7 +67,7 @@ def _print_assembly_plan(skill_specs: list[dict[str, Any]], idx: Any) -> None:
             all_caps.append(prov.get("capability", ""))
 
     order = resolve_dependencies(
-        all_caps, providers, dep_graph, idx._data.get("entries", {})
+        all_caps, providers, dep_graph, topo["entries"]
     )
 
     console.print(
