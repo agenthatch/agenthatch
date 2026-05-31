@@ -98,3 +98,8 @@ class CapabilityNotFoundError(AgentHatchError):
 class DependencyCycleError(AgentHatchError):
     """Circular dependency detected in skill topology graph."""
     exit_code = 12
+
+
+class CompactError(AgentHatchError):
+    """Auto-compact operation failed after all retries and fallbacks."""
+    exit_code = 13

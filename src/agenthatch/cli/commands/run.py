@@ -1,4 +1,7 @@
-"""agenthatch run — launch a SkillAgent in interactive TUI mode."""
+"""agenthatch run — launch a SkillAgent in interactive TUI mode.
+
+v0.5: Rich Live streaming with tool call display replaces opaque spinner.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
 
+from agenthatch.agent.loop import RichToolCallEvent
 from agenthatch.cli import console
 
 
@@ -81,6 +86,49 @@ def _render_status(agent: Any) -> str:
     return "\n".join(lines)
 
 
+def _stream_response(agent: Any, user_input: str) -> str:
+    """Stream agent response with live tool call display."""
+    full_text: list[str] = []
+    tool_status: dict[str, str] = {}
+
+    def render() -> str:
+        lines = [f"[bold bright_blue]{agent.spec.identity.display_name}[/]"]
+        for name, status in tool_status.items():
+            lines.append(f"  [cyan]{name}[/] {status}")
+        if full_text:
+            lines.append("".join(full_text)[-300:])
+        return "\n".join(lines) or "[dim]Thinking...[/dim]"
+
+    with Live(Panel(render(), title="Agent"), refresh_per_second=8) as live:
+        gen = agent.chat_stream(user_input)
+        final_text = ""
+        while True:
+            try:
+                event = next(gen)
+            except StopIteration as e:
+                final_text = e.value
+                break
+            if isinstance(event, RichToolCallEvent):
+                if event.phase == "start":
+                    tool_status[event.tool_name] = "[bold yellow]running...[/]"
+                elif event.phase == "done":
+                    elapsed = f"{event.elapsed:.1f}s" if event.elapsed else ""
+                    preview = (event.result_preview or "")[:80]
+                    tool_status[event.tool_name] = (
+                        f"[bold green]done[/] ({elapsed}) "
+                        f"[dim]→ {preview}[/]"
+                    )
+            elif isinstance(event, str):
+                full_text.append(event)
+            live.update(Panel(render(), title="Agent"))
+        live.update(Panel(
+            "[bold bright_blue]Response:[/]\n"
+            + (final_text or "".join(full_text) or "(no response)"),
+            title="Agent"
+        ))
+    return final_text or "".join(full_text) or "(no response)"
+
+
 def run_command(
     skill_name: str = typer.Argument(..., help="Skill ID or path to run"),  # noqa: B008
     provider: str = typer.Option(None, "--provider", "-p", help="Override provider"),
@@ -142,8 +190,10 @@ def run_command(
             console.print("")
             console.print(f"[bold bright_blue]{agent.spec.identity.display_name}[/]")
 
-            with console.status("[dim]Thinking...[/dim]"):
-                response_text = agent.chat(user_input)
+            try:
+                response_text = _stream_response(agent, user_input)
+            except Exception as e:
+                response_text = f"[error]Agent error: {e}[/error]"
             console.print(Markdown(response_text))
             console.print("")
 

@@ -1,4 +1,11 @@
-"""SkillAgent — the base brick and entry point for v0.4 Agent runtime."""
+"""SkillAgent — the base brick and entry point for v0.5 Agent runtime.
+
+v0.5 additions:
+- HooksManager + StateManager wired into ContextManager
+- Per-skill compact config from agenthatch.yaml
+- Session summary restore from .agenthatch/state/<skill-id>/
+- chat_stream() PEP 380 return value fix
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,9 @@ from typing import Any
 import yaml
 
 from agenthatch.agent.context import ContextManager
+from agenthatch.agent.hooks import HooksManager
 from agenthatch.agent.loop import ConversationLoop
+from agenthatch.agent.offload import StateManager
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.cap.bus import CapBus
 from agenthatch.house.resolver import is_builtin
@@ -92,6 +101,16 @@ class SkillAgent:
         self.skill_dir = skill_dir
         self.ctx = ContextManager(ahs_spec)
 
+        # ── v0.5: Apply per-skill compact config ──
+        agent_cfg = self.spec.agent
+        if agent_cfg and agent_cfg.runtime.compact:
+            self.ctx.compact_config = {
+                "enabled": agent_cfg.runtime.compact.enabled,
+                "ratio": agent_cfg.runtime.compact.ratio,
+                "min_recent_turns": agent_cfg.runtime.compact.min_recent_turns,
+            }
+            self.ctx._apply_compact_config()
+
         runtime_config = self._resolve_runtime_config(provider, api_key, model)
 
         self.capbus = CapBus()
@@ -108,6 +127,24 @@ class SkillAgent:
             sandbox=self.sandbox,
             ctx=self.ctx,
         )
+
+        # ── v0.5: Wire hooks + state management ──
+        self.hooks = HooksManager()
+        self.state = StateManager(
+            Path(".agenthatch") / "state" / self.spec.identity.id
+        )
+
+        self.ctx._hooks = self.hooks
+        self.ctx._state_manager = self.state
+        self.ctx._llm = self.llm
+
+        prior = self.state.load_summary()
+        if prior:
+            self.ctx.summary = prior
+            logger.info(
+                "Restored prior session summary: %d turns from %s",
+                prior.conversation_turns, prior.compressed_at
+            )
 
         self._assemble()
 
@@ -239,4 +276,5 @@ class SkillAgent:
 
     def chat_stream(self, user_input: str) -> Any:
         """Streaming chat for TUI consumption."""
-        yield from self.loop.stream(user_input)
+        result = yield from self.loop.stream(user_input)
+        return result

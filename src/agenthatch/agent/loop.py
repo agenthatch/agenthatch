@@ -53,6 +53,8 @@ class ConversationLoop:
 
     def run(self, user_input: str) -> str:
         """Execute one conversation turn synchronously."""
+        self.ctx.auto_compact_check(self.llm.model_max_tokens or 4096)
+
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
 
@@ -86,6 +88,14 @@ class ConversationLoop:
             }
             messages.append(assistant_msg)
 
+            # Store assistant tool_calls message in history.
+            # API requires content=null when tool_calls is present.
+            self.ctx.add_to_history(
+                "assistant",
+                "",
+                tool_calls=assistant_msg.get("tool_calls"),
+            )
+
             for tc in response.tool_calls:
                 try:
                     result = self.capbus.route(tc.name, tc.arguments)
@@ -98,9 +108,13 @@ class ConversationLoop:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result,
+                    "content": str(result),
                 })
-                self.ctx.add_to_history("tool", f"[{tc.name}]: {str(result)[:500]}")
+                self.ctx.add_to_history(
+                    "tool",
+                    f"[{tc.name}]: {str(result)[:500]}",
+                    tool_call_id=tc.id,
+                )
 
             response = self.llm.chat_with_tools(messages, tools)
 
@@ -114,6 +128,8 @@ class ConversationLoop:
         self, user_input: str
     ) -> Generator[RichToolCallEvent | str, None, str]:
         """Streaming conversation for TUI Live rendering."""
+        self.ctx.auto_compact_check(self.llm.model_max_tokens or 4096)
+
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
 
@@ -177,7 +193,11 @@ class ConversationLoop:
                     "tool_call_id": tc.id,
                     "content": result,
                 })
-                self.ctx.add_to_history("tool", f"[{tc.name}]: {str(result)[:500]}")
+                self.ctx.add_to_history(
+                    "tool",
+                    f"[{tc.name}]: {str(result)[:500]}",
+                    tool_call_id=tc.id,
+                )
 
             assistant_tool_calls = [
                 {

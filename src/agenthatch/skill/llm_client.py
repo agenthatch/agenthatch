@@ -52,6 +52,7 @@ class LLMClient:
         self._provider_name = name
         self._model = model or self._info.default_model
         self._features = self._info.features
+        self._max_tokens = 4096
 
         # BUG-04-06: Anthropic uses Messages API, not Chat Completions
         if self._features.requires_anthropic_adapter:
@@ -76,6 +77,10 @@ class LLMClient:
     @property
     def model(self) -> str:
         return self._model
+
+    @property
+    def model_max_tokens(self) -> int | None:
+        return self._max_tokens
 
     @property
     def features(self) -> ProviderFeatures:

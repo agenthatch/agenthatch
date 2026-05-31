@@ -194,6 +194,14 @@ class ConfidenceReport(BaseModel):
 
 # ─── v0.4 Agent Runtime Config ──────────────────────────────────────────
 
+class CompactConfig(BaseModel):
+    """Per-skill auto-compact configuration (v0.5)."""
+    enabled: bool = True
+    ratio: float = 0.75
+    min_recent_turns: int = 3
+    min_savings_ratio: float = 0.30
+
+
 class AgentRuntimeConfig(BaseModel):
     """Skill 级别的 Agent 运行时配置 (v0.4 新增)."""
     provider: str | None = None
@@ -202,6 +210,7 @@ class AgentRuntimeConfig(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 4096
     features: dict[str, bool] = {}
+    compact: CompactConfig | None = None  # v0.5 NEW
 
 
 class AgentConfig(BaseModel):
