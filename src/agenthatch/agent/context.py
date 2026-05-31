@@ -162,18 +162,41 @@ class ContextManager:
                         }
             isolated.insert(0, msg)
 
+        # ── v0.5.1: Strip orphaned tool messages (FIX-05) ──
+        validated: list[dict[str, Any]] = []
+        last_assistant_had_tool_calls = False
+        for msg in isolated:
+            role = msg.get("role", "")
+            if role == "tool":
+                if not last_assistant_had_tool_calls:
+                    logger.warning(
+                        "Stripping orphaned tool message (no preceding tool_calls)"
+                    )
+                    continue
+            last_assistant_had_tool_calls = (
+                role == "assistant" and bool(msg.get("tool_calls"))
+            )
+            validated.append(msg)
+        isolated = validated
+
         messages.extend(isolated)
 
         # Normalize: assistant messages with tool_calls must have content=None
         for msg in messages:
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                if not msg.get("content"):
+                if msg.get("content") == "":
                     msg["content"] = None
 
         messages.append({"role": "user", "content": user_input})
         return messages
 
-    def add_to_history(self, role: str, content: str, tool_call_id: str | None = None, tool_calls: list[dict[str, Any]] | None = None) -> None:
+    def add_to_history(
+        self,
+        role: str,
+        content: str | None,
+        tool_call_id: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Add a message to conversation history."""
         msg: dict[str, Any] = {"role": role, "content": content}
         if tool_call_id:

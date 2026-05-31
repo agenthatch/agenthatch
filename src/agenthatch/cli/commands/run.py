@@ -193,9 +193,11 @@ def run_command(
             try:
                 response_text = _stream_response(agent, user_input)
             except Exception as e:
-                response_text = f"[error]Agent error: {e}[/error]"
+                response_text = f"Agent error: {e}"
+                console.print(f"[error]{response_text}[/error]")
+                continue
             console.print(Markdown(response_text))
             console.print("")
 
-    except (KeyboardInterrupt, SystemExit):
-        console.print("\n[dim]Goodbye![/dim]")
+    except (KeyboardInterrupt, SystemExit, EOFError):
+        console.print()

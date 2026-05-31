@@ -11,7 +11,7 @@ from typing import Any
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.cap.bus import CapBus
 from agenthatch.exceptions import CapabilityNotFoundError
-from agenthatch.skill.llm_client import LLMClient
+from agenthatch.skill.llm_client import LLMClient, ToolCallResponse
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class ConversationLoop:
             # API requires content=null when tool_calls is present.
             self.ctx.add_to_history(
                 "assistant",
-                "",
+                None,
                 tool_calls=assistant_msg.get("tool_calls"),
             )
 
@@ -116,7 +116,14 @@ class ConversationLoop:
                     tool_call_id=tc.id,
                 )
 
-            response = self.llm.chat_with_tools(messages, tools)
+            try:
+                response = self.llm.chat_with_tools(messages, tools)
+            except Exception as e:
+                logger.error("LLM API call failed in tool loop: %s", e)
+                response = ToolCallResponse(
+                    text=f"Error communicating with model provider: {e}",
+                    tool_calls=[],
+                )
 
         self.ctx.add_to_history("user", user_input)
         if response.text:
@@ -139,10 +146,18 @@ class ConversationLoop:
             accumulated_text = ""
             has_yielded_tool_header = False
 
-            gen = self.llm.stream_chat_with_tools(
-                messages=messages,
-                tools=tools,
-            )
+            try:
+                gen = self.llm.stream_chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                )
+            except Exception as e:
+                logger.error("LLM stream call failed: %s", e)
+                full_response_text = (
+                    f"Error communicating with model provider: {e}"
+                )
+                break
+
             response = None
             while True:
                 try:
@@ -168,6 +183,27 @@ class ConversationLoop:
             if not response.has_tool_calls:
                 full_response_text = response.text or accumulated_text
                 break
+
+            # ── v0.5.1: Assistant tool_calls BEFORE tool loop (FIX-01) ──
+            assistant_tool_calls = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments),
+                    },
+                }
+                for tc in response.tool_calls
+            ]
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": assistant_tool_calls,
+            })
+            self.ctx.add_to_history(
+                "assistant", None, tool_calls=assistant_tool_calls
+            )
 
             for tc in response.tool_calls:
                 t0 = time.time()
@@ -198,23 +234,6 @@ class ConversationLoop:
                     f"[{tc.name}]: {str(result)[:500]}",
                     tool_call_id=tc.id,
                 )
-
-            assistant_tool_calls = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.name,
-                        "arguments": json.dumps(tc.arguments),
-                    },
-                }
-                for tc in response.tool_calls
-            ]
-            messages.append({
-                "role": "assistant",
-                "content": None,
-                "tool_calls": assistant_tool_calls,
-            })
 
         self.ctx.add_to_history("user", user_input)
         final_text = full_response_text or accumulated_text

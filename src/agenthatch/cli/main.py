@@ -109,7 +109,7 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
     elif verbose == 1:
         level = logging.INFO
     else:
-        level = logging.WARNING
+        level = logging.ERROR
 
     _logger = logging.getLogger("agenthatch")
     _logger.setLevel(level)

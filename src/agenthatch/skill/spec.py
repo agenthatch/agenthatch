@@ -155,6 +155,14 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
 
     if "timeout" in data and isinstance(data["timeout"], (int, float)):
         data["timeout"] = f"{int(data['timeout'])}s"
+    elif "timeout" in data and isinstance(data["timeout"], str):
+        timeout_val = data["timeout"].strip()
+        if timeout_val and not timeout_val.endswith("s"):
+            try:
+                int(timeout_val)
+                data["timeout"] = f"{timeout_val}s"
+            except ValueError:
+                pass
 
     if "runtime" in data and isinstance(data["runtime"], (int, float, bool)):
         data["runtime"] = str(data["runtime"])
