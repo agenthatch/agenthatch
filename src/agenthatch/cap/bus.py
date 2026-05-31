@@ -5,7 +5,6 @@ Provides complete register/match/route/inject_builtin/list_tool_definitions.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -96,11 +95,16 @@ class CapBus:
         for cap in self.capabilities.values():
             schema = cap.schema
             if not schema.get("type"):
+                properties: dict[str, Any] = {}
+                for k, v in schema.items():
+                    result = _json_type(v)
+                    if isinstance(result, dict):
+                        properties[k] = result
+                    else:
+                        properties[k] = {"type": result}
                 schema = {
                     "type": "object",
-                    "properties": {
-                        k: {"type": _json_type(v)} for k, v in schema.items()
-                    },
+                    "properties": properties,
                     "required": list(schema.keys()),
                 }
             tools.append({
@@ -123,10 +127,11 @@ class CapBus:
         return tools
 
 
-def _json_type(value: Any) -> str:
-    """Convert Python type annotation to JSON Schema type string.
+def _json_type(value: Any) -> str | dict[str, Any]:
+    """Convert Python type annotation to JSON Schema type.
 
     Handles arbitrary nesting: scalars, arrays, objects, nested arrays of objects.
+    Returns a string for scalars, a dict for compound types (no json.dumps).
     """
     TYPE_MAP: dict[str, str] = {
         "string": "string", "integer": "integer", "number": "number",
@@ -137,23 +142,35 @@ def _json_type(value: Any) -> str:
         first = value[0]
         if isinstance(first, str):
             item_type = TYPE_MAP.get(first.lower(), "string")
-            return json.dumps({"type": "array", "items": {"type": item_type}})
+            return {"type": "array", "items": {"type": item_type}}
         elif isinstance(first, dict):
-            props = {k: {"type": _json_type(v)} for k, v in first.items()}
-            return json.dumps({
+            item_props: dict[str, Any] = {}
+            for k, v in first.items():
+                result = _json_type(v)
+                if isinstance(result, dict):
+                    item_props[k] = result
+                else:
+                    item_props[k] = {"type": result}
+            return {
                 "type": "array",
-                "items": {"type": "object", "properties": props},
-            })
+                "items": {"type": "object", "properties": item_props},
+            }
         else:
-            return json.dumps({"type": "array", "items": {"type": "string"}})
+            return {"type": "array", "items": {"type": "string"}}
 
     if isinstance(value, dict):
         if "items" in value and isinstance(value["items"], list):
-            return json.dumps({
+            return {
                 "type": "array",
                 "items": {"type": _json_type(value["items"][0])},
-            })
-        props = {k: {"type": _json_type(v)} for k, v in value.items()}
-        return json.dumps({"type": "object", "properties": props})
+            }
+        obj_props: dict[str, Any] = {}
+        for k, v in value.items():
+            result = _json_type(v)
+            if isinstance(result, dict):
+                obj_props[k] = result
+            else:
+                obj_props[k] = {"type": result}
+        return {"type": "object", "properties": obj_props}
 
     return TYPE_MAP.get(str(value).lower(), "string")

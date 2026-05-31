@@ -186,11 +186,23 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
 
     # env: {"KEY": "val"} → [{"name": "KEY", "description": "val"}]
     if "env" in data and isinstance(data["env"], dict):
-        if "name" not in data["env"] and "description" not in data["env"]:
+        if "name" in data["env"] or "description" in data["env"]:
+            # {"description": "..."} or {"name": "X", "description": "Y"}
+            if "name" not in data["env"]:
+                data["env"]["name"] = ""
+            data["env"] = [data["env"]]
+        else:
+            # {"KEY": "val"}
             data["env"] = [
                 {"name": k, "description": str(v)}
                 for k, v in data["env"].items()
             ]
+
+    # env: list items missing "name" → fill with ""
+    if "env" in data and isinstance(data["env"], list):
+        for item in data["env"]:
+            if isinstance(item, dict) and "name" not in item:
+                item["name"] = ""
 
     return data
 
