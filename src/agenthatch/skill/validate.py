@@ -111,6 +111,11 @@ def validate_and_repair(
         ahs_dict.get("ahs_spec", ahs_dict) if isinstance(ahs_dict, dict) else ahs_dict
     )
 
+    # ── v0.5.2: Coerce base data before validation (Fix 4) ──
+    if "base" in spec_dict:
+        from agenthatch.skill.spec import _coerce_base_data
+        spec_dict["base"] = _coerce_base_data(spec_dict["base"])
+
     total_saved = 0
     retries = 0
 

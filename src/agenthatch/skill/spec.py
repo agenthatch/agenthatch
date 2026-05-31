@@ -144,28 +144,53 @@ class BaseSpec(BaseModel):
 def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
     """Coerce raw dict values to BaseSpec-compatible types.
 
-    Harness E uses unstructured chat() — LLM may output "sandbox": "False"
-    (string) or "timeout": 60 (int), which Pydantic strict validation rejects.
-    This normalizes common type mismatches before BaseSpec(**data).
+    Harness E uses unstructured chat() — LLM may produce type mismatches
+    (int timeout, str runtime, single string dependencies, dict env, etc.)
+    that Pydantic strict validation rejects. This normalizes all known
+    type mismatches before BaseSpec(**data).
     """
     data = base_data.copy() if base_data else {}
 
-    if "sandbox" in data and isinstance(data["sandbox"], str):
-        data["sandbox"] = data["sandbox"].lower() in ("true", "yes", "1")
-
-    if "timeout" in data and isinstance(data["timeout"], (int, float)):
-        data["timeout"] = f"{int(data['timeout'])}s"
-    elif "timeout" in data and isinstance(data["timeout"], str):
-        timeout_val = data["timeout"].strip()
-        if timeout_val and not timeout_val.endswith("s"):
+    # timeout: int 60 → "60s", str "45" → "45s", "60s " → "60s"
+    if "timeout" in data:
+        val = data["timeout"]
+        if isinstance(val, (int, float)):
+            data["timeout"] = f"{int(val)}s"
+        elif isinstance(val, str):
+            cleaned = val.strip().rstrip("s") + "s"
             try:
-                int(timeout_val)
-                data["timeout"] = f"{timeout_val}s"
+                int(cleaned.rstrip("s"))
+                data["timeout"] = cleaned
             except ValueError:
-                pass
+                data["timeout"] = "60s"
 
-    if "runtime" in data and isinstance(data["runtime"], (int, float, bool)):
-        data["runtime"] = str(data["runtime"])
+    # sandbox: "true"/"false" → True/False
+    if "sandbox" in data and isinstance(data["sandbox"], str):
+        data["sandbox"] = data["sandbox"].lower().strip() in ("true", "yes", "1")
+
+    # runtime: normalize, reject invalid values
+    VALID_RUNTIMES = {"python3.11", "bash", "node20"}
+    if "runtime" in data and isinstance(data["runtime"], str):
+        cleaned = data["runtime"].lower().strip()
+        if cleaned in ("python", "python3"):
+            cleaned = "python3.11"
+        if cleaned not in VALID_RUNTIMES:
+            data["runtime"] = None
+        else:
+            data["runtime"] = cleaned
+
+    # dependencies: "numpy" → ["numpy"]
+    if "dependencies" in data and isinstance(data["dependencies"], str):
+        deps = [d.strip() for d in data["dependencies"].split(",") if d.strip()]
+        data["dependencies"] = deps if deps else []
+
+    # env: {"KEY": "val"} → [{"name": "KEY", "description": "val"}]
+    if "env" in data and isinstance(data["env"], dict):
+        if "name" not in data["env"] and "description" not in data["env"]:
+            data["env"] = [
+                {"name": k, "description": str(v)}
+                for k, v in data["env"].items()
+            ]
 
     return data
 
