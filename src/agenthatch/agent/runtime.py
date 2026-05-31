@@ -90,12 +90,12 @@ class SkillAgent:
     ):
         self.spec = ahs_spec
         self.skill_dir = skill_dir
+        self.ctx = ContextManager(ahs_spec)
 
         runtime_config = self._resolve_runtime_config(provider, api_key, model)
 
         self.capbus = CapBus()
         self.sandbox = Sandbox()
-        self.ctx = ContextManager(ahs_spec)
 
         self.llm = LLMClient(
             provider_name=runtime_config["provider"],

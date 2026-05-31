@@ -241,8 +241,8 @@ def resolve_api_key(
     if config is None:
         config = _load_config_safe()
 
-    # BUG-04-07: Providers without env_key (e.g. Ollama) don't need API keys
-    if not info.env_key:
+    # BUG-04-07: Builtin providers without env_key (e.g. Ollama) don't need API keys
+    if info.kind == "builtin" and not info.env_key:
         return "local-no-key"
 
     # Level 1: Provider-specific env var

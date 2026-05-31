@@ -88,6 +88,9 @@ class ConversationLoop:
                 except CapabilityNotFoundError as e:
                     logger.warning("Tool call failed: %s", e)
                     result = f"Error: {e}"
+                except Exception as e:
+                    logger.warning("Tool execution failed: %s", e)
+                    result = f"Error: {e}"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
@@ -152,6 +155,9 @@ class ConversationLoop:
                     result = self.capbus.route(tc.name, tc.arguments)
                 except CapabilityNotFoundError as e:
                     logger.warning("Tool call failed: %s", e)
+                    result = f"Error: {e}"
+                except Exception as e:
+                    logger.warning("Tool execution failed: %s", e)
                     result = f"Error: {e}"
                 elapsed = time.time() - t0
 
