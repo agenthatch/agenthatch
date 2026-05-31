@@ -210,6 +210,8 @@ class SkillAgent:
         if not isinstance(estimated_input, int):
             estimated_input = 0
         safe_max = max(MIN_GENERATION_TOKENS, requested_max - estimated_input)
+        if merged_features.supports_reasoning_content:
+            safe_max = int(safe_max * 0.7)
         if safe_max < requested_max:
             logger.info(
                 "Adjusted max_tokens: %d -> %d (input estimate: %d tokens)",

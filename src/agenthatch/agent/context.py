@@ -372,10 +372,17 @@ class ContextManager:
                 temperature=0.1,
                 max_tokens=1000,
             )
-            match = re.search(r'\{[\s\S]*\}', text)
-            if not match:
-                raise json.JSONDecodeError("No JSON found in response", text, 0)
-            data = json.loads(match.group(0))
-            return CompactSummary(**data)
+            # Try multiple extraction strategies: last JSON block first (most likely)
+            blocks = re.findall(r'\{[\s\S]*?\}', text)
+            if blocks:
+                blocks.sort(key=lambda b: -len(b))
+                for block in blocks[:3]:
+                    try:
+                        data = json.loads(block)
+                        if isinstance(data, dict) and "session_intent" in data:
+                            return CompactSummary(**data)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+            raise json.JSONDecodeError("No valid JSON found in response", text, 0)
 
         raise RuntimeError("No LLM client available for compaction")

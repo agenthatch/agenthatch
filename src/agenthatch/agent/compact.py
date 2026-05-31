@@ -47,7 +47,11 @@ information while discarding redundant details.
    pending_actions.
 3. If the agent made a choice between alternatives, record it in key_decisions.
 4. Be specific: "Created /tmp/report.csv (1,234 rows)" not "Created a file".
-5. Output ONLY valid JSON matching this schema:
+
+## Output format
+Respond ONLY with a JSON object. No markdown fences, no explanation, no prefix
+or suffix. Start with "{" and end with "}". The JSON must match this schema:
+
 {
   "session_intent": "<one sentence>",
   "key_decisions": ["<decision>", ...],

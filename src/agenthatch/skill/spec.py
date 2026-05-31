@@ -164,9 +164,15 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
             except ValueError:
                 data["timeout"] = "60s"
 
-    # sandbox: "true"/"false" → True/False
-    if "sandbox" in data and isinstance(data["sandbox"], str):
-        data["sandbox"] = data["sandbox"].lower().strip() in ("true", "yes", "1")
+    # sandbox: "true"/"false" → True/False, also handle int 0/1 and None
+    if "sandbox" in data:
+        val = data["sandbox"]
+        if isinstance(val, str):
+            data["sandbox"] = val.lower().strip() in ("true", "yes", "1")
+        elif isinstance(val, (int, float)):
+            data["sandbox"] = bool(val)
+        elif val is None:
+            data["sandbox"] = False
 
     # runtime: normalize, reject invalid values
     VALID_RUNTIMES = {"python3.11", "bash", "node20"}
