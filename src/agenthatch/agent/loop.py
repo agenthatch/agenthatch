@@ -125,11 +125,13 @@ class ConversationLoop:
                     tool_calls=[],
                 )
 
+        # ── DD-05-01: Ensure text is always stored ──
         self.ctx.add_to_history("user", user_input)
-        if response.text:
-            self.ctx.add_to_history("assistant", response.text)
+        final_text = response.text if response and response.text else ""
+        if final_text:
+            self.ctx.add_to_history("assistant", final_text)
 
-        return response.text or "(no response)"
+        return final_text or "(no response)"
 
     def stream(
         self, user_input: str

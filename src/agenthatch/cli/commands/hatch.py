@@ -169,7 +169,12 @@ def hatch_command(
     if ahs_spec.confidence_report:
         cr = ahs_spec.confidence_report
         console.print(
-            f"  [ok]Confidence:[/ok] overall={cr.overall:.2f}"
+            "  [ok]Confidence:[/ok] "
+            f"A={cr.per_harness.get('A', 0):.2f} "
+            f"B={cr.per_harness.get('B', 0):.2f} "
+            f"C={cr.per_harness.get('C', 0):.2f} "
+            f"D={cr.per_harness.get('D', 0):.2f} "
+            f"E={cr.per_harness.get('E', 0):.2f}"
         )
 
     # ── 6. Write outputs ──────────────────────────────────────────────

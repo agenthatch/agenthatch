@@ -664,6 +664,7 @@ class Orchestrator:
         outputs: dict[str, HarnessOutput] = {}
 
         if tier_map.get("A") != "skip":
+            logger.info("Running harness A: extract_identity")
             outputs["A"] = harnesses["A"].run(
                 frontmatter=context.frontmatter,
                 dir_name=context.dir_name,
@@ -672,6 +673,7 @@ class Orchestrator:
             )
 
         if tier_map.get("B") != "skip":
+            logger.info("Running harness B: infer_intent")
             outputs["B"] = harnesses["B"].run(
                 description=context.frontmatter.get("description") if context.frontmatter else None,
                 body=context.body,
@@ -680,6 +682,7 @@ class Orchestrator:
             )
 
         if tier_map.get("C") != "skip":
+            logger.info("Running harness C: infer_interface")
             outputs["C"] = harnesses["C"].run(
                 body=context.body,
                 file_contents=file_contents,
@@ -697,6 +700,7 @@ class Orchestrator:
 
         # Step 4: Sequential dispatch (D depends on C for runtime context)
         if tier_map.get("D") != "skip":
+            logger.info("Running harness D: detect_base_and_instructions")
             outputs["D"] = harnesses["D"].run(
                 body=context.body,
                 file_contents=file_contents,
@@ -710,6 +714,7 @@ class Orchestrator:
 
         # Step 5: Assemble (E)
         try:
+            logger.info("Running harness E: assemble_and_validate")
             outputs["E"] = harnesses["E"].run(
                 identity=outputs["A"].result if "A" in outputs else {},
                 intent=outputs["B"].result if "B" in outputs else {},

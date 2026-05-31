@@ -259,5 +259,5 @@ ASSEMBLE_FEW_SHOT = """\
 Input:
 {""identity"": {""id"": ""weather-reporter"", ""display_name"": ""Weather Reporter"", ""version"": ""1.2.0""}, ""intent"": {""triggers"": [""weather"", ""forecast""], ""satisfies"": [""get weather for {city}""], ""summary"": ""Fetches current weather""}, ""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data""}, {""capability"": ""weather_alert"", ""type"": ""event""}], ""requires"": [{""capability"": ""http_client"", ""type"": ""transport""}]}, ""base"": {""runtime"": ""bash"", ""sandbox"": true, ""timeout"": ""120s"", ""env"": [{}]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Call API""}]}, ""resources"": {""scripts"": [{""name"": ""query_weather.sh"", ""hash"": ""abc123""}]}, ""dir_name"": ""weather-reporter""}  # noqa: E501
 Output:
-{""confidence_report"": {""overall"": 0.84, ""per_harness"": {""A"": 0.95, ""B"": 0.72, ""C"": 0.88, ""D"": 0.81}}, ""warnings"": [""weather_alert is event type — composition.event_listeners added""]}  # noqa: E501
+{""confidence_report"": {""overall"": 0.92, ""per_harness"": {""A"": 0.95, ""B"": 0.97, ""C"": 0.88, ""D"": 0.91}}, ""warnings"": [""weather_alert is event type — composition.event_listeners added""]}  # noqa: E501
 """

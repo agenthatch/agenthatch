@@ -151,18 +151,26 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
     """
     data = base_data.copy() if base_data else {}
 
-    # timeout: int 60 → "60s", str "45" → "45s", "60s " → "60s"
+    # timeout: int 60 → "60s", str "45" → "45s", None/{}/[] → "60s"
     if "timeout" in data:
         val = data["timeout"]
         if isinstance(val, (int, float)):
             data["timeout"] = f"{int(val)}s"
         elif isinstance(val, str):
-            cleaned = val.strip().rstrip("s") + "s"
-            try:
-                int(cleaned.rstrip("s"))
-                data["timeout"] = cleaned
-            except ValueError:
+            cleaned = val.strip()
+            if cleaned:
+                normalized = cleaned.rstrip("s") + "s"
+                try:
+                    int(normalized.rstrip("s"))
+                    data["timeout"] = normalized
+                except ValueError:
+                    data["timeout"] = "60s"
+            else:
                 data["timeout"] = "60s"
+        elif isinstance(val, (dict, list)):
+            data["timeout"] = "60s"
+        elif val is None:
+            data["timeout"] = "60s"
 
     # sandbox: "true"/"false" → True/False, also handle int 0/1 and None
     if "sandbox" in data:

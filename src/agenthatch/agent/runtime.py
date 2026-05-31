@@ -47,7 +47,7 @@ class SkillBrick:
         self._script_steps: dict[str, str] = {}
         for step in spec.instructions.workflow:
             if step.script:
-                p = skill_dir / step.script
+                p = (skill_dir / step.script).resolve()
                 if p.exists():
                     self._scripts[step.script] = p
                     self._script_steps[step.script] = step.description

@@ -162,22 +162,44 @@ class ContextManager:
                         }
             isolated.insert(0, msg)
 
-        # ── v0.5.1: Strip orphaned tool messages (FIX-05) ──
-        validated: list[dict[str, Any]] = []
+        # ── DD-05-04: Reorder orphaned tool messages instead of stripping ──
+        reordered: list[dict[str, Any]] = []
+        pending_orphan_tools: list[dict[str, Any]] = []
         last_assistant_had_tool_calls = False
+        last_assistant_tc_msg: dict[str, Any] | None = None
+
         for msg in isolated:
             role = msg.get("role", "")
             if role == "tool":
-                if not last_assistant_had_tool_calls:
-                    logger.warning(
-                        "Stripping orphaned tool message (no preceding tool_calls)"
-                    )
-                    continue
-            last_assistant_had_tool_calls = (
-                role == "assistant" and bool(msg.get("tool_calls"))
+                if last_assistant_had_tool_calls:
+                    reordered.append(msg)
+                else:
+                    pending_orphan_tools.append(msg)
+            elif role == "assistant":
+                if msg.get("tool_calls"):
+                    last_assistant_had_tool_calls = True
+                    last_assistant_tc_msg = msg
+                    reordered.append(msg)
+                    if pending_orphan_tools:
+                        reordered.extend(pending_orphan_tools)
+                        pending_orphan_tools[:] = []
+                else:
+                    last_assistant_had_tool_calls = False
+                    if pending_orphan_tools:
+                        pending_orphan_tools[:] = []
+                    reordered.append(msg)
+            else:
+                reordered.append(msg)
+
+        if pending_orphan_tools and last_assistant_tc_msg:
+            logger.warning(
+                "Appending %d orphaned tool messages after last assistant+tool_calls",
+                len(pending_orphan_tools),
             )
-            validated.append(msg)
-        isolated = validated
+            idx = reordered.index(last_assistant_tc_msg) + 1
+            reordered[idx:idx] = pending_orphan_tools
+
+        isolated = reordered
 
         messages.extend(isolated)
 
