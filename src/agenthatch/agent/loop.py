@@ -56,10 +56,14 @@ class ConversationLoop:
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
 
-        response = self.llm.chat_with_tools(
-            messages=messages,
-            tools=tools,
-        )
+        try:
+            response = self.llm.chat_with_tools(
+                messages=messages,
+                tools=tools,
+            )
+        except Exception as e:
+            logger.error("LLM API call failed: %s", e)
+            return f"I encountered an error communicating with the model provider: {e}"
 
         for _ in range(self.MAX_TOOL_ROUNDS):
             if not response.has_tool_calls:

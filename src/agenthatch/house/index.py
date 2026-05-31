@@ -286,7 +286,7 @@ class SkillhouseIndex:
 
     def get_entry(self, skill_id: str) -> dict[str, Any] | None:
         """Return the full index entry for a skill, or None if not found."""
-        return self._data.get("entries", {}).get(skill_id)
+        return self._data.get("entries", {}).get(skill_id)  # type: ignore[no-any-return]
 
     def get_entry_path(self, skill_id: str) -> str | None:
         """Get the ahs_path for a skill by ID. Returns None if not found."""

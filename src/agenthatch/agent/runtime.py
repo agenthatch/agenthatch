@@ -170,6 +170,8 @@ class SkillAgent:
         # BUG-04-02: Dynamic max_tokens based on estimated input tokens
         requested_max = resolved["max_tokens"]
         estimated_input = self.ctx.estimate_input_tokens()
+        if not isinstance(estimated_input, int):
+            estimated_input = 0
         safe_max = max(MIN_GENERATION_TOKENS, requested_max - estimated_input)
         if safe_max < requested_max:
             logger.warning(
