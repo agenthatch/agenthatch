@@ -19,7 +19,7 @@ class TextSynthesisCap(BuiltinCapability):
         "required": ["text"],
     }
 
-    def execute(self, text: str = "", format: str = "summary") -> str:
+    def execute(self, text: str = "", format: str = "summary") -> str:  # type: ignore[override]
         lines = [line for line in text.split("\n") if line.strip()]
         word_count = len(text.split())
         if format == "bullets":

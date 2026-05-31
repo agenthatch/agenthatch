@@ -1,5 +1,7 @@
 """HTTP client builtin capability."""
 
+from typing import Any
+
 from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability
 
 
@@ -18,11 +20,11 @@ class HttpClientCap(BuiltinCapability):
         "required": ["method", "url"],
     }
 
-    def execute(
+    def execute(  # type: ignore[override]
         self,
         method: str = "GET",
         url: str = "",
-        headers: dict | None = None,
+        headers: dict[str, Any] | None = None,
         body: str | None = None,
     ) -> str:
         import httpx

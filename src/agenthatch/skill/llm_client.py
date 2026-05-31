@@ -158,9 +158,9 @@ class LLMClient:
             )
             return ToolCallResponse(text=text, tool_calls=[])
 
-        response = self._client.chat.completions.create(
+        response = self._client.chat.completions.create(  # type: ignore[call-overload]
             model=model or self._model,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             tools=tools,
             tool_choice=tool_choice,
             temperature=temperature,
@@ -233,7 +233,7 @@ class LLMClient:
         stream = self._client.chat.completions.create(
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
-            tools=tools,
+            tools=tools,  # type: ignore[arg-type]
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
@@ -243,7 +243,7 @@ class LLMClient:
         tc_accum: dict[int, dict[str, str]] = {}
 
         for event in stream:
-            delta = event.choices[0].delta if event.choices else None
+            delta = event.choices[0].delta if event.choices else None  # type: ignore[union-attr]
             if delta is None:
                 continue
 

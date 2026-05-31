@@ -15,7 +15,7 @@ class GeolocationCap(BuiltinCapability):
         "required": ["location"],
     }
 
-    def execute(self, location: str = "") -> str:
+    def execute(self, location: str = "") -> str:  # type: ignore[override]
         return (
             f"Geolocation resolution for '{location}' is not yet implemented. "
             "This capability requires a geocoding API key."

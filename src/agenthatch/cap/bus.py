@@ -68,17 +68,17 @@ class CapBus:
         cap = self.capabilities.get(tool_name)
         if cap and cap.executor:
             if hasattr(cap.executor, "execute"):
-                return cap.executor.execute(**arguments)
+                return str(cap.executor.execute(**arguments))
             if hasattr(cap.executor, "execute_script"):
                 script_name = arguments.get("script_name", "")
                 filtered_args = {k: v for k, v in arguments.items() if k != "script_name"}
-                return cap.executor.execute_script(
+                return str(cap.executor.execute_script(
                     script_name, **filtered_args
-                )
+                ))
 
         builtin = self.builtins.get(tool_name)
         if builtin:
-            return builtin.execute(**arguments)
+            return str(builtin.execute(**arguments))
 
         raise CapabilityNotFoundError(
             f"Capability '{tool_name}' is not registered. "

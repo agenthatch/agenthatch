@@ -5,6 +5,7 @@ abstract base. The BUILTIN_REGISTRY maps capability names to their classes.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class BuiltinCapability(ABC):
@@ -12,10 +13,10 @@ class BuiltinCapability(ABC):
     name: str = ""
     cap_type: str = ""
     description: str = ""
-    schema: dict = {}
+    schema: dict[str, Any] = {}
 
     @abstractmethod
-    def execute(self, **kwargs) -> str:
+    def execute(self, **kwargs: Any) -> str:
         """Execute the capability."""
         ...
 

@@ -17,7 +17,7 @@ class FileReaderCap(BuiltinCapability):
         "required": ["path"],
     }
 
-    def execute(self, path: str = "") -> str:
+    def execute(self, path: str = "") -> str:  # type: ignore[override]
         p = Path(path)
         if not p.exists():
             return f"Error: file '{path}' not found"
@@ -40,7 +40,7 @@ class FileWriterCap(BuiltinCapability):
         "required": ["path", "content"],
     }
 
-    def execute(self, path: str = "", content: str = "") -> str:
+    def execute(self, path: str = "", content: str = "") -> str:  # type: ignore[override]
         try:
             Path(path).write_text(content)
             return f"File written: {path} ({len(content)} chars)"

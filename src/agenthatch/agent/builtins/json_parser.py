@@ -18,7 +18,7 @@ class JsonParserCap(BuiltinCapability):
         "required": ["json_string"],
     }
 
-    def execute(self, json_string: str = "", query: str = "") -> str:
+    def execute(self, json_string: str = "", query: str = "") -> str:  # type: ignore[override]
         try:
             data = json.loads(json_string)
         except json.JSONDecodeError as e:

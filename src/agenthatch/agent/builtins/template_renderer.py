@@ -1,5 +1,7 @@
 """Template renderer builtin capability."""
 
+from typing import Any
+
 from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability
 
 
@@ -16,7 +18,7 @@ class TemplateRendererCap(BuiltinCapability):
         "required": ["template", "variables"],
     }
 
-    def execute(self, template: str = "", variables: dict | None = None) -> str:
+    def execute(self, template: str = "", variables: dict[str, Any] | None = None) -> str:  # type: ignore[override]
         if variables is None:
             variables = {}
         try:

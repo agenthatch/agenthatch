@@ -17,7 +17,7 @@ class BashRuntimeCap(BuiltinCapability):
         "required": ["command"],
     }
 
-    def execute(self, command: str = "") -> str:
+    def execute(self, command: str = "") -> str:  # type: ignore[override]
         try:
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -44,7 +44,7 @@ class PythonRuntimeCap(BuiltinCapability):
         "required": ["code"],
     }
 
-    def execute(self, code: str = "") -> str:
+    def execute(self, code: str = "") -> str:  # type: ignore[override]
         try:
             result = subprocess.run(
                 ["python3", "-c", code],

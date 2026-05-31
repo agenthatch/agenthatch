@@ -15,7 +15,7 @@ class WebSearchCap(BuiltinCapability):
         "required": ["query"],
     }
 
-    def execute(self, query: str = "") -> str:
+    def execute(self, query: str = "") -> str:  # type: ignore[override]
         return (
             f"Web search for '{query}' is not yet implemented. "
             "This capability requires an external search API key."
