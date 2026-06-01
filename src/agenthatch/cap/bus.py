@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from agenthatch.cap.marshal import fuzzy_match
 from agenthatch.exceptions import CapabilityNotFoundError
@@ -33,7 +33,7 @@ class CapBus:
     capabilities: dict[str, CapabilityRegistration] = field(default_factory=dict)
     builtins: dict[str, Any] = field(default_factory=dict)
     unavailable: set[str] = field(default_factory=set)
-    _external_handlers: dict[str, Callable[..., Any]] = field(default_factory=dict)
+    _external_handlers: dict[str, Callable[..., str]] = field(default_factory=dict)
 
     def register(
         self,
@@ -81,20 +81,21 @@ class CapBus:
 
         # DD-05-11: External handlers first (most specific)
         if tool_name in self._external_handlers:
-            return str(self._external_handlers[tool_name](**arguments))
+            return self._external_handlers[tool_name](**arguments)
 
         cap = self.capabilities.get(tool_name)
         if cap and cap.executor:
-            if hasattr(cap.executor, "execute"):
-                return str(cap.executor.execute(**arguments))
-            if hasattr(cap.executor, "execute_script"):
-                script_name = arguments.get("script_name", "")
+            executor: Any = cap.executor
+            if hasattr(executor, "execute"):
+                return str(executor.execute(**arguments))
+            if hasattr(executor, "execute_script"):
+                script_name = str(arguments.get("script_name", ""))
                 filtered_args = {k: v for k, v in arguments.items() if k != "script_name"}
-                return str(cap.executor.execute_script(
+                return str(executor.execute_script(
                     script_name, **filtered_args
                 ))
 
-        builtin = self.builtins.get(tool_name)
+        builtin: Any = self.builtins.get(tool_name)
         if builtin:
             return str(builtin.execute(**arguments))
 
@@ -204,11 +205,10 @@ class APITemplateExecutor:
     def build_url(self, **kwargs: Any) -> str:
         import string
         placeholders = [
-            t[1] for t in string.Formatter().parse(self._tpl.url)
-            if t[1] is not None
+            t[1] for t in string.Formatter().parse(str(self._tpl.url)) if t[1]
         ]
         filtered = {k: v for k, v in kwargs.items() if k in placeholders}
-        return cast(str, self._tpl.url.format(**filtered))
+        return str(self._tpl.url).format(**filtered)
 
     def build_headers(self) -> dict[str, str]:
         headers = dict(self._tpl.headers)
@@ -222,6 +222,6 @@ class APITemplateExecutor:
     def execute(self, **kwargs: Any) -> str:
         url = self.build_url(**kwargs)
         headers = self.build_headers()
-        return cast(str, self._http.execute(
+        return str(self._http.execute(
             method=self._tpl.method, url=url, headers=headers
         ))

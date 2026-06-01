@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from io import TextIOWrapper
 from typing import Any, cast
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class MCPClient:
     def connect_all(self) -> None:
         for sname, cfg in self._servers.items():
             try:
-                proc: subprocess.Popen[str] = subprocess.Popen(
+                proc = subprocess.Popen(
                     [cfg.command] + cfg.args,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -76,12 +76,12 @@ class MCPClient:
         self, proc: subprocess.Popen[str], request: dict[str, Any]
     ) -> dict[str, Any]:
         payload = json.dumps(request)
-        stdin = cast(TextIOWrapper, proc.stdin)
-        stdin.write(payload + "\n")
-        stdin.flush()
-        stdout = cast(TextIOWrapper, proc.stdout)
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        proc.stdin.write(payload + "\n")
+        proc.stdin.flush()
         while True:
-            line = stdout.readline()
+            line = proc.stdout.readline()
             if not line:
                 return {}
             try:
@@ -122,23 +122,21 @@ class MCPClient:
 
     def register_with_capbus(self, capbus: Any) -> None:
         """Register all MCP tools as external handlers on CapBus."""
-        from functools import partial
-
         for full_name, t in self._tools.items():
-            server_name = full_name.split("__")[1]
+            sname = full_name.split("__")[1]
+            tool_name = t.name
+
+            def make_handler(sn: str, tn: str) -> Callable[..., str]:
+                def handler(**kwargs: Any) -> str:
+                    return self.call_tool(sn, tn, kwargs)
+                return handler
+
             capbus.register_external_tool(
-                full_name,
-                t.input_schema,
-                partial(self._mcp_handler, server_name, t.name),
+                full_name, t.input_schema, make_handler(sname, tool_name)
             )
 
-    def _mcp_handler(
-        self, server_name: str, tool_name: str, **kwargs: Any
-    ) -> str:
-        return self.call_tool(server_name, tool_name, dict(kwargs))
-
     def disconnect_all(self) -> None:
-        for proc in self._processes.values():
+        for _sname, proc in self._processes.items():
             try:
                 proc.terminate()
                 proc.wait(timeout=5)
