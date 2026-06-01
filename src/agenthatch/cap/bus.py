@@ -6,8 +6,9 @@ Provides complete register/match/route/inject_builtin/list_tool_definitions.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from agenthatch.cap.marshal import fuzzy_match
 from agenthatch.exceptions import CapabilityNotFoundError
@@ -32,6 +33,7 @@ class CapBus:
     capabilities: dict[str, CapabilityRegistration] = field(default_factory=dict)
     builtins: dict[str, Any] = field(default_factory=dict)
     unavailable: set[str] = field(default_factory=set)
+    _external_handlers: dict[str, Callable[..., Any]] = field(default_factory=dict)
 
     def register(
         self,
@@ -56,6 +58,18 @@ class CapBus:
         if name in BUILTIN_REGISTRY:
             self.builtins[name] = BUILTIN_REGISTRY[name]()
 
+    def register_external_tool(
+        self, name: str, schema: dict[str, Any], handler: Callable[..., str]
+    ) -> None:
+        """Register an external tool (MCP or API template) with a handler.
+
+        The handler receives **kwargs and returns a string result.
+        """
+        self.capabilities[name] = CapabilityRegistration(
+            name=name, type="external", schema=schema, source_skill=""
+        )
+        self._external_handlers[name] = handler
+
     def match(self, required: str) -> CapabilityRegistration | None:
         """Match a requirement to a registered capability."""
         if required in self.capabilities:
@@ -64,6 +78,10 @@ class CapBus:
 
     def route(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Execute routing: tool_call → capability execution."""
+
+        # DD-05-11: External handlers first (most specific)
+        if tool_name in self._external_handlers:
+            return str(self._external_handlers[tool_name](**arguments))
 
         cap = self.capabilities.get(tool_name)
         if cap and cap.executor:
@@ -174,3 +192,36 @@ def _json_type(value: Any) -> str | dict[str, Any]:
         return {"type": "object", "properties": obj_props}
 
     return TYPE_MAP.get(str(value).lower(), "string")
+
+
+class APITemplateExecutor:
+    """Executes API templates via the http_client builtin."""
+
+    def __init__(self, template: Any, http_client: Any):
+        self._tpl = template
+        self._http = http_client
+
+    def build_url(self, **kwargs: Any) -> str:
+        import string
+        placeholders = [
+            t[1] for t in string.Formatter().parse(self._tpl.url)
+            if t[1] is not None
+        ]
+        filtered = {k: v for k, v in kwargs.items() if k in placeholders}
+        return cast(str, self._tpl.url.format(**filtered))
+
+    def build_headers(self) -> dict[str, str]:
+        headers = dict(self._tpl.headers)
+        if self._tpl.auth_env_var:
+            import os
+            token = os.environ.get(self._tpl.auth_env_var, "")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    def execute(self, **kwargs: Any) -> str:
+        url = self.build_url(**kwargs)
+        headers = self.build_headers()
+        return cast(str, self._http.execute(
+            method=self._tpl.method, url=url, headers=headers
+        ))

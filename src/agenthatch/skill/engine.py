@@ -20,6 +20,7 @@ The Orchestrator implements a 4-level error handling strategy:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -39,6 +40,8 @@ from agenthatch.skill.prompts import (
     INTERFACE_HARNESS_PERSONA,
 )
 from agenthatch.skill.spec import (
+    AgentConfig,
+    AgentRuntimeConfig,
     AHSSpec,
     BaseAndInstructionsOutput,
     BaseSpec,
@@ -49,6 +52,7 @@ from agenthatch.skill.spec import (
     Instructions,
     IntentOutput,
     InterfaceOutput,
+    Resources,
     _coerce_base_data,
 )
 
@@ -732,6 +736,21 @@ class Orchestrator:
         # Step 6: Build AHSSpec from Harness E assembly output
         try:
             ahs_dict = outputs["E"].result.get("ahs_spec", {})
+
+            # ── DD-05-08: Wire resources into ahs_dict ──
+            ahs_dict["resources"] = resources
+
+            # ── DD-05-10: Inject raw_body into instructions ──
+            if "instructions" not in ahs_dict:
+                ahs_dict["instructions"] = {}
+            ahs_dict["instructions"]["raw_body"] = context.body
+
+            # ── DD-05-14: API template detection ──
+            api_templates = self._detect_api_templates(context.body)
+            if "interface" not in ahs_dict:
+                ahs_dict["interface"] = {}
+            ahs_dict["interface"]["api_templates"] = api_templates
+
             ahs_spec = self._dict_to_ahspec(ahs_dict)
 
             # Attach confidence report and traces
@@ -824,6 +843,39 @@ class Orchestrator:
 
         return {"scripts": scripts, "references": references, "assets": assets}
 
+    _CURL_PATTERN = re.compile(
+        r'curl\s+(?:-[a-zA-Z]+\s+)*'
+        r'(?:["\'])?(https?://[^\s"\']+)(?:["\'])?'
+    )
+
+    def _detect_api_templates(self, body: str) -> list[dict[str, Any]]:
+        """Detect curl commands in SKILL.md body and extract API templates."""
+        templates: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+
+        for match in self._CURL_PATTERN.finditer(body):
+            url = match.group(1)
+
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            context_start = max(0, match.start() - 200)
+            context_end = min(len(body), match.end() + 200)
+            context = body[context_start:context_end]
+
+            method = "GET"
+            if "-d " in context or "--data " in context or "--data-raw " in context:
+                method = "POST"
+
+            templates.append({
+                "url": url,
+                "context": context.strip(),
+                "method": method,
+            })
+
+        return templates
+
     def _dict_to_ahspec(self, ahs_dict: dict[str, Any]) -> AHSSpec:
         """Convert raw dict from Harness E into validated AHSSpec."""
         from agenthatch.skill.spec import (
@@ -840,11 +892,20 @@ class Orchestrator:
         instructions = Instructions(**ahs_dict.get("instructions", {}))
         composition = Composition(**ahs_dict.get("composition", {})) if ahs_dict.get("composition") else Composition()  # noqa: E501
 
+        # ── DD-05-12: Agent section stub ──
+        agent_config = ahs_dict.get("agent", {})
+        if isinstance(agent_config, dict) and agent_config:
+            agent = AgentConfig(runtime=AgentRuntimeConfig(**agent_config))
+        else:
+            agent = None
+
         return AHSSpec(
             identity=identity,
             intent=intent,
             interface=interface,
             base=base,
             instructions=instructions,
+            resources=Resources(**ahs_dict.get("resources", {})),
             composition=composition,
+            agent=agent,
         )

@@ -48,16 +48,33 @@ def _handle_command(user_input: str, agent: Any) -> str | None:
         return f"[warn]Unknown command: {cmd}[/warn]. Type /help for available commands."
 
 
+def _handle_progress(user_input: str, agent: Any) -> str | None:
+    """Handle /progress command for batch tracking."""
+    if not user_input.startswith("/progress"):
+        return None
+
+    parts = user_input.split()
+    if len(parts) == 2:
+        agent.ctx.set_batch_scope(int(parts[1]))
+        return f"[ok]Batch scope set: {parts[1]} items[/ok]"
+    elif len(parts) == 3:
+        agent.ctx._batch_current = int(parts[1])
+        agent.ctx._batch_total = int(parts[2])
+        return f"[ok]Progress: {parts[1]}/{parts[2]}[/ok]"
+    return "[warn]Usage: /progress <total> or /progress <current> <total>[/warn]"
+
+
 def _render_help(agent: Any) -> str:
     lines = [
         f"[bold bright_blue]{agent.spec.identity.display_name}[/]"
         f" — {agent.spec.intent.summary or 'No summary'}",
         "",
         "[bold]Available commands:[/bold]",
-        "  [bold cyan]/help[/]    Show this help",
-        "  [bold cyan]/clear[/]   Clear conversation history",
-        "  [bold cyan]/status[/]  Show provider/model info",
-        "  [bold cyan]/quit[/]    Exit (or Ctrl+D)",
+        "  [bold cyan]/help[/]      Show this help",
+        "  [bold cyan]/clear[/]     Clear conversation history",
+        "  [bold cyan]/status[/]    Show provider/model info",
+        "  [bold cyan]/progress[/]  Set batch scope (e.g. /progress 100)",
+        "  [bold cyan]/quit[/]      Exit (or Ctrl+D)",
     ]
     return "\n".join(lines)
 
@@ -185,6 +202,11 @@ def run_command(
             cmd_result = _handle_command(user_input, agent)
             if cmd_result is not None:
                 console.print(cmd_result)
+                continue
+
+            progress_result = _handle_progress(user_input, agent)
+            if progress_result is not None:
+                console.print(progress_result)
                 continue
 
             console.print("")

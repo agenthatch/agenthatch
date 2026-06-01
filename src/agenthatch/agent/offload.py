@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -47,3 +47,41 @@ class StateManager:
             return None
         data = json.loads(path.read_text())
         return CompactSummary(**data)
+
+
+@dataclass
+class Checkpoint:
+    session_id: str
+    saved_at: str = ""
+    turn_count: int = 0
+    history: list[dict[str, Any]] = field(default_factory=list)
+    summary: dict[str, Any] | None = None
+    compact_failures: int = 0
+    cb_state: str = "closed"
+    cb_failures: int = 0
+
+
+class CheckpointManager:
+    """Saves and restores conversation state."""
+
+    def __init__(self, session_dir: Path):
+        self._dir = session_dir
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._path = self._dir / "checkpoint.json"
+
+    def save(self, checkpoint: Checkpoint) -> None:
+        checkpoint.saved_at = datetime.now().isoformat()
+        tmp = self._dir / "checkpoint.tmp.json"
+        with open(tmp, "w") as f:
+            json.dump(asdict(checkpoint), f, indent=2, default=str)
+        tmp.rename(self._path)
+
+    def load(self) -> Checkpoint | None:
+        if not self._path.exists():
+            return None
+        with open(self._path) as f:
+            data = json.load(f)
+        return Checkpoint(**data)
+
+    def exists(self) -> bool:
+        return self._path.exists()

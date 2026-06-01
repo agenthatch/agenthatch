@@ -37,6 +37,8 @@ class ContextManager:
     MAX_TOOL_RESULTS_FULL: int = 10
     TOOL_RESULT_SUMMARY_CHARS: int = 200
 
+    ANCHOR_RULES: list[str] = []
+
     def __init__(self, ahs_spec: AHSSpec):
         self.spec = ahs_spec
         self.history: list[dict[str, Any]] = []
@@ -48,6 +50,10 @@ class ContextManager:
         self._state_manager: Any = None
         self._llm: Any = None
         self.summary: CompactSummary | None = None
+        self._turn_count: int = 0
+        self._batch_total: int = 0
+        self._batch_current: int = 0
+        self._capbus: Any = None
 
     def _apply_compact_config(self) -> None:
         if self.compact_config:
@@ -123,16 +129,99 @@ class ContextManager:
             if s.plan_required:
                 parts.append("\nAlways create a plan before executing.")
 
-        if self.spec.instructions.output_template:
+        # ── DD-05-10: Operational guidance from raw_body ──
+        if self.spec.instructions.raw_body:
+            body = self.spec.instructions.raw_body
+            if len(body) > 3000:
+                body = body[:3000] + "\n\n... (truncated for context window)"
+            parts.append("\n## Operational Guidance")
+            parts.append(body)
+
+        # ── DD-05-09: Resource summary ──
+        if self.spec.resources.references:
+            parts.append("\n## Reference Documents")
             parts.append(
-                "\n## Output Format (MANDATORY - do not deviate)"
+                "These documents contain domain knowledge. "
+                "Read them with the read_file tool when you need "
+                "detailed information."
             )
+            for ref in self.spec.resources.references:
+                parts.append(
+                    f"- {ref.get('name', ref.get('path', 'unknown'))}"
+                )
+        if self.spec.resources.scripts:
+            parts.append("\n## Available Scripts")
+            parts.append(
+                "These scripts are available via run_skill_script(). "
+                "Call them by script_name."
+            )
+            for script in self.spec.resources.scripts:
+                parts.append(
+                    f"- run_skill_script("
+                    f'script_name="{script.get("name", "")}"'
+                    f")"
+                )
+
+        # ── DD-05-21: External tool summary ──
+        if self._capbus is not None:
+            external_tools = []
+            for name, cap in self._capbus.capabilities.items():
+                if cap.type == "external":
+                    desc = cap.schema.get("description", name)
+                    external_tools.append(f"- {name}: {desc}")
+            if external_tools:
+                parts.append("\n## Available External Tools")
+                parts.append(
+                    "These tools connect to external services. "
+                    "Use them to gather data, query APIs, and interact "
+                    "with infrastructure."
+                )
+                parts.extend(external_tools)
+
+        if self.spec.instructions.output_template:
+            parts.append("")
+            parts.append(
+                "## Output Format (MANDATORY — enforced every turn)"
+            )
+            # ── DD-05-19: Template guard — reinforced every turn ──
+            if self.summary is not None:
+                parts.append(
+                    "This is a long-running session. "
+                    "You MUST still follow the output template below. "
+                    "Do not drift into free-form text."
+                )
             parts.append(
                 "You MUST format your final answer EXACTLY according "
                 "to the template below. Do not add, remove, or reorder "
                 "fields. Replace {placeholders} with actual values."
             )
             parts.append(f"\n{self.spec.instructions.output_template}")
+
+        # ── DD-05-18: Anchor rules survive compaction ──
+        should_inject = self.summary is not None or (
+            self._turn_count > 0 and self._turn_count % 20 == 0
+        )
+        if self.ANCHOR_RULES and should_inject:
+            parts.append("\n## Core Rules (NEVER forget)")
+            parts.append(
+                "The following rules are your foundational constraints. "
+                "They were established at the start of this session and "
+                "MUST be followed regardless of context compaction."
+            )
+            for rule in self.ANCHOR_RULES:
+                parts.append(f"- {rule}")
+
+        # ── DD-05-20: Batch progress gating ──
+        if self._batch_total > 0:
+            parts.append("")
+            parts.append("## Progress Tracking")
+            parts.append(
+                f"You are processing a batch of {self._batch_total} items. "
+                f"Current progress: {self._batch_current}/{self._batch_total}. "
+                "After completing each item, clearly state your progress "
+                "and continue to the next item. Stop when all items are done. "
+                "Do NOT repeat already-completed items."
+            )
 
         return "\n".join(parts)
 
@@ -357,6 +446,13 @@ class ContextManager:
             prompt += self.summary.to_text()
             prompt += "\n\nUpdate this summary to include the recent conversation below."
 
+        # ── DD-05-18: Inject anchor rules into compact prompt ──
+        if self.ANCHOR_RULES:
+            prompt += (
+                "\n\nIMPORTANT: Preserve these rules in your summary: "
+                + "; ".join(self.ANCHOR_RULES)
+            )
+
         prompt += "\n\n## Conversation to Compact\n"
 
         messages: list[dict[str, Any]] = [
@@ -408,3 +504,10 @@ class ContextManager:
             raise json.JSONDecodeError("No valid JSON found in response", text, 0)
 
         raise RuntimeError("No LLM client available for compaction")
+
+    def set_batch_scope(self, total: int) -> None:
+        self._batch_total = total
+        self._batch_current = 0
+
+    def advance_batch(self) -> None:
+        self._batch_current += 1

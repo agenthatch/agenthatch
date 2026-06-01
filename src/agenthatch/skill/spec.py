@@ -95,11 +95,36 @@ class Capability(BaseModel):
     input_schema: dict[str, Any] = {}
 
 
+class MCPServerRef(BaseModel):
+    """Reference to an MCP server."""
+    name: str
+    config: dict[str, Any] = {}
+
+
+class APIParam(BaseModel):
+    """API template parameter."""
+    name: str
+    type: str
+    required: bool = True
+
+
+class APITemplate(BaseModel):
+    """API template auto-detected from curl commands."""
+    name: str
+    url: str
+    method: str = "GET"
+    params: list[APIParam] = []
+    headers: dict[str, str] = {}
+    auth_env_var: str | None = None
+
+
 class Interface(BaseModel):
-    """Skill interface — provides, requires, compatible_with."""
+    """Skill interface — provides, requires, compatible_with, MCP, API templates."""
     provides: list[Capability]
     requires: list[Capability] = []
     compatible_with: list[str] = []
+    mcp_servers: list[MCPServerRef] = []
+    api_templates: list[APITemplate] = []
 
 
 class EnvVar(BaseModel):
@@ -125,11 +150,12 @@ class Safety(BaseModel):
 
 
 class Instructions(BaseModel):
-    """Skill instructions — workflow, rules, safety."""
+    """Skill instructions — workflow, rules, safety, output template."""
     workflow: list[WorkflowStep] = []
     rules: list[str] = []
     safety: Safety = Safety()
     output_template: str | None = None
+    raw_body: str | None = None
 
 
 class BaseSpec(BaseModel):

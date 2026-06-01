@@ -15,12 +15,14 @@ from typing import Any
 
 import yaml
 
+from agenthatch.agent.compact import CompactSummary
 from agenthatch.agent.context import ContextManager
 from agenthatch.agent.hooks import HooksManager
 from agenthatch.agent.loop import ConversationLoop
-from agenthatch.agent.offload import StateManager
+from agenthatch.agent.mcp import MCPClient, MCPServerConfig
+from agenthatch.agent.offload import CheckpointManager, StateManager
 from agenthatch.base.sandbox import Sandbox
-from agenthatch.cap.bus import CapBus
+from agenthatch.cap.bus import APITemplateExecutor, CapBus
 from agenthatch.house.resolver import is_builtin
 from agenthatch.providers import ProviderFeatures, get_default_provider, get_provider
 from agenthatch.skill.llm_client import LLMClient
@@ -222,6 +224,9 @@ class SkillAgent:
 
     def _assemble(self) -> None:
         """Assemble capabilities from AHSSPEC."""
+        # ── DD-05-18: Extract anchor rules from instructions.rules ──
+        self.ctx.ANCHOR_RULES = list(self.spec.instructions.rules)
+
         skill_brick = SkillBrick(self.spec, self.skill_dir, self.sandbox)
 
         for cap in self.spec.interface.provides:
@@ -264,6 +269,56 @@ class SkillAgent:
             timeout=self.spec.base.timeout,
             env={e.name: e.description for e in self.spec.base.env},
         )
+
+        # ── DD-05-11: MCP integration ──
+        self._mcp_client = MCPClient()
+        for server_ref in self.spec.interface.mcp_servers:
+            config = MCPServerConfig(
+                command=server_ref.config.get("command", ""),
+                args=server_ref.config.get("args", []),
+                env=server_ref.config.get("env", {}),
+                transport=server_ref.config.get("transport", "stdio"),
+            )
+            self._mcp_client.add_server(server_ref.name, config)
+        self._mcp_client.connect_all()
+        self._mcp_client.register_with_capbus(self.capbus)
+
+        # ── DD-05-14: API template registration ──
+        http_client = self.capbus.builtins.get("http_client")
+        for tpl in self.spec.interface.api_templates:
+            if http_client is not None:
+                executor = APITemplateExecutor(tpl, http_client)
+                self.capbus.register_external_tool(
+                    f"api__{tpl.name}",
+                    {"type": "object", "properties": {
+                        p.name: {"type": p.type} for p in tpl.params
+                    }},
+                    executor.execute,
+                )
+
+        # ── DD-05-17: Checkpoint restore ──
+        self._checkpoint_mgr = CheckpointManager(
+            Path.home() / ".agenthatch" / "sessions" / self.spec.identity.id
+        )
+        if self._checkpoint_mgr.exists():
+            cp = self._checkpoint_mgr.load()
+            if cp:
+                self.ctx.history = cp.history
+                if cp.summary:
+                    self.ctx.summary = CompactSummary(**cp.summary)
+                self.ctx._consecutive_compact_failures = cp.compact_failures
+                self.ctx._turn_count = cp.turn_count
+                self.loop._cb_state = cp.cb_state
+                self.loop._cb_failures = cp.cb_failures
+                logger.info(
+                    "Restored checkpoint: %d turns, session %s",
+                    cp.turn_count, cp.session_id,
+                )
+
+        self.loop._checkpoint_mgr = self._checkpoint_mgr
+
+        # ── DD-05-21: CapBus wiring to context ──
+        self.ctx._capbus = self.capbus
 
         if self.spec.instructions.output_template:
             logger.info(
