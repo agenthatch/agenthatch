@@ -22,7 +22,7 @@ try:
     import tomllib
 except ImportError:
     try:
-        import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+        import tomli as tomllib  # type: ignore[no-redef]
     except ImportError:
         tomllib = None  # type: ignore[assignment]
 
@@ -259,8 +259,9 @@ def _resolve_custom_provider(name: str, config: dict[str, Any]) -> ProviderInfo:
         )
     features_cfg = custom_section.get("features", {})
     if "supports_reasoning_content" not in features_cfg:
-        if _probe_reasoning_content(
-            api_key=resolve_api_key(name),
+        api_key = custom_section.get("api_key", "")
+        if api_key and _probe_reasoning_content(
+            api_key=api_key,
             base_url=custom_section.get("base_url", ""),
             model=custom_section.get("default_model", ""),
         ):
