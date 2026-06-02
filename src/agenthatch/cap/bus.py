@@ -34,6 +34,7 @@ class CapBus:
     builtins: dict[str, Any] = field(default_factory=dict)
     unavailable: set[str] = field(default_factory=set)
     _external_handlers: dict[str, Callable[..., str]] = field(default_factory=dict)
+    _external_schemas: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def register(
         self,
@@ -65,10 +66,8 @@ class CapBus:
 
         The handler receives **kwargs and returns a string result.
         """
-        self.capabilities[name] = CapabilityRegistration(
-            name=name, type="external", schema=schema, source_skill=""
-        )
         self._external_handlers[name] = handler
+        self._external_schemas[name] = schema
 
     def match(self, required: str) -> CapabilityRegistration | None:
         """Match a requirement to a registered capability."""
@@ -109,41 +108,35 @@ class CapBus:
         self.unavailable.add(name)
 
     def list_tool_definitions(self) -> list[dict[str, Any]]:
-        """Generate OpenAI function calling tool definitions."""
-        tools: list[dict[str, Any]] = []
-        for cap in self.capabilities.values():
-            schema = cap.schema
-            if not schema.get("type"):
-                properties: dict[str, Any] = {}
-                for k, v in schema.items():
-                    result = _json_type(v)
-                    if isinstance(result, dict):
-                        properties[k] = result
-                    else:
-                        properties[k] = {"type": result}
-                schema = {
-                    "type": "object",
-                    "properties": properties,
-                    "required": list(schema.keys()),
-                }
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": cap.name,
-                    "description": f"[{cap.type}] from {cap.source_skill}",
-                    "parameters": schema,
-                },
-            })
-        for name, builtin in self.builtins.items():
-            tools.append({
+        """Return LLM-visible tool definitions.
+
+        Only builtins and external handlers are exposed.
+        Capability declarations (provides) are metadata-only.
+        """
+        definitions: list[dict[str, Any]] = []
+
+        for name, cap in self.builtins.items():
+            schema = getattr(cap, "schema", {})
+            definitions.append({
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": f"[builtin] {builtin.__class__.__name__}",
-                    "parameters": builtin.schema,
+                    "description": getattr(cap, "description", ""),
+                    "parameters": schema,
                 },
             })
-        return tools
+
+        for name, schema in self._external_schemas.items():
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": f"External tool: {name}",
+                    "parameters": schema,
+                },
+            })
+
+        return definitions
 
 
 def _json_type(value: Any) -> str | dict[str, Any]:

@@ -54,6 +54,16 @@ class SkillBrick:
                     self._scripts[step.script] = p
                     self._script_steps[step.script] = step.description
 
+        for script_entry in spec.resources.scripts:
+            script_name = script_entry.get("name", "")
+            if not script_name:
+                continue
+            script_path = skill_dir / "scripts" / script_name
+            if not script_path.exists():
+                script_path = skill_dir / script_name
+            if script_path.exists():
+                self._scripts[script_name] = script_path
+
     def execute_script(self, script_name: str = "", **kwargs: Any) -> str:
         """Run the script specified by LLM via run_skill_script tool."""
         script = self._scripts.get(script_name)
@@ -102,6 +112,9 @@ class SkillAgent:
         self.spec = ahs_spec
         self.skill_dir = skill_dir
         self.ctx = ContextManager(ahs_spec)
+        self.ctx._skill_dir = skill_dir
+        self.ctx._rich_prompt = False
+        self._rich_prompt: bool = False
 
         # ── v0.5: Apply per-skill compact config ──
         agent_cfg = self.spec.agent

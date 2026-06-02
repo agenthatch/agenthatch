@@ -92,10 +92,18 @@ def _format_file_contents_for_harness(
 # ─────────────────────────────────────────────────────────────────────────
 
 MODEL_TIER_MAP: dict[str, dict[str, str]] = {
-    "pure_instruction": {"A": "small", "B": "small", "C": "large", "D": "skip", "E": "small"},
-    "script_driven": {"A": "small", "B": "small", "C": "large", "D": "large", "E": "small"},
-    "integration": {"A": "small", "B": "large", "C": "large", "D": "large", "E": "small"},
-    "knowledge": {"A": "small", "B": "large", "C": "large", "D": "small", "E": "small"},
+    "pure_instruction": {
+        "A": "small", "B": "small", "C": "large", "D": "skip", "E": "small", "F": "small",
+    },
+    "script_driven": {
+        "A": "small", "B": "small", "C": "large", "D": "large", "E": "small", "F": "small",
+    },
+    "integration": {
+        "A": "small", "B": "large", "C": "large", "D": "large", "E": "small", "F": "small",
+    },
+    "knowledge": {
+        "A": "small", "B": "large", "C": "large", "D": "small", "E": "small", "F": "small",
+    },
 }
 
 
@@ -609,6 +617,41 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Harness F: infer_mcp_servers
+# ─────────────────────────────────────────────────────────────────────────
+
+class InferMCPServersHarness(AgentHarness):
+    """Harness F: Detect MCP server dependencies from skill body."""
+
+    def run(self, **inputs: object) -> HarnessOutput:
+        body = str(inputs.get("body", ""))
+        mcp_servers: list[dict[str, Any]] = []
+        if not body:
+            return HarnessOutput(
+                result={"mcp_servers": mcp_servers},
+                confidence=1.0,
+                reasoning_trace=["no body, skipping"],
+                self_check_passed=True,
+            )
+
+        mcp_pattern = re.compile(r'mcp__(\w+)__')
+        server_names = set(mcp_pattern.findall(body))
+
+        for sname in sorted(server_names):
+            mcp_servers.append({
+                "name": sname,
+                "config": {"transport": "auto"},
+            })
+
+        return HarnessOutput(
+            result={"mcp_servers": mcp_servers},
+            confidence=0.9,
+            reasoning_trace=[f"detected {len(mcp_servers)} MCP servers"],
+            self_check_passed=True,
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Orchestrator
 
 class Orchestrator:
@@ -733,6 +776,15 @@ class Orchestrator:
             from agenthatch.skill.validate import validate_and_repair
             return validate_and_repair({}, outputs, harnesses, context)
 
+        # Step 5b: Infer MCP servers (F)
+        if tier_map.get("F") != "skip":
+            logger.info("Running harness F: infer_mcp_servers")
+            outputs["F"] = harnesses["F"].run(
+                body=context.body,
+                references=resources.get("references", []),
+                api_templates=None,
+            )
+
         # Step 6: Build AHSSpec from Harness E assembly output
         try:
             ahs_dict = outputs["E"].result.get("ahs_spec", {})
@@ -751,6 +803,19 @@ class Orchestrator:
                 ahs_dict["interface"] = {}
             ahs_dict["interface"]["api_templates"] = api_templates
 
+            # ── DD-05-25: Merge MCP servers from Harness F ──
+            mcp_servers: list[dict[str, Any]] = []
+            if "F" in outputs:
+                f_output: Any = outputs["F"]
+                mcp_servers = (
+                    f_output.result.get("mcp_servers", [])
+                    if hasattr(f_output, "result") else []
+                )
+            if mcp_servers:
+                if "interface" not in ahs_dict:
+                    ahs_dict["interface"] = {}
+                ahs_dict["interface"]["mcp_servers"] = mcp_servers
+
             ahs_spec = self._dict_to_ahspec(ahs_dict)
 
             # Attach confidence report and traces
@@ -759,7 +824,7 @@ class Orchestrator:
 
             if confidence_report:
                 ahs_spec.confidence_report = ConfidenceReport(**confidence_report)
-            ahs_spec.harness_traces = [outputs[k] for k in ["A", "B", "C", "D", "E"] if k in outputs]  # noqa: E501
+            ahs_spec.harness_traces = [outputs[k] for k in ["A", "B", "C", "D", "E", "F"] if k in outputs]  # noqa: E501
 
             return ahs_spec, outputs
         except Exception as e:
@@ -807,6 +872,7 @@ class Orchestrator:
         c_client, c_model = _resolve("C")
         d_client, d_model = _resolve("D")
         e_client, e_model = _resolve("E")
+        f_client, f_model = _resolve("F")
 
         return {
             "A": ExtractIdentityHarness(name="extract_identity", client=a_client, model=a_model),
@@ -814,6 +880,7 @@ class Orchestrator:
             "C": InferInterfaceHarness(name="infer_interface", client=c_client, model=c_model),
             "D": DetectBaseHarness(name="detect_base_and_instructions", client=d_client, model=d_model),  # noqa: E501
             "E": AssembleHarness(name="assemble_and_validate", client=e_client, model=e_model),
+            "F": InferMCPServersHarness(name="infer_mcp_servers", client=f_client, model=f_model),
         }
 
     def _build_resources(self, manifest: FileManifest) -> dict[str, list[dict[str, str]]]:
@@ -848,6 +915,23 @@ class Orchestrator:
         r'(?:["\'])?(https?://[^\s"\']+)(?:["\'])?'
     )
 
+    @staticmethod
+    def _derive_api_name(url: str, method: str) -> str:
+        """Derive a human-readable name from URL path for API template."""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(path_parts) >= 3:
+            name = "_".join(path_parts[-3:])
+        elif path_parts:
+            name = "_".join(path_parts[-2:])
+        else:
+            name = parsed.netloc.replace(".", "_")
+        # Clean up non-alphanumeric
+        import re as _re
+        name = _re.sub(r'[^a-zA-Z0-9_]', '_', name)
+        return f"{method.lower()}_{name}"[:50]
+
     def _detect_api_templates(self, body: str) -> list[dict[str, Any]]:
         """Detect curl commands in SKILL.md body and extract API templates."""
         templates: list[dict[str, Any]] = []
@@ -869,6 +953,7 @@ class Orchestrator:
                 method = "POST"
 
             templates.append({
+                "name": self._derive_api_name(url, method),
                 "url": url,
                 "context": context.strip(),
                 "method": method,

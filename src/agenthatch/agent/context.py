@@ -24,6 +24,45 @@ from agenthatch.skill.spec import AHSSpec
 logger = logging.getLogger(__name__)
 
 
+def _extract_balanced_json(text: str) -> list[str]:
+    r"""Extract balanced JSON objects from text using brace-depth counting.
+
+    Unlike re.findall(r'\{[\s\S]*?\}', text), this correctly handles
+    nested objects, arrays, and strings containing braces.
+    """
+    results: list[str] = []
+    depth = 0
+    start = -1
+    in_string = False
+    escape = False
+
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start >= 0:
+                results.append(text[start:i + 1])
+                start = -1
+        elif depth < 0:
+            depth = 0
+
+    return results
+
+
 class ContextManager:
     """Constructs system prompt and manages conversation history window."""
 
@@ -38,6 +77,7 @@ class ContextManager:
     TOOL_RESULT_SUMMARY_CHARS: int = 200
 
     ANCHOR_RULES: list[str] = []
+    _skill_dir: Path | None = None
 
     def __init__(self, ahs_spec: AHSSpec):
         self.spec = ahs_spec
@@ -54,6 +94,7 @@ class ContextManager:
         self._batch_total: int = 0
         self._batch_current: int = 0
         self._capbus: Any = None
+        self._rich_prompt: bool = False
 
     def _apply_compact_config(self) -> None:
         if self.compact_config:
@@ -67,7 +108,7 @@ class ContextManager:
                 "min_savings_ratio", self.COMPACT_MIN_SAVINGS_RATIO
             )
 
-    def build_system_prompt(self) -> str:
+    def build_system_prompt(self, rich: bool = False) -> str:
         """Build system prompt from AHSSPEC with domain persona injection."""
         parts: list[str] = []
 
@@ -223,6 +264,16 @@ class ContextManager:
                 "Do NOT repeat already-completed items."
             )
 
+        # ── DD-05-38: Rich prompt mode — reference summaries ──
+        if rich and self.spec.resources.references and self._skill_dir:
+            parts.append("\n## Reference Summaries")
+            for ref in self.spec.resources.references[:5]:
+                ref_path = ref.get("name", "")
+                ref_file = self._skill_dir / ref_path
+                if ref_file.exists():
+                    content = ref_file.read_text()[:500]
+                    parts.append(f"\n### {ref_path}\n{content}")
+
         return "\n".join(parts)
 
     def build_messages(self, user_input: str) -> list[dict[str, Any]]:
@@ -232,7 +283,7 @@ class ContextManager:
         TOOL_RESULT_SUMMARY_CHARS to prevent prompt bloat.
         """
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.build_system_prompt()}
+            {"role": "system", "content": self.build_system_prompt(rich=self._rich_prompt)}
         ]
         recent = self.history[-self.max_history_turns * 2:]
 
@@ -490,8 +541,8 @@ class ContextManager:
                 temperature=0.1,
                 max_tokens=1000,
             )
-            # Try multiple extraction strategies: last JSON block first (most likely)
-            blocks = re.findall(r'\{[\s\S]*?\}', text)
+            # ── DD-05-40: Brace-balanced extraction (replaces non-greedy regex) ──
+            blocks = _extract_balanced_json(text)
             if blocks:
                 blocks.sort(key=lambda b: -len(b))
                 for block in blocks[:3]:
@@ -501,6 +552,15 @@ class ContextManager:
                             return CompactSummary(**data)
                     except (json.JSONDecodeError, TypeError):
                         continue
+            # Fall back to regex if brace-balancing found nothing
+            regex_blocks = re.findall(r'\{[\s\S]*?\}', text)
+            for block in regex_blocks[:3]:
+                try:
+                    data = json.loads(block)
+                    if isinstance(data, dict) and "session_intent" in data:
+                        return CompactSummary(**data)
+                except (json.JSONDecodeError, TypeError):
+                    continue
             raise json.JSONDecodeError("No valid JSON found in response", text, 0)
 
         raise RuntimeError("No LLM client available for compaction")

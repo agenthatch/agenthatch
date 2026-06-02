@@ -16,12 +16,10 @@ from __future__ import annotations
 
 INFRASTRUCTURE_CATALOG: dict[str, list[str]] = {
     "builtin_transport": ["http_client"],
-    "builtin_io": ["file_reader", "file_writer", "data_loader"],
-    "builtin_runtime": ["python3_runtime", "bash_runtime", "node_runtime"],
-    "builtin_tool": ["aws_cli", "docker_cli", "git_cli"],
-    "builtin_connector": ["database_connection"],
-    "builtin_utility": ["json_parser", "language_detector", "diff_viewer"],
-    "builtin_formatter": ["text_template", "template_renderer"],
+    "builtin_io": ["file_reader", "file_writer"],
+    "builtin_runtime": ["python3_runtime", "bash_runtime"],
+    "builtin_utility": ["json_parser"],
+    "builtin_formatter": ["template_renderer"],
     "builtin_reasoning": ["web_search", "text_synthesis"],
     "builtin_service": ["geolocation"],
 }

@@ -12,6 +12,7 @@ Priority chain (highest to lowest):
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -136,6 +137,80 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
 
 BUILTIN_PROVIDER_NAMES: frozenset[str] = frozenset(BUILTIN_PROVIDERS.keys())
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Provider capability probing
+# ---------------------------------------------------------------------------
+
+
+def _probe_reasoning_content(api_key: str, base_url: str, model: str) -> bool:
+    """Probe whether provider returns reasoning_content with empty content."""
+    try:
+        import openai
+
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=10.0)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Say hi in one word."}],
+            max_tokens=20,
+        )
+        msg = resp.choices[0].message
+        content = getattr(msg, "content", "")
+        reasoning = getattr(msg, "reasoning_content", None)
+        return bool(not content and reasoning)
+    except Exception:
+        return False
+
+
+def _probe_provider_capabilities(
+    api_key: str, base_url: str, model: str
+) -> ProviderFeatures:
+    """Probe a custom provider to auto-detect capabilities."""
+    features = ProviderFeatures()
+
+    try:
+        import openai
+
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=10.0)
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Say hi."}],
+            max_tokens=5,
+        )
+        msg = resp.choices[0].message
+        if not getattr(msg, "content", "") and getattr(msg, "reasoning_content", None):
+            features = ProviderFeatures(
+                supports_reasoning_content=True,
+                supports_tools=features.supports_tools,
+                supports_stream_tools=features.supports_stream_tools,
+                supports_json_mode=features.supports_json_mode,
+            )
+
+        try:
+            client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "test"}],
+                tools=[{"type": "function", "function": {
+                    "name": "test", "parameters": {"type": "object", "properties": {}}
+                }}],
+                max_tokens=5,
+            )
+        except Exception:
+            features = ProviderFeatures(
+                supports_tools=False,
+                supports_reasoning_content=features.supports_reasoning_content,
+                supports_stream_tools=False,
+                supports_json_mode=features.supports_json_mode,
+            )
+
+    except Exception as e:
+        logger.warning("Provider probe failed for %s: %s", model, e)
+
+    return features
+
 
 # ---------------------------------------------------------------------------
 # Provider resolution
@@ -183,6 +258,16 @@ def _resolve_custom_provider(name: str, config: dict[str, Any]) -> ProviderInfo:
             f"Add [providers.custom.{custom_key}] to {CONFIG_FILE}"
         )
     features_cfg = custom_section.get("features", {})
+    if "supports_reasoning_content" not in features_cfg:
+        if _probe_reasoning_content(
+            api_key=resolve_api_key(name),
+            base_url=custom_section.get("base_url", ""),
+            model=custom_section.get("default_model", ""),
+        ):
+            features_cfg["supports_reasoning_content"] = True
+            logger.info(
+                "Provider '%s': auto-detected reasoning_content support", name
+            )
     features = ProviderFeatures(
         supports_tools=features_cfg.get("supports_tools", True),
         supports_stream_tools=features_cfg.get("supports_stream_tools", True),

@@ -1,8 +1,11 @@
 """HTTP client builtin capability."""
 
+import logging
 from typing import Any
 
-from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability
+from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability, with_enriched_errors
+
+logger = logging.getLogger(__name__)
 
 
 class HttpClientCap(BuiltinCapability):
@@ -20,13 +23,20 @@ class HttpClientCap(BuiltinCapability):
         "required": ["method", "url"],
     }
 
-    def execute(  # type: ignore[override]
+    @with_enriched_errors
+    def execute(
         self,
         method: str = "GET",
         url: str = "",
         headers: dict[str, Any] | None = None,
         body: str | None = None,
+        **kwargs: Any,
     ) -> str:
+        if kwargs:
+            logger.warning(
+                "%s received unknown parameters: %s (ignored)",
+                self.__class__.__name__, list(kwargs.keys()),
+            )
         import httpx
         try:
             r = httpx.request(

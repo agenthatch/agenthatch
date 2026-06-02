@@ -1,8 +1,12 @@
 """File I/O builtin capabilities."""
 
+import logging
 from pathlib import Path
+from typing import Any
 
-from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability
+from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability, with_enriched_errors
+
+logger = logging.getLogger(__name__)
 
 
 class FileReaderCap(BuiltinCapability):
@@ -17,7 +21,13 @@ class FileReaderCap(BuiltinCapability):
         "required": ["path"],
     }
 
-    def execute(self, path: str = "") -> str:  # type: ignore[override]
+    @with_enriched_errors
+    def execute(self, path: str = "", **kwargs: Any) -> str:
+        if kwargs:
+            logger.warning(
+                "%s received unknown parameters: %s (ignored)",
+                self.__class__.__name__, list(kwargs.keys()),
+            )
         p = Path(path)
         if not p.exists():
             return f"Error: file '{path}' not found"
@@ -40,7 +50,13 @@ class FileWriterCap(BuiltinCapability):
         "required": ["path", "content"],
     }
 
-    def execute(self, path: str = "", content: str = "") -> str:  # type: ignore[override]
+    @with_enriched_errors
+    def execute(self, path: str = "", content: str = "", **kwargs: Any) -> str:
+        if kwargs:
+            logger.warning(
+                "%s received unknown parameters: %s (ignored)",
+                self.__class__.__name__, list(kwargs.keys()),
+            )
         try:
             Path(path).write_text(content)
             return f"File written: {path} ({len(content)} chars)"

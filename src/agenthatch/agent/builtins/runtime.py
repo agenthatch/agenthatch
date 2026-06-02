@@ -1,8 +1,12 @@
 """Runtime builtin capabilities."""
 
+import logging
 import subprocess
+from typing import Any
 
-from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability
+from agenthatch.agent.builtins import BUILTIN_REGISTRY, BuiltinCapability, with_enriched_errors
+
+logger = logging.getLogger(__name__)
 
 
 class BashRuntimeCap(BuiltinCapability):
@@ -17,7 +21,13 @@ class BashRuntimeCap(BuiltinCapability):
         "required": ["command"],
     }
 
-    def execute(self, command: str = "") -> str:  # type: ignore[override]
+    @with_enriched_errors
+    def execute(self, command: str = "", **kwargs: Any) -> str:
+        if kwargs:
+            logger.warning(
+                "%s received unknown parameters: %s (ignored)",
+                self.__class__.__name__, list(kwargs.keys()),
+            )
         try:
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -44,7 +54,13 @@ class PythonRuntimeCap(BuiltinCapability):
         "required": ["code"],
     }
 
-    def execute(self, code: str = "") -> str:  # type: ignore[override]
+    @with_enriched_errors
+    def execute(self, code: str = "", **kwargs: Any) -> str:
+        if kwargs:
+            logger.warning(
+                "%s received unknown parameters: %s (ignored)",
+                self.__class__.__name__, list(kwargs.keys()),
+            )
         try:
             result = subprocess.run(
                 ["python3", "-c", code],

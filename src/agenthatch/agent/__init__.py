@@ -1,16 +1,27 @@
-"""agenthatch Agent Runtime — v0.5.6.
+"""agenthatch Agent Runtime — v0.5.7.
 
 SkillAgent is the entry point. Loads from AHSSPEC, assembles
 capabilities, and provides chat/chat_stream interface.
 
-v0.5.6: + MCPClient, MCPServerConfig, MCPToolDef, Checkpoint, CheckpointManager,
-APITemplateExecutor, external tool dispatch, retry, circuit breaker,
-anchor rules, output template guard, batch progress gating.
+v0.5.7: + Multi-transport MCP (Stdio/StreamableHTTP/SSE), transport auto-detection,
+graceful degradation, with_enriched_errors, reasoning_content probe,
+provider auto-probing, brace-balanced JSON extraction, API template naming,
+FLAT_CATALOG cleanup, Capability/Tool distinction, SkillBrick resource loading,
+rich prompt mode.
 """
 
 from agenthatch.agent.compact import CompactSummary
 from agenthatch.agent.hooks import HookPoint, HooksManager
-from agenthatch.agent.mcp import MCPClient, MCPServerConfig, MCPToolDef
+from agenthatch.agent.mcp import (
+    MCPClient,
+    MCPServerConfig,
+    MCPToolDef,
+    SSETransport,
+    StdioTransport,
+    StreamableHTTPTransport,
+    Transport,
+    _resolve_transport,
+)
 from agenthatch.agent.offload import Checkpoint, CheckpointManager, SessionState, StateManager
 from agenthatch.agent.runtime import SkillAgent
 from agenthatch.cap.bus import APITemplateExecutor
@@ -28,4 +39,9 @@ __all__ = [
     "Checkpoint",
     "CheckpointManager",
     "APITemplateExecutor",
+    "Transport",
+    "StdioTransport",
+    "StreamableHTTPTransport",
+    "SSETransport",
+    "_resolve_transport",
 ]
