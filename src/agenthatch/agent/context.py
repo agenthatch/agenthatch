@@ -341,6 +341,40 @@ class ContextManager:
 
         isolated = reordered
 
+        # ── DD-08-02 Part B: Validate tool call chain completeness ──
+        validated: list[dict[str, Any]] = []
+        pending_tc_ids: dict[str, list[int]] = {}
+        tool_results: set[str] = set()
+
+        for msg in isolated:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                validated.append(msg)
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        pending_tc_ids.setdefault(tc_id, []).append(len(validated) - 1)
+            elif msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id", "")
+                if tc_id and tc_id in pending_tc_ids:
+                    tool_results.add(tc_id)
+                    validated.append(msg)
+            else:
+                validated.append(msg)
+
+        # Strip tool_calls without matching tool results
+        for msg in validated:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                filtered_tcs = [
+                    tc for tc in msg["tool_calls"]
+                    if tc.get("id", "") in tool_results
+                ]
+                if not filtered_tcs:
+                    msg.pop("tool_calls", None)
+                elif len(filtered_tcs) != len(msg["tool_calls"]):
+                    msg["tool_calls"] = filtered_tcs
+
+        isolated = validated
+
         messages.extend(isolated)
 
         # Normalize: assistant messages with tool_calls must have content=None
@@ -478,8 +512,51 @@ class ContextManager:
         return True
 
     def _fallback_truncation(self) -> bool:
-        """Simple truncation: keep only recent turns."""
-        self.history = self.history[-(self.MIN_RECENT_TURNS * 2):]
+        """Truncate history to recent turns, preserving tool call message chains."""
+        keep_count = self.MIN_RECENT_TURNS * 2
+
+        if len(self.history) <= keep_count:
+            return False
+
+        # Walk backwards to find a safe truncation boundary.
+        safe_boundary = len(self.history) - keep_count
+
+        # Extend backwards to include the start of any tool call chain
+        # that spans the boundary: assistant(tool_calls) → tool → tool → ... → assistant
+        for i in range(safe_boundary - 1, -1, -1):
+            msg = self.history[i]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                safe_boundary = i
+                break
+            elif msg.get("role") == "tool":
+                continue
+            else:
+                break
+
+        # Ensure tool results for tool_calls in kept section are included
+        tool_call_ids: set[str] = set()
+        for i in range(safe_boundary, len(self.history)):
+            msg = self.history[i]
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    tool_call_ids.add(tc.get("id", ""))
+            elif msg.get("role") == "tool":
+                tid = msg.get("tool_call_id", "")
+                if tid in tool_call_ids:
+                    tool_call_ids.discard(tid)
+
+        if tool_call_ids:
+            for i in range(safe_boundary - 1, -1, -1):
+                msg = self.history[i]
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    safe_boundary = i
+                    break
+
+        self.history = self.history[safe_boundary:]
+        logger.debug(
+            "Truncated history to %d messages (preserved tool call chains)",
+            len(self.history),
+        )
         return False
 
     def _offload_full_history(self) -> Path | None:

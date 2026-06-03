@@ -34,6 +34,7 @@ from agenthatch.skill.prompts import (
     FLAT_CATALOG,
     IDENTITY_FEW_SHOT,
     IDENTITY_HARNESS_PERSONA,
+    INFER_MCP_SERVERS_PROMPT,
     INTENT_FEW_SHOT,
     INTENT_HARNESS_PERSONA,
     INTERFACE_FEW_SHOT,
@@ -567,6 +568,50 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
         except json.JSONDecodeError:
             return {}
 
+    def _compute_structural_confidence(self, ahs_dict: dict[str, Any]) -> float:
+        """Compute confidence based on structural checks, not LLM self-assessment."""
+        checks = 0
+        passed = 0
+
+        identity = ahs_dict.get("identity", {})
+        checks += 3
+        if identity.get("id"):
+            passed += 1
+        if identity.get("name"):
+            passed += 1
+        if identity.get("version"):
+            passed += 1
+
+        interface = ahs_dict.get("interface", {})
+        checks += 2
+        if interface.get("provides"):
+            passed += 1
+        if interface.get("requires"):
+            passed += 1
+
+        instructions = ahs_dict.get("instructions", {})
+        checks += 2
+        if instructions.get("workflow"):
+            passed += 1
+        if instructions.get("raw_body") and len(instructions["raw_body"]) > 100:
+            passed += 1
+
+        resources = ahs_dict.get("resources", {})
+        checks += 1
+        if resources.get("scripts") or resources.get("references"):
+            passed += 1
+
+        score = passed / max(checks, 1)
+        logger.info("Harness E structural confidence: %.2f (%d/%d)", score, passed, checks)
+        return score
+
+    def run(self, **inputs: object) -> HarnessOutput:
+        output = super().run(**inputs)
+        ahs_dict = output.result.get("ahs_spec", {})
+        structural_confidence = self._compute_structural_confidence(ahs_dict)
+        output.confidence = structural_confidence
+        return output
+
     def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         if not result.get("ahs_spec"):
             return False, "ahs_spec is missing"
@@ -623,6 +668,13 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
 class InferMCPServersHarness(AgentHarness):
     """Harness F: Detect MCP server dependencies from skill body."""
 
+    def build_system_prompt(self) -> str:
+        return INFER_MCP_SERVERS_PROMPT
+
+    def build_user_message(self, **inputs: object) -> str:
+        body = str(inputs.get("body", ""))
+        return body
+
     def run(self, **inputs: object) -> HarnessOutput:
         body = str(inputs.get("body", ""))
         mcp_servers: list[dict[str, Any]] = []
@@ -634,18 +686,42 @@ class InferMCPServersHarness(AgentHarness):
                 self_check_passed=True,
             )
 
-        mcp_pattern = re.compile(r'mcp__(\w+)__')
-        server_names = set(mcp_pattern.findall(body))
+        try:
+            messages = [
+                {"role": "system", "content": self.build_system_prompt()},
+                {"role": "user", "content": self.build_user_message(body=body)},
+            ]
+            response = self.client.chat(messages=messages, model=self.model)
+            import json as _json
 
-        for sname in sorted(server_names):
-            mcp_servers.append({
-                "name": sname,
-                "config": {"transport": "auto"},
-            })
+            data = _json.loads(response)
+            llm_servers = data.get("mcp_servers", [])
+        except Exception:
+            # Fallback to regex-based extraction
+            llm_servers = []
+            mcp_pattern = re.compile(r'mcp__(\w+)__')
+            server_names = set(mcp_pattern.findall(body))
+            for sname in sorted(server_names):
+                llm_servers.append({
+                    "name": sname,
+                    "config": {"transport": "auto"},
+                })
+
+        # DD-08-05 Part C: Verify against actual mcp__ patterns in body
+        mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
+        referenced = set(mcp_pattern.findall(body))
+        for server in llm_servers:
+            name = server.get("name", "")
+            if name in referenced:
+                mcp_servers.append(server)
+            else:
+                logger.warning(
+                    "Harness F: dropping MCP server '%s' — not referenced in SKILL.md", name
+                )
 
         return HarnessOutput(
             result={"mcp_servers": mcp_servers},
-            confidence=0.9,
+            confidence=0.9 if mcp_servers else 0.5,
             reasoning_trace=[f"detected {len(mcp_servers)} MCP servers"],
             self_check_passed=True,
         )
@@ -873,6 +949,13 @@ class Orchestrator:
         d_client, d_model = _resolve("D")
         e_client, e_model = _resolve("E")
         f_client, f_model = _resolve("F")
+
+        # DD-08-10: Extend timeout for reasoning models
+        d_timeout = 60
+        if d_client and hasattr(d_client, '_features'):
+            if d_client._features.supports_reasoning_content:
+                d_timeout = 120
+        logger.debug("Harness D timeout: %ds", d_timeout)
 
         return {
             "A": ExtractIdentityHarness(name="extract_identity", client=a_client, model=a_model),

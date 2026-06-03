@@ -259,3 +259,30 @@ Input:
 Output:
 {""confidence_report"": {""overall"": 0.92, ""per_harness"": {""A"": 0.95, ""B"": 0.97, ""C"": 0.88, ""D"": 0.91}}, ""warnings"": [""weather_alert is event type — composition.event_listeners added""]}  # noqa: E501
 """
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Harness F: infer_mcp_servers
+# ─────────────────────────────────────────────────────────────────────────
+
+INFER_MCP_SERVERS_PROMPT = """You are analyzing a skill's documentation to identify MCP servers it depends on.
+
+SKILL BODY:
+{body}
+
+Find ALL MCP server references. Look for:
+1. Pattern: `mcp__SERVER_NAME__TOOL_NAME` — extract SERVER_NAME
+2. Pattern: `mcp_servers:` YAML sections in configuration blocks
+3. Pattern: "MCP server" or "MCP service" mentions with connection details
+4. Named MCP tools with `mcp__` prefix in tool usage examples
+
+For each server found, determine:
+- name: the server identifier (e.g., "data-infra-mcp", "Apollo-mcp")
+- transport: infer from context ("stdio" if command mentioned, "http" if URL)
+- description: what this server provides (from surrounding text)
+
+Return ONLY valid JSON:
+{"mcp_servers": [{"name": "...", "transport": "...", "description": "..."}]}
+
+If no MCP servers found, return: {"mcp_servers": []}
+"""

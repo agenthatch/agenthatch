@@ -109,7 +109,7 @@ class LLMClient:
                 "Consider increasing max_tokens in agenthatch.yaml "
                 "or via --max-tokens CLI flag."
             )
-        return self._extract_content(choice.message, self._features)
+        return self._extract_content(choice.message)
 
     # ── Structured output (Instructor pattern) ───────────────────────
 
@@ -131,12 +131,35 @@ class LLMClient:
         # nested Pydantic objects as JSON strings instead of native dicts,
         # causing validation errors like "Input should be an object".
         client = instructor.from_openai(self._client, mode=instructor.Mode.JSON)
-        return client.chat.completions.create(
+
+        try:
+            return client.chat.completions.create(
+                model=model or self._model,
+                messages=messages,  # type: ignore[arg-type]
+                response_model=response_model,
+                max_retries=max_retries,
+            )
+        except instructor.exceptions.InstructorRetryException:  # type: ignore[attr-defined]
+            pass
+
+        # DD-08-03: Fallback for reasoning models — instructor failed,
+        # try extracting content via _extract_content and parse manually
+        response = self._client.chat.completions.create(
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
-            response_model=response_model,
-            max_retries=max_retries,
+            temperature=0.0,
+            max_tokens=4096,
         )
+        msg = response.choices[0].message
+        content = self._extract_content(msg)
+        if not content:
+            raise ValueError(
+                "chat_structured: model returned empty content and "
+                "reasoning_content also empty"
+            )
+        import json as _json
+        parsed = _json.loads(content)
+        return response_model.model_validate(parsed)  # type: ignore[attr-defined]
 
     # ── v0.4 Tool Calling ──────────────────────────────────────────────
 
@@ -174,7 +197,7 @@ class LLMClient:
         result = ToolCallResponse.from_openai(response)
         # BUG-04-01: Apply content extraction for reasoning/content split
         msg = response.choices[0].message
-        extracted = self._extract_content(msg, self._features)
+        extracted = self._extract_content(msg)
         if extracted:
             result.text = extracted
         return result
@@ -368,33 +391,18 @@ class LLMClient:
 
         return False
 
-    @staticmethod
-    def _extract_content(message: Any, provider_features: ProviderFeatures) -> str:
-        """Extract user-visible content from a provider response message.
+    def _extract_content(self, message: Any) -> str:
+        """Extract text content from LLM response, handling reasoning models.
 
-        Handles the reasoning/content splitting pattern across providers:
-        - DeepSeek V4: message.content may be empty; fallback to message.reasoning_content
-        - Anthropic: content is an array of typed blocks; filter type="text" blocks
-        - OpenAI: standard message.content
-        - Ollama: depends on loaded model
-
-        Returns:
-            Extracted text content, never None (returns "" if nothing found).
+        Used by ALL call paths: chat_with_tools, chat_structured, chat, etc.
         """
-        content = getattr(message, "content", None)
-        if isinstance(content, str) and content.strip():
+        content = getattr(message, "content", "") or ""
+
+        if content:
             return content
 
-        if isinstance(content, list):
-            text_blocks = [
-                block.get("text", "")
-                for block in content
-                if isinstance(block, dict) and block.get("type") == "text"
-            ]
-            if text_blocks:
-                return "\n".join(text_blocks)
-
-        if provider_features.supports_reasoning_content:
+        # For reasoning models, content may be empty while reasoning_content has text
+        if self._features.supports_reasoning_content:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning and isinstance(reasoning, str) and reasoning.strip():
                 logger.warning(

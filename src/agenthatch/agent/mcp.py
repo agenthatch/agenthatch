@@ -255,6 +255,13 @@ class SSETransport(Transport):
 # ── Transport Registry ───────────────────────────────────────────────────
 
 
+_TRANSPORT_ALIASES: dict[str, str] = {
+    "http": "streamable_http",
+    "https": "streamable_http",
+    "streamable": "streamable_http",
+}
+
+
 _TRANSPORT_REGISTRY: dict[str, type[Transport]] = {
     "stdio": StdioTransport,
     "streamable_http": StreamableHTTPTransport,
@@ -263,33 +270,39 @@ _TRANSPORT_REGISTRY: dict[str, type[Transport]] = {
 
 
 def _resolve_transport(config: MCPServerConfig) -> str:
-    """Auto-detect transport type from config fields."""
+    """Auto-detect transport type from config fields, normalizing aliases."""
     if config.transport and config.transport != "auto":
-        return config.transport
+        raw = config.transport.strip().lower()
+        return _TRANSPORT_ALIASES.get(raw, raw)
     if config.url and not config.command:
-        try:
-            import httpx
-            probe = httpx.post(
-                config.url.rstrip("/"),
-                json={
-                    "jsonrpc": "2.0", "id": 0, "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2025-03-26",
-                        "capabilities": {},
-                        "clientInfo": {"name": "agenthatch-probe", "version": "0.5.7"},
-                    },
-                },
-                headers={"Content-Type": "application/json"},
-                timeout=5.0,
-            )
-            if probe.status_code == 200:
-                data = probe.json()
-                if "result" in data or "error" in data:
-                    return "streamable_http"
-        except Exception:
-            pass
-        return "sse"
+        return _probe_transport(config)
     return "stdio"
+
+
+def _probe_transport(config: MCPServerConfig) -> str:
+    """Probe HTTP endpoint to distinguish streamable_http vs sse."""
+    try:
+        import httpx
+        probe = httpx.post(
+            config.url.rstrip("/"),
+            json={
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "agenthatch-probe", "version": "0.5.8"},
+                },
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=5.0,
+        )
+        if probe.status_code == 200:
+            data = probe.json()
+            if "result" in data or "error" in data:
+                return "streamable_http"
+    except Exception:
+        pass
+    return "sse"
 
 
 # ── MCPToolDef ───────────────────────────────────────────────────────────

@@ -21,6 +21,11 @@ class CompactSummary:
     conversation_turns: int = 0
     compressed_at: str = ""
 
+    @property
+    def key_findings(self) -> list[str]:
+        """Alias for key_decisions — used by checkpoint serializer."""
+        return self.key_decisions
+
     def to_text(self) -> str:
         lines = [
             f"Task: {self.session_intent}",

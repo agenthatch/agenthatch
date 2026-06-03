@@ -115,13 +115,28 @@ class ConversationLoop:
             )
 
             for tc in response.tool_calls:
+                t0 = time.time()
+                logger.info(
+                    "  Executing: %s(%s)...", tc.name,
+                    ", ".join(
+                        f"{k}={v}" for k, v in tc.arguments.items()
+                        if k != "url"
+                    ),
+                )
                 try:
                     result = self.capbus.route(tc.name, tc.arguments)
+                    elapsed = time.time() - t0
+                    logger.info(
+                        "  %s -> %d chars (%.1fs)", tc.name,
+                        len(str(result)), elapsed,
+                    )
                 except CapabilityNotFoundError as e:
-                    logger.warning("Tool call failed: %s", e)
+                    elapsed = time.time() - t0
+                    logger.warning("Tool call failed: %s (%.1fs)", e, elapsed)
                     result = f"Error: {e}"
                 except Exception as e:
-                    logger.warning("Tool execution failed: %s", e)
+                    elapsed = time.time() - t0
+                    logger.warning("Tool execution failed: %s (%.1fs)", e, elapsed)
                     result = f"Error: {e}"
                 messages.append({
                     "role": "tool",

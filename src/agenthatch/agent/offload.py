@@ -45,8 +45,18 @@ class StateManager:
         path = self.state_dir / "summary.json"
         if not path.exists():
             return None
-        data = json.loads(path.read_text())
-        return CompactSummary(**data)
+        try:
+            data = json.loads(path.read_text())
+            return CompactSummary(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "Summary file is corrupted: %s. Starting fresh.", e
+            )
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            return None
 
 
 @dataclass
@@ -79,9 +89,19 @@ class CheckpointManager:
     def load(self) -> Checkpoint | None:
         if not self._path.exists():
             return None
-        with open(self._path) as f:
-            data = json.load(f)
-        return Checkpoint(**data)
+        try:
+            with open(self._path) as f:
+                data = json.load(f)
+            return Checkpoint(**data)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "Checkpoint file is corrupted: %s. Starting fresh.", e
+            )
+            try:
+                self._path.unlink()
+            except OSError:
+                pass
+            return None
 
     def exists(self) -> bool:
         return self._path.exists()
