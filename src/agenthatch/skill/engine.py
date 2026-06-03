@@ -569,39 +569,34 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             return {}
 
     def _compute_structural_confidence(self, ahs_dict: dict[str, Any]) -> float:
-        """Compute confidence based on structural checks, not LLM self-assessment."""
+        """DD-09-07: Compute confidence based on structural checks, not LLM self-assessment."""
         checks = 0
         passed = 0
 
-        identity = ahs_dict.get("identity", {})
-        checks += 3
-        if identity.get("id"):
-            passed += 1
-        if identity.get("name"):
-            passed += 1
-        if identity.get("version"):
-            passed += 1
+        id_ = ahs_dict.get("identity", {})
+        for f in ("id", "display_name", "version"):
+            checks += 1
+            if id_.get(f):
+                passed += 1
 
-        interface = ahs_dict.get("interface", {})
-        checks += 2
-        if interface.get("provides"):
-            passed += 1
-        if interface.get("requires"):
-            passed += 1
+        iface = ahs_dict.get("interface", {})
+        for f in ("provides", "requires"):
+            checks += 1
+            if iface.get(f):
+                passed += 1
 
-        instructions = ahs_dict.get("instructions", {})
-        checks += 2
-        if instructions.get("workflow"):
-            passed += 1
-        if instructions.get("raw_body") and len(instructions["raw_body"]) > 100:
-            passed += 1
+        instr = ahs_dict.get("instructions", {})
+        for f in ("workflow", "rules"):
+            checks += 1
+            if instr.get(f):
+                passed += 1
 
-        resources = ahs_dict.get("resources", {})
+        res = ahs_dict.get("resources", {})
         checks += 1
-        if resources.get("scripts") or resources.get("references"):
+        if res.get("scripts") or res.get("references"):
             passed += 1
 
-        score = passed / max(checks, 1)
+        score = round(passed / max(checks, 1), 2)
         logger.info("Harness E structural confidence: %.2f (%d/%d)", score, passed, checks)
         return score
 
@@ -887,6 +882,8 @@ class Orchestrator:
                     f_output.result.get("mcp_servers", [])
                     if hasattr(f_output, "result") else []
                 )
+            # DD-09-04 Part B: Enrich MCP servers from SKILL.md body patterns
+            mcp_servers = self._enrich_mcp_from_body(mcp_servers, context.body)
             if mcp_servers:
                 if "interface" not in ahs_dict:
                     ahs_dict["interface"] = {}
@@ -1014,6 +1011,35 @@ class Orchestrator:
         import re as _re
         name = _re.sub(r'[^a-zA-Z0-9_]', '_', name)
         return f"{method.lower()}_{name}"[:50]
+
+    @staticmethod
+    def _enrich_mcp_from_body(
+        servers: list[dict[str, Any]], body: str
+    ) -> list[dict[str, Any]]:
+        """DD-09-04B: Scan SKILL.md body for mcp__ patterns.
+
+        Fills in missing server info from mcp__SERVER__TOOL references.
+        Never fabricates URLs — if no URL in SKILL.md, transport stays empty.
+        """
+        mcp_pattern = re.compile(r'mcp__(\w[\w-]*)__')
+        found = set(mcp_pattern.findall(body))
+        existing_names = {s.get('name', '') for s in servers}
+
+        for name in found:
+            if name not in existing_names:
+                servers.append({
+                    'name': name,
+                    'transport': '',
+                    'url': '',
+                    'command': '',
+                    'description': f'MCP server referenced in skill as mcp__{name}__*',
+                })
+            else:
+                # Existing server without transport — don't fabricate
+                for s in servers:
+                    if s.get('name') == name and not s.get('transport'):
+                        s['transport'] = ''
+        return servers
 
     def _detect_api_templates(self, body: str) -> list[dict[str, Any]]:
         """Detect curl commands in SKILL.md body and extract API templates."""

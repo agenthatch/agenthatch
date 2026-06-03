@@ -276,13 +276,18 @@ Find ALL MCP server references. Look for:
 3. Pattern: "MCP server" or "MCP service" mentions with connection details
 4. Named MCP tools with `mcp__` prefix in tool usage examples
 
-For each server found, determine:
-- name: the server identifier (e.g., "data-infra-mcp", "Apollo-mcp")
-- transport: infer from context ("stdio" if command mentioned, "http" if URL)
-- description: what this server provides (from surrounding text)
+For each MCP server found in the skill text, extract:
+- name: server identifier (e.g., "data-infra-mcp", "Apollo-mcp")
+- transport: "stdio" if a CLI command is mentioned, "streamable_http" if a URL/endpoint is given, "sse" if SSE
+- url: full URL with http:// or https:// prefix (for HTTP/SSE transport)
+- command: CLI command (for stdio transport)
+- description: what the server provides
+
+If the skill mentions MCP tool names like mcp__SERVER__TOOL but gives no
+URL or command, set transport="" and do NOT fabricate a URL.
 
 Return ONLY valid JSON:
-{"mcp_servers": [{"name": "...", "transport": "...", "description": "..."}]}
+{"mcp_servers": [{"name": "...", "transport": "...", "url": "...", "command": "...", "description": "..."}]}
 
 If no MCP servers found, return: {"mcp_servers": []}
 """

@@ -78,6 +78,7 @@ class ContextManager:
 
     ANCHOR_RULES: list[str] = []
     _skill_dir: Path | None = None
+    mcp_status_note: str = ""  # DD-09-05: MCP server status injected into system prompt
 
     def __init__(self, ahs_spec: AHSSpec):
         self.spec = ahs_spec
@@ -273,6 +274,11 @@ class ContextManager:
                 if ref_file.exists():
                     content = ref_file.read_text()[:500]
                     parts.append(f"\n### {ref_path}\n{content}")
+
+        # ── DD-09-05: MCP server status injection ──
+        if getattr(self, 'mcp_status_note', ''):
+            parts.append("")
+            parts.append(self.mcp_status_note)
 
         return "\n".join(parts)
 

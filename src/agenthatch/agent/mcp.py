@@ -336,7 +336,7 @@ class MCPClient:
             transport_type = _resolve_transport(cfg)
             transport_cls = _TRANSPORT_REGISTRY.get(transport_type)
             if transport_cls is None:
-                logger.warning(
+                logger.debug(
                     "MCP server '%s': unknown transport '%s', skipping",
                     sname, transport_type,
                 )
@@ -352,7 +352,7 @@ class MCPClient:
                     sname, transport_type, len(self._tools),
                 )
             except Exception as e:
-                logger.warning("MCP server '%s' unavailable: %s", sname, e)
+                logger.debug("MCP server '%s' unavailable: %s", sname, e)
                 self._unavailable.add(sname)
                 try:
                     transport.disconnect()

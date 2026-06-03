@@ -158,7 +158,21 @@ class LLMClient:
                 "reasoning_content also empty"
             )
         import json as _json
-        parsed = _json.loads(content)
+
+        # DD-09-06: Try balanced JSON extraction for reasoning models
+        # that return markdown+JSON mixtures in reasoning_content
+        try:
+            parsed = _json.loads(content)
+        except _json.JSONDecodeError as e:
+            from agenthatch.agent.context import _extract_balanced_json
+
+            json_strs = _extract_balanced_json(content)
+            if json_strs:
+                parsed = _json.loads(json_strs[0])
+            else:
+                raise ValueError(
+                    "chat_structured: no valid JSON found in response"
+                ) from e
         return response_model.model_validate(parsed)  # type: ignore[attr-defined]
 
     # ── v0.4 Tool Calling ──────────────────────────────────────────────
@@ -194,7 +208,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        result = ToolCallResponse.from_openai(response)
+        result = ToolCallResponse.from_openai(response, llm_client=self)
         # BUG-04-01: Apply content extraction for reasoning/content split
         msg = response.choices[0].message
         extracted = self._extract_content(msg)
@@ -395,20 +409,31 @@ class LLMClient:
         """Extract text content from LLM response, handling reasoning models.
 
         Used by ALL call paths: chat_with_tools, chat_structured, chat, etc.
-        """
-        content = getattr(message, "content", "") or ""
 
-        if content:
+        DD-09-09: Handles three formats:
+          1. content as string (OpenAI-compatible)
+          2. content as list (Anthropic Messages API)
+          3. reasoning_content fallback (reasoning models)
+        """
+        # Standard: content as string
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content.strip():
             return content
 
-        # For reasoning models, content may be empty while reasoning_content has text
+        # Anthropic: content as list of blocks
+        if isinstance(content, list):
+            texts = [
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            if texts:
+                return "\n".join(texts)
+
+        # DD-09-09: Reasoning fallback — return FULL reasoning_content
         if self._features.supports_reasoning_content:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning and isinstance(reasoning, str) and reasoning.strip():
-                logger.warning(
-                    "Model returned empty content; falling back to "
-                    "reasoning_content (%d chars)", len(reasoning)
-                )
                 return reasoning
 
         return ""
@@ -464,12 +489,23 @@ class ToolCallResponse:
         return len(self.tool_calls) > 0
 
     @classmethod
-    def from_openai(cls, response: Any) -> ToolCallResponse:
-        """从 OpenAI ChatCompletion 对象构造."""
+    def from_openai(cls, response: Any, llm_client: Any | None = None) -> ToolCallResponse:
+        """从 OpenAI ChatCompletion 对象构造.
+
+        DD-09-01: When llm_client is provided, use _extract_content()
+        for reasoning model support (handles content="" via reasoning_content).
+        Falls back to msg.content when llm_client is None (backward compatible).
+        """
         import json
 
         msg = response.choices[0].message
-        text = msg.content or None
+
+        # DD-09-01: Use _extract_content() for reasoning model support
+        if llm_client and hasattr(llm_client, '_extract_content'):
+            text = llm_client._extract_content(msg) or None
+        else:
+            text = msg.content or None
+
         tool_calls: list[ToolCall] = []
         if msg.tool_calls:
             for tc in msg.tool_calls:

@@ -95,6 +95,11 @@ MIN_GENERATION_TOKENS = 1024
 class SkillAgent:
     """Base Brick — the entry point for v0.4 Agent runtime."""
 
+    # DD-09-03: Reasoning models share a single max_tokens budget between
+    # reasoning and content tokens. Multiply default budget by this factor
+    # to ensure adequate content token allocation (≈40% of total).
+    REASONING_MAX_TOKENS_MULTIPLIER: float = 2.5
+
     @classmethod
     def from_ahspec(cls, ahs_path: Path, **overrides: Any) -> SkillAgent:
         """Load SkillAgent from agenthatch.yaml."""
@@ -225,8 +230,19 @@ class SkillAgent:
         if not isinstance(estimated_input, int):
             estimated_input = 0
         safe_max = max(MIN_GENERATION_TOKENS, requested_max - estimated_input)
-        if merged_features.supports_reasoning_content:
-            safe_max = int(safe_max * 0.7)
+
+        # DD-09-03: Reasoning models share a single max_tokens budget
+        # between reasoning and content. The old 0.7x reduction was wrong —
+        # it starved content tokens. Instead, INFLATE the budget.
+        user_set_max_tokens = self.spec.agent is not None
+        if (merged_features.supports_reasoning_content
+                and not user_set_max_tokens
+                and safe_max < 8192):
+            inflated = int(requested_max * self.REASONING_MAX_TOKENS_MULTIPLIER)
+            inflated = min(inflated, 16384)  # Cap at 16K (API limit)
+            safe_max = max(MIN_GENERATION_TOKENS, inflated - estimated_input)
+            logger.debug("Inflated max_tokens for reasoning model: %d", safe_max)
+
         if safe_max < requested_max:
             logger.info(
                 "Adjusted max_tokens: %d -> %d (input estimate: %d tokens)",
@@ -296,6 +312,19 @@ class SkillAgent:
         self._mcp_client.connect_all()
         self._mcp_client.register_with_capbus(self.capbus)
 
+        # ── DD-09-05: Inject MCP server status into system prompt ──
+        if self.spec.interface.mcp_servers:
+            status_lines = ["## MCP Server Status"]
+            for srv in self.spec.interface.mcp_servers:
+                transport = getattr(self._mcp_client, '_transports', {}).get(srv.name)
+                is_connected = transport.is_connected() if transport else False
+                # Also check unavailable set
+                if srv.name in getattr(self._mcp_client, '_unavailable', set()):
+                    is_connected = False
+                status = "AVAILABLE" if is_connected else "UNAVAILABLE"
+                status_lines.append(f"- {srv.name}: {status}")
+            self.ctx.mcp_status_note = "\n".join(status_lines)
+
         # ── DD-05-14: API template registration ──
         http_client = self.capbus.builtins.get("http_client")
         for tpl in self.spec.interface.api_templates:
@@ -310,15 +339,41 @@ class SkillAgent:
                 )
 
         # ── DD-05-17: Checkpoint restore ──
+        # DD-09-08: Use project-local directory to avoid sandbox permission denial
         self._checkpoint_mgr = CheckpointManager(
-            Path.home() / ".agenthatch" / "sessions" / self.spec.identity.id
+            Path.cwd() / ".agenthatch" / "sessions" / self.spec.identity.id
         )
+        # Migration: if old path has data, copy it once
+        old_dir = Path.home() / ".agenthatch" / "sessions" / self.spec.identity.id
+        new_dir = Path.cwd() / ".agenthatch" / "sessions" / self.spec.identity.id
+        if old_dir.exists() and not new_dir.exists():
+            import shutil
+            try:
+                shutil.copytree(old_dir, new_dir)
+                logger.info("Migrated checkpoint from %s to %s", old_dir, new_dir)
+            except OSError as e:
+                logger.warning("Checkpoint migration failed: %s", e)
         if self._checkpoint_mgr.exists():
             cp = self._checkpoint_mgr.load()
             if cp:
                 self.ctx.history = cp.history
                 if cp.summary:
-                    self.ctx.summary = CompactSummary(**cp.summary)
+                    summary_dict = dict(cp.summary)
+                    # DD-09-02: Remap key_findings → key_decisions for checkpoint compat.
+                    # v0.5.7/v0.5.8 early versions serialized @property key_findings
+                    # into checkpoint, but CompactSummary.__init__() only accepts
+                    # key_decisions. Without this remap, TypeError crashes the agent.
+                    if 'key_findings' in summary_dict:
+                        if 'key_decisions' not in summary_dict:
+                            summary_dict['key_decisions'] = summary_dict.pop('key_findings')
+                        else:
+                            summary_dict.pop('key_findings')
+                    # Also strip any other unknown properties that may have been serialized
+                    known_fields = set(CompactSummary.__dataclass_fields__.keys())
+                    unknown = set(summary_dict.keys()) - known_fields
+                    for k in unknown:
+                        summary_dict.pop(k, None)
+                    self.ctx.summary = CompactSummary(**summary_dict)
                 self.ctx._consecutive_compact_failures = cp.compact_failures
                 self.ctx._turn_count = cp.turn_count
                 self.loop._cb_state = cp.cb_state
