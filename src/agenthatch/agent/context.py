@@ -63,6 +63,9 @@ def _extract_balanced_json(text: str) -> list[str]:
     return results
 
 
+CAPBUS_OVERHEAD_CHARS = 1500  # Estimated overhead for tool definitions in system prompt
+
+
 class ContextManager:
     """Constructs system prompt and manages conversation history window."""
 
@@ -421,9 +424,10 @@ class ContextManager:
         system_len = len(self.build_system_prompt())
         history_len = sum(
             len(str(msg.get("content", "") or ""))
+            + len(str(msg.get("tool_calls", "")))  # v0.5.10: include tool_calls
             for msg in self.history
         )
-        return (system_len + history_len) // self._CHARS_PER_TOKEN_ESTIMATE
+        return (system_len + history_len + CAPBUS_OVERHEAD_CHARS) // self._CHARS_PER_TOKEN_ESTIMATE
 
     # ── v0.5 Auto-Compact ──────────────────────────────────────────────
 
@@ -465,7 +469,7 @@ class ContextManager:
             return False
 
         recent_tokens = sum(
-            len(str(m.get("content", ""))) // 4
+            len(str(m.get("content", ""))) // self._CHARS_PER_TOKEN_ESTIMATE
             for m in self.history[-(self.MIN_RECENT_TURNS * 2):]
         )
         estimated_after = 500 + recent_tokens
@@ -484,7 +488,7 @@ class ContextManager:
         """Execute compaction. Returns True on success, False on fallback."""
         try:
             summary = self._generate_summary()
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, RuntimeError) as e:
             logger.warning("Compact summary invalid (%s), falling back to truncation", e)
             self._consecutive_compact_failures += 1
             return self._fallback_truncation()

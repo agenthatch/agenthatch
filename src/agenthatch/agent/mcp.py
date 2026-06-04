@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 logger = logging.getLogger(__name__)
+
+_TIMEOUT_SECONDS = 30
 
 
 # ── Transport ABC ────────────────────────────────────────────────────────
@@ -87,7 +91,7 @@ class StdioTransport(Transport):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            env={**self._config.env},
+            env={**os.environ, **self._config.env},
         )
 
     def send_request(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -96,7 +100,8 @@ class StdioTransport(Transport):
         payload = json.dumps(request)
         self._proc.stdin.write(payload + "\n")
         self._proc.stdin.flush()
-        while True:
+        deadline = time.time() + _TIMEOUT_SECONDS
+        while time.time() < deadline:
             line = self._proc.stdout.readline()
             if not line:
                 return {}
@@ -104,6 +109,8 @@ class StdioTransport(Transport):
                 return cast(dict[str, Any], json.loads(line))
             except json.JSONDecodeError:
                 continue
+        logger.warning("MCP StdioTransport timed out after %ds", _TIMEOUT_SECONDS)
+        return {}
 
     def disconnect(self) -> None:
         if self._proc:
@@ -228,6 +235,17 @@ class SSETransport(Transport):
     def connect(self) -> None:
         import httpx
         self._client = httpx.Client(timeout=60.0)
+        # MCP protocol handshake: initialize → notifications/initialized
+        init_response = self.send_request({
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "agenthatch", "version": "0.5.10"},
+            },
+        })
+        if init_response:
+            self.send_request({"method": "notifications/initialized"})
 
     def send_request(self, request: dict[str, Any]) -> dict[str, Any]:
         if not self._client:
@@ -366,7 +384,12 @@ class MCPClient:
             "method": "tools/list",
             "params": {},
         })
-        for tool in resp.get("result", {}).get("tools", resp.get("tools", [])):
+        result = resp.get("result")
+        if result is None:
+            logger.warning("MCP tools/list returned no result for server '%s'", sname)
+            return
+        tools = result.get("tools", []) if isinstance(result, dict) else []
+        for tool in tools:
             full_name = f"mcp__{sname}__{tool['name']}"
             self._tools[full_name] = MCPToolDef(
                 name=tool["name"],
@@ -427,7 +450,7 @@ class MCPClient:
     def register_with_capbus(self, capbus: Any) -> None:
         """Register all MCP tools as external handlers on CapBus."""
         for full_name, t in self._tools.items():
-            sname = full_name.split("__")[1]
+            sname = full_name.split("__", 1)[1]
             tool_name = t.name
 
             def make_handler(sn: str, tn: str) -> Callable[..., str]:

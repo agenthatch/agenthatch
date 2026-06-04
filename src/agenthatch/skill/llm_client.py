@@ -118,6 +118,8 @@ class LLMClient:
         messages: list[dict[str, Any]],
         response_model: type,
         model: str | None = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
         max_retries: int = 2,
     ) -> Any:
         """Structured output via Instructor (LLM → Pydantic).

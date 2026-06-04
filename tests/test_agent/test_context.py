@@ -134,7 +134,7 @@ class TestBuildSystemPrompt:
 
     def test_prompt_without_author(self):
         spec = AHSSpec(
-            identity=Identity(id="no-author", display_name="No Author", version="1.0"),
+            identity=Identity(id="no-author", display_name="No Author", version="1.0.0"),
             intent=Intent(triggers=["a"], satisfies=["b"], summary="c"),
             interface=Interface(provides=[], requires=[]),
             base=BaseSpec(),

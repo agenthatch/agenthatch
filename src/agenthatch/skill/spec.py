@@ -6,10 +6,11 @@ and v0.4 SkillAgent initialization (via SkillAgent.from_ahspec()).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 # ─── Phase 1 Data Structures (non-middleware) ──────────────────────────
 
@@ -80,6 +81,27 @@ class Identity(BaseModel):
     author: str | None = None
     meta: dict[str, Any] = {}
 
+    @field_validator("id")
+    @classmethod
+    def validate_kebab_case(cls, v: str) -> str:
+        if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", v):
+            raise ValueError(f"id '{v}' is not kebab-case")
+        return v
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("display_name must not be empty")
+        return v.strip()
+
+    @field_validator("version")
+    @classmethod
+    def validate_semver(cls, v: str) -> str:
+        if not re.match(r"^\d+\.\d+\.\d+$", v):
+            raise ValueError(f"version '{v}' is not valid semver")
+        return v
+
 
 class Intent(BaseModel):
     """Skill intent — triggers & satisfies."""
@@ -88,10 +110,16 @@ class Intent(BaseModel):
     summary: str
 
 
+CAPABILITY_TYPES = Literal[
+    "data", "analysis", "media", "transform",
+    "action", "event", "knowledge", "renderer",
+]
+
+
 class Capability(BaseModel):
     """A single capability entry in provides/requires."""
     capability: str    # snake_case, globally unique
-    type: str          # data, analysis, media, transform, action, event, knowledge, renderer
+    type: CAPABILITY_TYPES
     input_schema: dict[str, Any] = {}
 
 
@@ -247,6 +275,56 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _coerce_ahs_dict(spec_dict: dict[str, Any]) -> dict[str, Any]:
+    """Coerce type mismatches across all AHSSPEC fields.
+
+    Extends _coerce_base_data to cover identity, intent, and interface.
+    """
+    data = spec_dict.copy() if spec_dict else {}
+
+    # ── identity coercion ──
+    identity = data.get("identity", {})
+    if isinstance(identity, dict):
+        if "id" in identity and isinstance(identity["id"], str):
+            identity["id"] = re.sub(r"[^a-z0-9-]", "-", identity["id"].lower()).strip("-")
+        if "version" in identity and isinstance(identity["version"], str):
+            # "v1.2.3" → "1.2.3"
+            v = identity["version"].lstrip("vV")
+            if re.match(r"^\d+\.\d+\.\d+$", v):
+                identity["version"] = v
+
+    # ── intent coercion ──
+    intent = data.get("intent", {})
+    if isinstance(intent, dict):
+        # triggers: comma-separated string → list
+        if "triggers" in intent and isinstance(intent["triggers"], str):
+            intent["triggers"] = [t.strip() for t in intent["triggers"].split(",") if t.strip()]
+        # satisfies: comma-separated string → list
+        if "satisfies" in intent and isinstance(intent["satisfies"], str):
+            intent["satisfies"] = [s.strip() for s in intent["satisfies"].split(",") if s.strip()]
+
+    # ── interface coercion ──
+    interface = data.get("interface", {})
+    if isinstance(interface, dict):
+        # provides: single dict → list
+        if "provides" in interface and isinstance(interface["provides"], dict):
+            interface["provides"] = [interface["provides"]]
+        # requires: single dict → list
+        if "requires" in interface and isinstance(interface["requires"], dict):
+            interface["requires"] = [interface["requires"]]
+        # compatible_with: comma-separated string → list
+        if "compatible_with" in interface and isinstance(interface["compatible_with"], str):
+            interface["compatible_with"] = [
+                s.strip() for s in interface["compatible_with"].split(",") if s.strip()
+            ]
+
+    # ── base coercion (existing) ──
+    if "base" in data:
+        data["base"] = _coerce_base_data(data["base"])
+
+    return data
+
+
 class Modes(BaseModel):
     """Multi-mode skill configuration."""
     modes: dict[str, dict[str, Any]] = {}
@@ -343,3 +421,10 @@ class BaseAndInstructionsOutput(BaseModel):
     """Harness D structured output."""
     base: BaseSpec
     instructions: Instructions
+
+
+class AssembleOutput(BaseModel):
+    """Harness E structured output."""
+    ahs_spec: dict[str, Any]
+    confidence_report: ConfidenceReport | None = None
+    warnings: list[str] = Field(default_factory=list)

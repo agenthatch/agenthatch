@@ -19,11 +19,14 @@ The Orchestrator implements a 4-level error handling strategy:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+
+from pydantic import ValidationError
 
 from agenthatch.skill.llm_client import LLMClient
 from agenthatch.skill.prompts import (
@@ -100,7 +103,7 @@ MODEL_TIER_MAP: dict[str, dict[str, str]] = {
         "A": "small", "B": "small", "C": "large", "D": "large", "E": "small", "F": "small",
     },
     "integration": {
-        "A": "small", "B": "large", "C": "large", "D": "large", "E": "small", "F": "small",
+        "A": "small", "B": "large", "C": "large", "D": "large", "E": "large", "F": "small",
     },
     "knowledge": {
         "A": "small", "B": "large", "C": "large", "D": "small", "E": "small", "F": "small",
@@ -548,7 +551,22 @@ dir_name: {dir_name}
 Cross-check and return the assembled ahs_spec with confidence_report."""
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
-        """Harness E uses simple chat (not structured) for flexible assembly."""
+        """Harness E: try structured output first, fallback to raw chat."""
+        # ── v0.5.10: Prefer chat_structured for reliability ──
+        try:
+            from agenthatch.skill.spec import AssembleOutput
+            result = self.client.chat_structured(
+                messages=messages,
+                response_model=AssembleOutput,
+                model=self.model,
+                temperature=0.3,
+                max_tokens=8192,
+            )
+            return result.model_dump()
+        except Exception as e:
+            logger.debug(f"Harness E chat_structured failed: {e}, falling back to raw chat")
+
+        # Fallback: raw chat with manual JSON extraction
         response = self.client.chat(
             messages=messages,
             model=self.model,
@@ -630,6 +648,7 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
         dir_name = inputs["dir_name"]
         correction_prompt = (
             f"Your previous output failed validation: {failure_reason}\n\n"
+            f"Previous output (first 500 chars):\n{str(result)[:500]}\n\n"
             "Please fix and return the corrected ahs_spec:\n"
             f"{self.build_user_message(identity=identity, intent=intent, interface=interface, base=base, instructions=instructions, resources=resources, dir_name=dir_name)}"  # noqa: E501
         )
@@ -731,7 +750,7 @@ class Orchestrator:
     Responsibilities:
       1. Pre-flight: analyze skill type, decide Harness combination + model tiers
       2. Build: construct LLMClient + 5 AgentHarness instances
-      3. Dispatch: parallel A+B+C, sequential D, sequential E
+      3. Dispatch: sequential A → B → C → D → E
       4. Collect: gather HarnessOutput, check self_check_passed
       5. Finalize: if validation fails, enter targeted repair loop
     """
@@ -842,10 +861,25 @@ class Orchestrator:
                 resources=resources,
                 dir_name=context.dir_name,
             )
-        except Exception as e:
-            logger.error(f"Harness E assembly failed: {e}")
-            from agenthatch.skill.validate import validate_and_repair
-            return validate_and_repair({}, outputs, harnesses, context)
+        except (ValueError, TypeError, RuntimeError, json.JSONDecodeError) as e:
+            logger.warning(f"Harness E assembly failed: {e}, retrying once")
+            try:
+                outputs["E"] = harnesses["E"].run(
+                    identity=outputs["A"].result if "A" in outputs else {},
+                    intent=outputs["B"].result if "B" in outputs else {},
+                    interface=outputs["C"].result if "C" in outputs else {},
+                    base=outputs["D"].result.get("base", {}) if "D" in outputs else {},
+                    instructions=(
+                        outputs["D"].result.get("instructions", {})
+                        if "D" in outputs else {}
+                    ),
+                    resources=resources,
+                    dir_name=context.dir_name,
+                )
+            except Exception as e2:
+                logger.error(f"Harness E retry also failed: {e2}")
+                from agenthatch.exceptions import SchemaValidationError
+                raise SchemaValidationError(f"Harness E failed: {e2}") from e2
 
         # Step 5b: Infer MCP servers (F)
         if tier_map.get("F") != "skip":
@@ -857,6 +891,7 @@ class Orchestrator:
             )
 
         # Step 6: Build AHSSpec from Harness E assembly output
+        ahs_dict: dict[str, Any] = {}
         try:
             ahs_dict = outputs["E"].result.get("ahs_spec", {})
 
@@ -900,12 +935,11 @@ class Orchestrator:
             ahs_spec.harness_traces = [outputs[k] for k in ["A", "B", "C", "D", "E", "F"] if k in outputs]  # noqa: E501
 
             return ahs_spec, outputs
-        except Exception as e:
-            # Last resort: try targeted repair via Pydantic validation
+        except (ValidationError, TypeError, ValueError) as e:
             logger.warning(f"Assembly failed: {e}, attempting targeted repair")
             from agenthatch.skill.validate import validate_and_repair
 
-            return validate_and_repair(outputs["E"].result, outputs, harnesses, context)
+            return validate_and_repair(ahs_dict, outputs, harnesses, context)
 
     def _classify(self, context: ContextPack) -> str:
         """Pre-flight skill type classification (deterministic heuristics).

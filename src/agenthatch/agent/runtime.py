@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from agenthatch.agent.compact import CompactSummary
 from agenthatch.agent.context import ContextManager
@@ -29,6 +30,13 @@ from agenthatch.skill.llm_client import LLMClient
 from agenthatch.skill.spec import AHSSpec
 
 logger = logging.getLogger(__name__)
+
+
+_SAFE_ENV_PREFIXES = ("",)  # Allow all by default, but block known dangerous keys
+_DANGEROUS_ENV_KEYS = {
+    "PATH", "HOME", "USER", "SHELL", "PWD",
+    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
+}
 
 
 class SkillBrick:
@@ -73,7 +81,8 @@ class SkillBrick:
                 f"Error: script '{script_name}' not found. "
                 f"Available scripts: {available}"
             )
-        return self.sandbox.run(str(script), env=kwargs)
+        safe_env = {k: str(v) for k, v in kwargs.items() if k.upper() not in _DANGEROUS_ENV_KEYS}
+        return self.sandbox.run(str(script), env=safe_env)
 
     def build_workflow_for_prompt(self) -> str:
         """Generate workflow text for system prompt injection."""
@@ -103,7 +112,12 @@ class SkillAgent:
     @classmethod
     def from_ahspec(cls, ahs_path: Path, **overrides: Any) -> SkillAgent:
         """Load SkillAgent from agenthatch.yaml."""
-        spec = AHSSpec.model_validate(yaml.safe_load(ahs_path.read_text()))
+        try:
+            raw = ahs_path.read_text(encoding="utf-8")
+            spec = AHSSpec.model_validate(yaml.safe_load(raw))
+        except (OSError, yaml.YAMLError, ValidationError) as e:
+            from agenthatch.exceptions import AgentHatchError
+            raise AgentHatchError(f"Failed to load AHSSPEC from {ahs_path}: {e}") from e
         return cls(spec, skill_dir=ahs_path.parent, **overrides)
 
     def __init__(
@@ -234,7 +248,10 @@ class SkillAgent:
         # DD-09-03: Reasoning models share a single max_tokens budget
         # between reasoning and content. The old 0.7x reduction was wrong —
         # it starved content tokens. Instead, INFLATE the budget.
-        user_set_max_tokens = self.spec.agent is not None
+        user_set_max_tokens = (
+            self.spec.agent is not None
+            and self.spec.agent.runtime.max_tokens != 4096  # 4096 is the default
+        )
         if (merged_features.supports_reasoning_content
                 and not user_set_max_tokens
                 and safe_max < 8192):

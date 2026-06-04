@@ -22,7 +22,7 @@ try:
     import tomllib
 except ImportError:
     try:
-        import tomli as tomllib  # type: ignore[no-redef]
+        import tomli as tomllib  # type: ignore[no-redef,unused-ignore,import-not-found]
     except ImportError:
         tomllib = None  # type: ignore[assignment]
 

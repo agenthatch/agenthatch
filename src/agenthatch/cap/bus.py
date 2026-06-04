@@ -58,6 +58,8 @@ class CapBus:
         from agenthatch.agent.builtins import BUILTIN_REGISTRY
         if name in BUILTIN_REGISTRY:
             self.builtins[name] = BUILTIN_REGISTRY[name]()
+        else:
+            logger.warning("inject_builtin: '%s' not found in BUILTIN_REGISTRY", name)
 
     def register_external_tool(
         self, name: str, schema: dict[str, Any], handler: Callable[..., str]
@@ -201,7 +203,16 @@ class APITemplateExecutor:
             t[1] for t in string.Formatter().parse(str(self._tpl.url)) if t[1]
         ]
         filtered = {k: v for k, v in kwargs.items() if k in placeholders}
-        return str(self._tpl.url).format(**filtered)
+        try:
+            return str(self._tpl.url).format(**filtered)
+        except KeyError as e:
+            logger.warning("build_url: missing placeholder %s in URL template", e)
+            # Replace missing placeholders with empty string
+            safe_url = str(self._tpl.url)
+            for ph in placeholders:
+                if ph not in filtered:
+                    safe_url = safe_url.replace("{" + ph + "}", "")
+            return safe_url.format(**filtered)
 
     def build_headers(self) -> dict[str, str]:
         headers = dict(self._tpl.headers)

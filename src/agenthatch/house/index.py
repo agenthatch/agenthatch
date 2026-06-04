@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,10 +88,12 @@ class SkillhouseIndex:
             self._data["created_at"] = self._data["updated_at"]
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(
             json.dumps(self._data, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        tmp.replace(self._path)  # Atomic on POSIX
 
     # ── Search Engine Initialization ──────────────────────────────────
 
@@ -123,14 +126,28 @@ class SkillhouseIndex:
             return
         from sentence_transformers import SentenceTransformer
 
-        try:
-            self._embedder = SentenceTransformer(self._embedding_model_name)
-        except Exception as e:
+        embedder_result: list[Any] = [None]
+        embedder_error: list[Any] = [None]
+
+        def _load() -> None:
+            try:
+                embedder_result[0] = SentenceTransformer(self._embedding_model_name)
+            except Exception as e:
+                embedder_error[0] = e
+
+        t = threading.Thread(target=_load, daemon=True)
+        t.start()
+        t.join(timeout=60)  # 60s timeout for model download
+        if t.is_alive():
             logger.warning(
-                f"Failed to load embedding model '{self._embedding_model_name}': {e}. "
-                "Embedding search disabled, falling back to keyword-only."
+                "SentenceTransformer download timed out (60s). "
+                "Embedding search disabled."
             )
             self._embedder_disabled = True
+            return
+        if embedder_error[0]:
+            raise embedder_error[0]
+        self._embedder = embedder_result[0]
 
     # ── Search ────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -84,6 +85,8 @@ class CheckpointManager:
         tmp = self._dir / "checkpoint.tmp.json"
         with open(tmp, "w") as f:
             json.dump(asdict(checkpoint), f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
         tmp.rename(self._path)
 
     def load(self) -> Checkpoint | None:
@@ -95,10 +98,12 @@ class CheckpointManager:
             return Checkpoint(**data)
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(
-                "Checkpoint file is corrupted: %s. Starting fresh.", e
+                "Checkpoint file is corrupted: %s. Renaming to .bak.", e
             )
             try:
-                self._path.unlink()
+                bak_path = self._path.with_suffix(".json.bak")
+                self._path.rename(bak_path)
+                logger.info("Corrupted checkpoint backed up to %s", bak_path)
             except OSError:
                 pass
             return None

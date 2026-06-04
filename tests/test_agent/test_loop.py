@@ -24,7 +24,7 @@ from agenthatch.skill.spec import (
 @pytest.fixture
 def spec() -> AHSSpec:
     return AHSSpec(
-        identity=Identity(id="loop-test", display_name="Loop Test", version="1.0"),
+        identity=Identity(id="loop-test", display_name="Loop Test", version="1.0.0"),
         intent=Intent(triggers=["test"], satisfies=["test"], summary="Test"),
         interface=Interface(provides=[], requires=[]),
         base=BaseSpec(),

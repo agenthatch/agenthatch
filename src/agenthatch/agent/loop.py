@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import random
@@ -15,6 +16,20 @@ from agenthatch.exceptions import CapabilityNotFoundError
 from agenthatch.skill.llm_client import LLMClient, ToolCallResponse
 
 logger = logging.getLogger(__name__)
+
+MAX_TOOL_RESULT_CHARS = 10000
+
+
+def _route_with_timeout(
+    capbus: CapBus, tool_name: str, arguments: dict[str, Any], timeout: int = 120
+) -> str:
+    """Execute tool with timeout to prevent infinite hangs."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(capbus.route, tool_name, arguments)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return f"Error: tool '{tool_name}' timed out after {timeout}s"
 
 
 class RichToolCallEvent:
@@ -124,7 +139,7 @@ class ConversationLoop:
                     ),
                 )
                 try:
-                    result = self.capbus.route(tc.name, tc.arguments)
+                    result = _route_with_timeout(self.capbus, tc.name, tc.arguments)
                     elapsed = time.time() - t0
                     logger.info(
                         "  %s -> %d chars (%.1fs)", tc.name,
@@ -138,10 +153,14 @@ class ConversationLoop:
                     elapsed = time.time() - t0
                     logger.warning("Tool execution failed: %s (%.1fs)", e, elapsed)
                     result = f"Error: {e}"
+                # Truncate large tool results to prevent token overflow
+                result_str = str(result)
+                if len(result_str) > MAX_TOOL_RESULT_CHARS:
+                    result_str = result_str[:MAX_TOOL_RESULT_CHARS] + "\n... (truncated)"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": str(result),
+                    "content": result_str,
                 })
                 self.ctx.add_to_history(
                     "tool",
@@ -397,7 +416,7 @@ class ConversationLoop:
             for tc in response.tool_calls:
                 t0 = time.time()
                 try:
-                    result = self.capbus.route(tc.name, tc.arguments)
+                    result = _route_with_timeout(self.capbus, tc.name, tc.arguments)
                 except CapabilityNotFoundError as e:
                     logger.warning("Tool call failed: %s", e)
                     result = f"Error: {e}"
@@ -413,10 +432,14 @@ class ConversationLoop:
                     result_preview=result[:200],
                 )
 
+                # Truncate large tool results to prevent token overflow
+                result_str = str(result)
+                if len(result_str) > MAX_TOOL_RESULT_CHARS:
+                    result_str = result_str[:MAX_TOOL_RESULT_CHARS] + "\n... (truncated)"
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result,
+                    "content": result_str,
                 })
                 self.ctx.add_to_history(
                     "tool",

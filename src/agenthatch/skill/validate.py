@@ -66,6 +66,26 @@ _FIELD_TO_HARNESS: dict[str, str] = {
     "instructions": "D",
 }
 
+# Map sub-fields to parent fields for Pydantic errors where loc[0] is a sub-field
+_PARENT_FIELD_MAP: dict[str, str] = {
+    # identity sub-fields
+    "id": "identity", "display_name": "identity", "version": "identity",
+    "license": "identity", "author": "identity", "meta": "identity",
+    # intent sub-fields
+    "triggers": "intent", "satisfies": "intent", "summary": "intent",
+    # interface sub-fields
+    "provides": "interface", "requires": "interface",
+    "compatible_with": "interface", "mcp_servers": "interface",
+    "api_templates": "interface",
+    # instructions sub-fields
+    "workflow": "instructions", "rules": "instructions",
+    "safety": "instructions", "output_template": "instructions",
+    "raw_body": "instructions",
+    # base sub-fields
+    "runtime": "base", "sandbox": "base", "timeout": "base",
+    "env": "base", "dependencies": "base",
+}
+
 # Harness key → human-readable label
 _HARNESS_LABEL: dict[str, str] = {
     "A": "extract_identity",
@@ -111,10 +131,10 @@ def validate_and_repair(
         ahs_dict.get("ahs_spec", ahs_dict) if isinstance(ahs_dict, dict) else ahs_dict
     )
 
-    # ── v0.5.2: Coerce base data before validation (Fix 4) ──
-    if "base" in spec_dict:
-        from agenthatch.skill.spec import _coerce_base_data
-        spec_dict["base"] = _coerce_base_data(spec_dict["base"])
+    # ── v0.5.10: Coerce all AHSSPEC fields before validation ──
+    if isinstance(spec_dict, dict) and spec_dict:
+        from agenthatch.skill.spec import _coerce_ahs_dict
+        spec_dict = _coerce_ahs_dict(spec_dict)
 
     total_saved = 0
     retries = 0
@@ -250,6 +270,13 @@ def _map_errors_to_harnesses(errors: list[dict[str, Any]]) -> list[str]:
             continue
         top_field = str(loc[0])
         harness_key = _FIELD_TO_HARNESS.get(top_field)
+        if not harness_key:
+            # Try sub-field → parent field resolution
+            parent = _PARENT_FIELD_MAP.get(top_field)
+            if parent:
+                harness_key = _FIELD_TO_HARNESS.get(parent)
+        if not harness_key and top_field == "__root__":
+            harness_key = "E"  # parse error → re-run assembly
         if harness_key:
             harnesses.add(harness_key)
     return sorted(harnesses)

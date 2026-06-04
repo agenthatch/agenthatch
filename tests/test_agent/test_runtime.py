@@ -27,7 +27,7 @@ from agenthatch.skill.spec import (
 @pytest.fixture
 def minimal_spec() -> AHSSpec:
     return AHSSpec(
-        identity=Identity(id="test", display_name="Test", version="1.0"),
+        identity=Identity(id="test", display_name="Test", version="1.0.0"),
         intent=Intent(triggers=["a"], satisfies=["b"], summary="c"),
         interface=Interface(provides=[], requires=[]),
         base=BaseSpec(),
@@ -38,7 +38,7 @@ def minimal_spec() -> AHSSpec:
 @pytest.fixture
 def spec_with_agent_config() -> AHSSpec:
     return AHSSpec(
-        identity=Identity(id="configured", display_name="Configured", version="1.0"),
+        identity=Identity(id="configured", display_name="Configured", version="1.0.0"),
         intent=Intent(triggers=["x"], satisfies=["y"], summary="z"),
         interface=Interface(provides=[], requires=[]),
         base=BaseSpec(),
@@ -58,7 +58,7 @@ def spec_with_agent_config() -> AHSSpec:
 @pytest.fixture
 def spec_with_capabilities() -> AHSSpec:
     return AHSSpec(
-        identity=Identity(id="cap-skill", display_name="Cap Skill", version="1.0"),
+        identity=Identity(id="cap-skill", display_name="Cap Skill", version="1.0.0"),
         intent=Intent(triggers=["cap"], satisfies=["cap {x}"], summary="cap test"),
         interface=Interface(
             provides=[
@@ -87,7 +87,7 @@ def spec_with_scripts(tmp_path) -> AHSSpec:
     script_path = tmp_path / "hello.sh"
     script_path.write_text("#!/bin/bash\necho hello")
     spec = AHSSpec(
-        identity=Identity(id="script-skill", display_name="Script Skill", version="1.0"),
+        identity=Identity(id="script-skill", display_name="Script Skill", version="1.0.0"),
         intent=Intent(triggers=["run"], satisfies=["run script"], summary="script test"),
         interface=Interface(provides=[], requires=[]),
         base=BaseSpec(runtime="bash"),
@@ -107,7 +107,7 @@ def ahs_yaml_path(tmp_path, minimal_spec) -> Path:
         "identity": {
             "id": "test",
             "display_name": "Test",
-            "version": "1.0",
+            "version": "1.0.0",
         },
         "intent": {
             "triggers": ["a"],
