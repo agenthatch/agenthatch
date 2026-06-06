@@ -482,7 +482,7 @@ class ContextManager:
         """Execute compaction. Returns True on success."""
         try:
             summary = self._generate_summary()
-        except (json.JSONDecodeError, KeyError, RuntimeError) as e:
+        except (json.JSONDecodeError, KeyError, RuntimeError, ValueError) as e:
             logger.warning("Compact summary invalid (%s), falling back to truncation", e)
             self._consecutive_compact_failures += 1
             return self._fallback_truncation()

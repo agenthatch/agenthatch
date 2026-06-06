@@ -7,6 +7,7 @@
 [llm]
 provider = "{{ llm_provider | default('openai') }}"
 model = "{{ model | default('gpt-4o') }}"
+base_url = "{{ base_url | default('https://api.openai.com/v1') }}"
 # api_key = ""  # Auto-inherited; uncomment to override with env var or plaintext key
 
 [compact]

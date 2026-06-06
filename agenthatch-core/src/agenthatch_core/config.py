@@ -74,7 +74,7 @@ def _warn_plaintext_api_key(result: dict) -> None:
 
 
 def inherit_api_key(config: dict[str, Any]) -> dict[str, Any]:
-    """Fill missing API key from agenthatch global config.
+    """Fill missing API key and base_url from agenthatch global config.
 
     Reads ~/.agenthatch/config.toml (standard path, no agenthatch import).
     Only fills if the key is missing or empty — never overwrites explicit keys.
@@ -85,12 +85,6 @@ def inherit_api_key(config: dict[str, Any]) -> dict[str, Any]:
     llm_cfg = config.get("llm", {})
     if not isinstance(llm_cfg, dict):
         return config
-
-    api_key = llm_cfg.get("api_key", "")
-
-    # resolve_runtime_config() already resolved ${VAR} → either real key or empty
-    if api_key and api_key.strip():
-        return config  # Already has a valid key, nothing to inherit
 
     provider = llm_cfg.get("provider", "deepseek")
 
@@ -108,8 +102,18 @@ def inherit_api_key(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(provider_cfg, dict):
         return config
 
-    ah_api_key = provider_cfg.get("api_key", "")
-    if ah_api_key and isinstance(ah_api_key, str) and not ah_api_key.startswith("${"):
-        llm_cfg["api_key"] = ah_api_key
+    # Inherit api_key if missing
+    api_key = llm_cfg.get("api_key", "")
+    if not api_key or not api_key.strip():
+        ah_api_key = provider_cfg.get("api_key", "")
+        if ah_api_key and isinstance(ah_api_key, str) and not ah_api_key.startswith("${"):
+            llm_cfg["api_key"] = ah_api_key
+
+    # Inherit base_url if missing (critical: otherwise defaults to openai.com)
+    base_url = llm_cfg.get("base_url", "")
+    if not base_url:
+        ah_base_url = provider_cfg.get("base_url", "")
+        if ah_base_url:
+            llm_cfg["base_url"] = ah_base_url
 
     return config

@@ -107,8 +107,8 @@ class GenerateEngine:
         # Base runtime
         base_runtime = base.get("runtime", "python3.11") if base else "python3.11"
 
-        # Model: derived from base runtime or default
-        model = "gpt-4o"
+        # LLM provider/model: read from global config if available
+        llm_provider, model, base_url = self._read_default_provider()
 
         # Tools: list of provide capability names
         tools = self._extract_tool_names(interface.get("provides", []))
@@ -123,11 +123,12 @@ class GenerateEngine:
             "workflow": workflow,
             "output_tpl": output_tpl,
             "rules": rules,
-            "requires": requires,
             "base_runtime": base_runtime,
-            "llm_provider": "openai",  # Default LLM provider (user overrides in runtime.toml)
+            "llm_provider": llm_provider,
             "model": model,
+            "base_url": base_url,
             "tools": tools,
+            "requires": requires,
         }
 
     @staticmethod
@@ -164,6 +165,29 @@ class GenerateEngine:
             result = prefix + result[1:]
 
         return result
+
+    @staticmethod
+    def _read_default_provider() -> tuple[str, str, str]:
+        """Read default provider, model, and base_url from global config.
+
+        Returns ("openai", "gpt-4o", "https://api.openai.com/v1") if no config found.
+        """
+        import tomllib as _tomllib
+
+        config_path = Path.home() / ".agenthatch" / "config.toml"
+        if not config_path.exists():
+            return ("openai", "gpt-4o", "https://api.openai.com/v1")
+
+        try:
+            cfg = _tomllib.loads(config_path.read_text())
+        except Exception:
+            return ("openai", "gpt-4o", "https://api.openai.com/v1")
+
+        provider = cfg.get("providers", {}).get("default", "openai")
+        provider_cfg = cfg.get("providers", {}).get(provider, {})
+        model = provider_cfg.get("default_model", "gpt-4o")
+        base_url = provider_cfg.get("base_url", "https://api.openai.com/v1")
+        return (provider, model, base_url)
 
     @staticmethod
     def _format_workflow(workflow: list[dict[str, Any]]) -> str:

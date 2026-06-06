@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class CompactSummary:
+class CompactSummary(BaseModel):
     """Structured summary produced by LLM during context compaction."""
 
     session_intent: str = ""
-    key_decisions: list[str] = field(default_factory=list)
-    artifacts_created: list[str] = field(default_factory=list)
+    key_decisions: list[str] = Field(default_factory=list)
+    artifacts_created: list[str] = Field(default_factory=list)
     current_state: str = ""
-    pending_actions: list[str] = field(default_factory=list)
-    open_questions: list[str] = field(default_factory=list)
-    errors_encountered: list[str] = field(default_factory=list)
+    pending_actions: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    errors_encountered: list[str] = Field(default_factory=list)
     tool_calls_summary: str = ""
     conversation_turns: int = 0
     compressed_at: str = ""

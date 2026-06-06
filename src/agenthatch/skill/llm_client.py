@@ -141,7 +141,7 @@ class LLMClient:
                 response_model=response_model,
                 max_retries=max_retries,
             )
-        except instructor.exceptions.InstructorRetryException:  # type: ignore[attr-defined]
+        except instructor.core.InstructorRetryException:
             pass
 
         # DD-08-03: Fallback for reasoning models — instructor failed,

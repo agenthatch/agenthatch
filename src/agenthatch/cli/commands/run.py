@@ -58,7 +58,11 @@ def run_command(
     if model:
         runtime_config.setdefault("llm", {})["model"] = model
 
-    # 4. In-process launch
+    # 4. Inherit API key from global config if still missing after CLI overrides
+    from agenthatch_core.config import inherit_api_key
+    runtime_config = inherit_api_key(runtime_config)
+
+    # 5. In-process launch
     _launch(agent_dir, skill_name, runtime_config)
 
 
@@ -76,12 +80,17 @@ def _find_hatched_agent(skill_name: str) -> Path:
     from agenthatch.config import Config
     from agenthatch.house.index import SkillhouseIndex
 
-    # Priority 1: Direct path
+    # Priority 1: Direct path (only when input looks like a filesystem path)
     input_path = Path(skill_name)
-    if input_path.exists():
+    looks_like_path = (
+        "/" in skill_name
+        or "\\" in skill_name
+        or bool(input_path.suffix)
+        or skill_name in (".", "..")
+    )
+    if looks_like_path and input_path.exists():
         if input_path.is_dir():
             return _validate_agent_dir(input_path)
-        # If it's a file, find the parent agent dir
         return _validate_agent_dir(input_path.parent)
 
     # Check ./<name>-agent/
@@ -353,7 +362,7 @@ def _handle_config_command(agent: Any) -> str | None:
     runtime_path = agent_dir / "runtime.toml"
 
     try:
-        import tomli_w  # type: ignore[import-not-found]
+        import tomli_w
     except ImportError:
         return "[warn]tomli_w not installed. Run: pip install tomli_w[/warn]"
 
