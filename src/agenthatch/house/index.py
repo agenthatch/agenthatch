@@ -217,6 +217,7 @@ class SkillhouseIndex:
         skill_id: str,
         ahs_spec: Any,  # AHSSpec instance
         ahs_path: str,
+        agent_output: str | None = None,
     ) -> None:
         """Register a new skill in the index.
 
@@ -224,6 +225,7 @@ class SkillhouseIndex:
             skill_id: Unique skill identifier (kebab-case).
             ahs_spec: AHSSpec Pydantic model instance.
             ahs_path: Path to the agenthatch.yaml file.
+            agent_output: Path to the generated Agent directory (v0.6).
         """
         entry = {
             "ahs_path": ahs_path,
@@ -250,6 +252,8 @@ class SkillhouseIndex:
             },
             "hash": _compute_ahs_hash(ahs_spec),
         }
+        if agent_output:
+            entry["agent_output"] = agent_output
         # Generate embedding from satisfies + summary
         entry["embedding"] = self._compute_entry_embedding(entry)  # type: ignore[assignment]
 
@@ -257,6 +261,13 @@ class SkillhouseIndex:
         self._remove_from_topology(skill_id)
         self._update_topology(skill_id, ahs_spec)
         self._bm25 = None  # invalidate BM25 cache
+        self._save()
+
+    def update_agent_output(self, skill_id: str, agent_output: str) -> None:
+        """Update the agent_output path for an existing entry (v0.6)."""
+        if skill_id not in self._data.get("entries", {}):
+            return
+        self._data["entries"][skill_id]["agent_output"] = agent_output
         self._save()
 
     def _compute_entry_embedding(self, entry: dict[str, Any]) -> list[float]:

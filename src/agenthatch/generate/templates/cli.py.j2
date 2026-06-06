@@ -1,0 +1,145 @@
+"""{{ agent_name }} CLI — Typer application."""
+
+import typer
+from pathlib import Path
+from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.prompt import Prompt
+
+from {{ package_name }}.agent import {{ agent_class }}
+
+app = typer.Typer(name="{{ agent_name }}", help="{{ description }}")
+console = Console()
+
+RUNTIME_PATH = Path(__file__).resolve().parent.parent / "runtime.toml"
+
+
+def _load_runtime(config_path: Path) -> dict:
+    """Load, resolve, and inherit runtime configuration."""
+    import tomllib
+    from agenthatch_core.config import resolve_runtime_config, inherit_api_key
+    raw = tomllib.loads(config_path.read_text())
+    resolved = resolve_runtime_config(raw)
+    return inherit_api_key(resolved)
+
+
+def _cmd_config(agent, runtime_path: Path):
+    """Interactive API key configuration. Instant apply + persist to runtime.toml."""
+    import tomllib, tomli_w
+
+    if not runtime_path.exists():
+        runtime_path.write_text("[llm]\nprovider = \"openai\"\nmodel = \"gpt-4o\"\n")
+
+    cfg = tomllib.loads(runtime_path.read_text())
+    llm = cfg.setdefault("llm", {})
+    current_key = llm.get("api_key", "")
+
+    if current_key and not current_key.startswith("$"):
+        key_display = "sk..." + current_key[-4:]
+    elif not current_key:
+        key_display = "auto-inherit from agenthatch config"
+    else:
+        key_display = "env var reference"
+
+    console.print(Panel(
+        f"Provider: {llm.get('provider', 'openai')}\n"
+        f"Model: {llm.get('model', 'gpt-4o')}\n"
+        f"API Key: {key_display}",
+        title="API Key Configuration"
+    ))
+    console.print("  1. Switch Provider\n  2. Switch Model\n  3. Change API Key\n  4. Back")
+
+    choice = Prompt.ask("Select", choices=["1", "2", "3", "4"])
+
+    if choice == "1":
+        new_provider = Prompt.ask("Provider", choices=["deepseek", "openai", "anthropic", "ollama"])
+        llm["provider"] = new_provider
+    elif choice == "2":
+        llm["model"] = Prompt.ask("Model", default=llm.get("model", "gpt-4o"))
+    elif choice == "3":
+        llm["api_key"] = Prompt.ask("API Key", password=True)
+    else:
+        return
+
+    # Persist
+    runtime_path.write_text(tomli_w.dumps(cfg))
+
+    # Instant apply: rebuild LLMClient with the new key
+    from agenthatch_core.llm.client import LLMClient
+    agent.llm = LLMClient(
+        provider=llm.get("provider", "openai"),
+        model=llm.get("model", "gpt-4o"),
+        api_key=llm.get("api_key"),
+    )
+    console.print("[bold green]✓ Configuration updated and applied[/bold green]")
+
+
+@app.command()
+def serve(
+    config: Path = typer.Option(RUNTIME_PATH, help="Path to runtime config"),
+):
+    """Start interactive chat service."""
+    runtime = _load_runtime(config)
+    agent = {{ agent_class }}(runtime_config=runtime)
+
+    console.print(Panel(
+        f"[bold bright_blue]{{ agent_class }}[/] ({{ agent_name }} v{{ version }})",
+        title="Agent", border_style="bright_blue"
+    ))
+
+    while True:
+        try:
+            user_input = Prompt.ask("[bold green]You[/]")
+            if not user_input.strip():
+                continue
+            if user_input.strip() == "/config":
+                _cmd_config(agent, config)
+                continue
+            if user_input.strip() in ("/quit", "/exit"):
+                break
+            if user_input.strip() == "/help":
+                console.print("[bold]Commands:[/] /help /config /quit")
+                continue
+
+            full_text: list[str] = []
+            tool_status: dict[str, str] = {}
+
+            def _render():
+                lines = [f"[bold bright_blue]{agent.identity.display_name}[/]"]
+                for name, status in tool_status.items():
+                    lines.append(f"  [cyan]{name}[/] {status}")
+                if full_text:
+                    lines.append("".join(full_text)[-300:])
+                return "\n".join(lines) or "[dim]Thinking...[/dim]"
+
+            with Live(Panel(_render(), title="Agent"), refresh_per_second=8) as live:
+                for event in agent.chat_stream(user_input):
+                    if hasattr(event, 'phase'):
+                        if event.phase == "start":
+                            tool_status[event.tool_name] = "[bold yellow]running...[/]"
+                        elif event.phase == "done":
+                            tool_status[event.tool_name] = (
+                                f"[bold green]done[/] ({event.elapsed:.1f}s) "
+                                f"[dim]→ {(event.result_preview or '')[:80]}[/]"
+                            )
+                    else:
+                        full_text.append(str(event))
+                    live.update(Panel(_render(), title="Agent"))
+
+            console.print(Markdown("".join(full_text)))
+            console.print()
+        except (KeyboardInterrupt, EOFError):
+            break
+
+
+@app.command()
+def chat(
+    message: str = typer.Argument(help="Single chat message"),
+    config: Path = typer.Option(RUNTIME_PATH),
+):
+    """Single-turn chat mode."""
+    runtime = _load_runtime(config)
+    agent = {{ agent_class }}(runtime_config=runtime)
+    console.print(agent.chat(message))

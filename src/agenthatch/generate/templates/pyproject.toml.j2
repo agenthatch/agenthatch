@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "{{ agent_name }}-agent"
+version = "{{ version }}"
+description = "{{ description }}"
+requires-python = ">=3.11"
+dependencies = [
+    "agenthatch-core>=0.6.0",
+    "typer>=0.15.0",
+    "rich>=13.0",
+{%- for req in requires %}
+    "{{ req }}",
+{%- endfor %}
+]
+
+[project.scripts]
+{{ agent_name }} = "{{ package_name }}.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/{{ package_name }}"]

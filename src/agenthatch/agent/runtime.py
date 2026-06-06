@@ -10,6 +10,7 @@ v0.5 additions:
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,15 @@ class SkillAgent:
         except (OSError, yaml.YAMLError, ValidationError) as e:
             from agenthatch.exceptions import AgentHatchError
             raise AgentHatchError(f"Failed to load AHSSPEC from {ahs_path}: {e}") from e
+
+        if spec.agent and spec.agent.runtime is not None:
+            warnings.warn(
+                "agent.runtime in agenthatch.yaml is deprecated. "
+                "Runtime config has moved to runtime.toml. "
+                "Run 'agenthatch migrate' to convert.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return cls(spec, skill_dir=ahs_path.parent, **overrides)
 
     def __init__(
@@ -137,7 +147,7 @@ class SkillAgent:
 
         # ── v0.5: Apply per-skill compact config ──
         agent_cfg = self.spec.agent
-        if agent_cfg and agent_cfg.runtime.compact:
+        if agent_cfg and agent_cfg.runtime and agent_cfg.runtime.compact:
             self.ctx.compact_config = {
                 "enabled": agent_cfg.runtime.compact.enabled,
                 "ratio": agent_cfg.runtime.compact.ratio,
@@ -190,23 +200,24 @@ class SkillAgent:
     ) -> dict[str, Any]:
         """Resolve runtime config with 3-level priority: CLI > agenthatch.yaml > config.toml."""
         agent_cfg = self.spec.agent
+        has_runtime = agent_cfg is not None and agent_cfg.runtime is not None
         resolved: dict[str, Any] = {
             "provider": provider or (
-                agent_cfg.runtime.provider if agent_cfg else None
+                agent_cfg.runtime.provider if has_runtime else None
             ) or get_default_provider(),
             "model": model or (
-                agent_cfg.runtime.model if agent_cfg else None
+                agent_cfg.runtime.model if has_runtime else None
             ) or "",
             "api_key": api_key or "",
             "temperature": (
-                agent_cfg.runtime.temperature if agent_cfg else 0.7
+                agent_cfg.runtime.temperature if has_runtime else 0.7
             ),
             "max_tokens": (
-                agent_cfg.runtime.max_tokens if agent_cfg else 4096
+                agent_cfg.runtime.max_tokens if has_runtime else 4096
             ),
         }
 
-        agent_features = agent_cfg.runtime.features if agent_cfg else {}
+        agent_features = agent_cfg.runtime.features if has_runtime else {}
         provider_features = getattr(
             get_provider(resolved["provider"]), "features", ProviderFeatures()
         )
@@ -250,6 +261,7 @@ class SkillAgent:
         # it starved content tokens. Instead, INFLATE the budget.
         user_set_max_tokens = (
             self.spec.agent is not None
+            and self.spec.agent.runtime is not None
             and self.spec.agent.runtime.max_tokens != 4096  # 4096 is the default
         )
         if (merged_features.supports_reasoning_content

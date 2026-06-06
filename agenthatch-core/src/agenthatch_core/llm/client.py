@@ -1,73 +1,76 @@
-"""LLMClient — Thin wrapper over v0.2 providers + openai SDK.
+"""LLMClient — Unified LLM call interface (agenthatch-core).
 
-All AgentHarnesses use this single client interface.
-Supports OpenAI-compatible APIs (including Anthropic proxy via base_url).
+Supports OpenAI-compatible APIs. Core version accepts provider details directly
+rather than resolving from agenthatch config.
 
 Usage:
-    client = LLMClient(provider_name="openai")
+    client = LLMClient(provider="openai", model="gpt-4o", api_key="sk-...")
     response = client.chat(messages=[{"role": "user", "content": "Hello"}])
     result = client.chat_structured(messages=msgs, response_model=MyPydanticModel)
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Generator
-from dataclasses import dataclass
-from dataclasses import field as dc_field
+from dataclasses import dataclass, field as dc_field
 from typing import Any
 
-from agenthatch.exceptions import ApiKeyError, ProviderCapabilityError
-from agenthatch.providers import (
-    ProviderFeatures,
-    get_default_provider,
-    get_provider,
-    resolve_api_key,
-)
+from agenthatch_core.exceptions import ApiKeyError, ProviderCapabilityError
+from agenthatch_core.llm.types import StreamDelta, ToolCall, ToolCallResponse
 
 logger = logging.getLogger(__name__)
 
 
-class LLMClient:
-    """Unified LLM call interface wrapping v0.2 provider management.
+@dataclass
+class ProviderFeatures:
+    """Capability flags for a provider's API surface."""
+    supports_tools: bool = True
+    supports_stream_tools: bool = True
+    supports_json_mode: bool = True
+    supports_parallel_tool_calls: bool = True
+    supports_reasoning_content: bool = False
+    requires_anthropic_adapter: bool = False
+    available_models: list[str] = dc_field(default_factory=list)
 
-    All AgentHarnesses use this client for both simple chat and
-    structured (Instructor) output calls.
+
+class LLMClient:
+    """Unified LLM call interface.
+
+    Core version: accepts provider details directly.
     """
 
-    def __init__(self, provider_name: str | None = None, model: str | None = None):
-        """Initialize LLM client for a provider.
-
-        Args:
-            provider_name: Provider name (openai/anthropic/deepseek/ollama/custom.<name>).
-                           If None, uses the default provider from config.
-            model: Model name. If None, uses provider's default_model.
-        """
-        name = provider_name or get_default_provider()
-        self._info = get_provider(name)
-        api_key = resolve_api_key(name)
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        features: ProviderFeatures | None = None,
+        **kwargs: Any,
+    ):
         if not api_key:
-            raise ApiKeyError(f"No API key resolved for provider '{name}'")
+            raise ApiKeyError(f"No API key provided for provider '{provider}'")
 
-        self._provider_name = name
-        self._model = model or self._info.default_model
-        self._features = self._info.features
-        self._max_tokens = 4096
+        self._provider_name = provider
+        self._model = model
+        self._features = features or ProviderFeatures()
+        self._max_tokens = max_tokens or 4096
 
-        # BUG-04-06: Anthropic uses Messages API, not Chat Completions
         if self._features.requires_anthropic_adapter:
             raise ProviderCapabilityError(
-                f"Provider '{name}' requires an Anthropic API adapter which is "
-                f"not yet implemented. Track progress at: "
-                f"github.com/agenthatch/agenthatch/issues/anthropic-adapter"
+                f"Provider '{provider}' requires an Anthropic API adapter."
             )
 
         import openai
 
         self._client = openai.OpenAI(
             api_key=api_key,
-            base_url=self._info.base_url,
-            timeout=120.0,
+            base_url=base_url or "https://api.openai.com/v1",
+            timeout=kwargs.get("timeout", 120.0),
         )
 
     @property
@@ -105,11 +108,52 @@ class LLMClient:
         choice = response.choices[0]
         if choice.finish_reason == "length":
             logger.warning(
-                "Response truncated by max_tokens limit. "
-                "Consider increasing max_tokens in agenthatch.yaml "
-                "or via --max-tokens CLI flag."
+                "Response truncated by max_tokens limit."
             )
         return self._extract_content(choice.message)
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> Generator[str, None, str]:
+        """Streaming chat completion without tools.
+
+        Returns a generator yielding text deltas, with final response as
+        the StopIteration value.  Delegates to _stream_native with no tools
+        rather than using empty tool lists (which can trigger tool_choice
+        anomalies in some models).
+        """
+        stream = self._client.chat.completions.create(
+            model=model or self._model,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+
+        for event in stream:
+            delta = event.choices[0].delta if event.choices else None  # type: ignore[union-attr]
+            if delta is None:
+                continue
+
+            if delta.content:
+                text_parts.append(delta.content)
+                yield delta.content
+
+            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                reasoning_parts.append(delta.reasoning_content)
+
+        text = "".join(text_parts)
+        if not text and reasoning_parts:
+            text = "".join(reasoning_parts)
+
+        return text
 
     # ── Structured output (Instructor pattern) ───────────────────────
 
@@ -122,16 +166,9 @@ class LLMClient:
         max_tokens: int = 4096,
         max_retries: int = 2,
     ) -> Any:
-        """Structured output via Instructor (LLM → Pydantic).
-
-        Wraps instructor.from_openai() with retry loop.
-        Returns validated Pydantic model instance.
-        """
+        """Structured output via Instructor (LLM -> Pydantic)."""
         import instructor
 
-        # Mode.JSON required: glm-5-external in TOOLS mode serializes
-        # nested Pydantic objects as JSON strings instead of native dicts,
-        # causing validation errors like "Input should be an object".
         client = instructor.from_openai(self._client, mode=instructor.Mode.JSON)
 
         try:
@@ -141,11 +178,12 @@ class LLMClient:
                 response_model=response_model,
                 max_retries=max_retries,
             )
-        except instructor.exceptions.InstructorRetryException:  # type: ignore[attr-defined]
+        except Exception:
+            # InstructorRetryException or any other instructor error
+            # Fallback to raw JSON parsing below
             pass
 
-        # DD-08-03: Fallback for reasoning models — instructor failed,
-        # try extracting content via _extract_content and parse manually
+        # Fallback for reasoning models
         response = self._client.chat.completions.create(
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
@@ -156,28 +194,23 @@ class LLMClient:
         content = self._extract_content(msg)
         if not content:
             raise ValueError(
-                "chat_structured: model returned empty content and "
-                "reasoning_content also empty"
+                "chat_structured: model returned empty content"
             )
-        import json as _json
-
-        # DD-09-06: Try balanced JSON extraction for reasoning models
-        # that return markdown+JSON mixtures in reasoning_content
         try:
-            parsed = _json.loads(content)
-        except _json.JSONDecodeError as e:
-            from agenthatch.agent.context import _extract_balanced_json
+            parsed = json.loads(content)
+        except json.JSONDecodeError as e:
+            from agenthatch_core.context.manager import _extract_balanced_json
 
             json_strs = _extract_balanced_json(content)
             if json_strs:
-                parsed = _json.loads(json_strs[0])
+                parsed = json.loads(json_strs[0])
             else:
                 raise ValueError(
                     "chat_structured: no valid JSON found in response"
                 ) from e
         return response_model.model_validate(parsed)  # type: ignore[attr-defined]
 
-    # ── v0.4 Tool Calling ──────────────────────────────────────────────
+    # ── Tool Calling ─────────────────────────────────────────────────
 
     def chat_with_tools(
         self,
@@ -188,11 +221,7 @@ class LLMClient:
         max_tokens: int = 4096,
         tool_choice: str = "auto",
     ) -> ToolCallResponse:
-        """Chat completion with tool calling.
-
-        Degradation: if provider declares supports_tools=False,
-        call chat() and return a text-only ToolCallResponse.
-        """
+        """Chat completion with tool calling."""
         if not self._features.supports_tools:
             text = self.chat(
                 messages=messages,
@@ -211,7 +240,6 @@ class LLMClient:
             max_tokens=max_tokens,
         )
         result = ToolCallResponse.from_openai(response, llm_client=self)
-        # BUG-04-01: Apply content extraction for reasoning/content split
         msg = response.choices[0].message
         extracted = self._extract_content(msg)
         if extracted:
@@ -228,16 +256,7 @@ class LLMClient:
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
-        """Streaming chat completion with tool calling.
-
-        Degradation strategy:
-          Phase 1: If provider declares supports_stream_tools=False,
-                   skip streaming entirely, call chat_with_tools() synchronously,
-                   then yield the result as synthetic deltas.
-          Phase 2: If provider declares supports_stream_tools=True but the API
-                   returns an error at runtime, catch the exception and fall back
-                   to Phase 1 (synchronous with synthetic streaming).
-        """
+        """Streaming chat completion with tool calling."""
         if not self._features.supports_stream_tools:
             return self._stream_synthetic_fallback(messages, tools, model, temperature, max_tokens)
 
@@ -246,18 +265,10 @@ class LLMClient:
         except Exception as e:
             if self._is_stream_tools_error(e):
                 logger.warning(
-                    "Provider '%s' failed on stream+tools, falling back to synthetic streaming: %s",
+                    "Provider '%s' failed on stream+tools, falling back to synthetic: %s",
                     self._provider_name, e,
                 )
-                self._features = ProviderFeatures(
-                    supports_tools=self._features.supports_tools,
-                    supports_stream_tools=False,
-                    supports_json_mode=self._features.supports_json_mode,
-                    supports_parallel_tool_calls=self._features.supports_parallel_tool_calls,
-                    supports_reasoning_content=self._features.supports_reasoning_content,
-                    requires_anthropic_adapter=self._features.requires_anthropic_adapter,
-                    available_models=self._features.available_models,
-                )
+                self._features.supports_stream_tools = False
                 return self._stream_synthetic_fallback(
                     messages, tools, model, temperature, max_tokens
                 )
@@ -271,9 +282,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
-        """Native streaming with tool calling (OpenAI-compatible)."""
-        import json
-
+        """Native streaming with tool calling."""
         stream = self._client.chat.completions.create(
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
@@ -347,8 +356,6 @@ class LLMClient:
         text = "".join(text_parts)
         if not text and reasoning_parts:
             text = "".join(reasoning_parts)
-        elif not text and not reasoning_parts and not final_tool_calls:
-            text = ""
 
         return ToolCallResponse(
             text=text or None,
@@ -363,13 +370,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
-        """Synthetic streaming: call chat_with_tools() synchronously,
-        then yield result as StreamDelta chunks.
-
-        This provides the same Generator[StreamDelta, None, ToolCallResponse]
-        interface as _stream_native, so ConversationLoop.stream() works
-        identically regardless of provider capability.
-        """
+        """Synthetic streaming fallback."""
         response = self.chat_with_tools(
             messages=messages,
             tools=tools,
@@ -380,7 +381,7 @@ class LLMClient:
 
         if response.text:
             for i in range(0, len(response.text), self._SYNTHETIC_CHUNK_SIZE):
-                chunk = response.text[i : i + self._SYNTHETIC_CHUNK_SIZE]
+                chunk = response.text[i: i + self._SYNTHETIC_CHUNK_SIZE]
                 yield StreamDelta(type="text", content=chunk)
 
         for i, tc in enumerate(response.tool_calls):
@@ -396,13 +397,7 @@ class LLMClient:
 
     @staticmethod
     def _is_stream_tools_error(exc: Exception) -> bool:
-        """Detect whether an exception is caused by stream+tools incompatibility.
-
-        Checks for common error patterns from OpenAI-compatible APIs:
-          - "stream" and "tool" both mentioned in error message
-          - HTTP 400 with tool/stream related error code
-          - Zhipu AI specific error patterns
-        """
+        """Detect stream+tools incompatibility errors."""
         msg = str(exc).lower()
         has_stream = "stream" in msg
         has_tool = "tool" in msg or "function" in msg
@@ -418,21 +413,11 @@ class LLMClient:
         return False
 
     def _extract_content(self, message: Any) -> str:
-        """Extract text content from LLM response, handling reasoning models.
-
-        Used by ALL call paths: chat_with_tools, chat_structured, chat, etc.
-
-        DD-09-09: Handles three formats:
-          1. content as string (OpenAI-compatible)
-          2. content as list (Anthropic Messages API)
-          3. reasoning_content fallback (reasoning models)
-        """
-        # Standard: content as string
+        """Extract text content from LLM response, handling reasoning models."""
         content = getattr(message, "content", None)
         if isinstance(content, str) and content.strip():
             return content
 
-        # Anthropic: content as list of blocks
         if isinstance(content, list):
             texts = [
                 b.get("text", "")
@@ -442,7 +427,6 @@ class LLMClient:
             if texts:
                 return "\n".join(texts)
 
-        # DD-09-09: Reasoning fallback — return FULL reasoning_content
         if self._features.supports_reasoning_content:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning and isinstance(reasoning, str) and reasoning.strip():
@@ -451,97 +435,30 @@ class LLMClient:
         return ""
 
 
-# ── v0.4 Tool Calling Data Classes ──────────────────────────────────
+# Extend ToolCallResponse with from_openai factory
+def _tool_call_response_from_openai(response: Any, llm_client: Any | None = None) -> ToolCallResponse:
+    """Construct ToolCallResponse from OpenAI ChatCompletion."""
+    msg = response.choices[0].message
+
+    if llm_client and hasattr(llm_client, '_extract_content'):
+        text = llm_client._extract_content(msg) or None
+    else:
+        text = msg.content or None
+
+    tool_calls: list[ToolCall] = []
+    if msg.tool_calls:
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(ToolCall(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=args,
+            ))
+    return ToolCallResponse(text=text, tool_calls=tool_calls)
 
 
-@dataclass
-class UsageInfo:
-    """Token usage breakdown from LLM API response."""
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-    reasoning_tokens: int = 0
-    cached_tokens: int = 0
-
-    @classmethod
-    def from_openai_response(cls, response: Any) -> UsageInfo:
-        """Extract usage from OpenAI-compatible response."""
-        usage = getattr(response, "usage", None)
-        if not usage:
-            return cls()
-        details = getattr(usage, "completion_tokens_details", None)
-        prompt_details = getattr(usage, "prompt_tokens_details", None)
-        return cls(
-            prompt_tokens=getattr(usage, "prompt_tokens", 0),
-            completion_tokens=getattr(usage, "completion_tokens", 0),
-            total_tokens=getattr(usage, "total_tokens", 0),
-            reasoning_tokens=getattr(details, "reasoning_tokens", 0) if details else 0,
-            cached_tokens=getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0,
-        )
-
-
-@dataclass
-class ToolCall:
-    """A single tool call returned by the LLM."""
-    id: str
-    name: str
-    arguments: dict[str, Any]
-
-
-@dataclass
-class ToolCallResponse:
-    """LLM response: may contain text, tool calls, or both."""
-    text: str | None = None
-    tool_calls: list[ToolCall] = dc_field(default_factory=list)
-    usage: UsageInfo | None = None
-
-    @property
-    def has_tool_calls(self) -> bool:
-        return len(self.tool_calls) > 0
-
-    @classmethod
-    def from_openai(cls, response: Any, llm_client: Any | None = None) -> ToolCallResponse:
-        """Construct from an OpenAI ChatCompletion object.
-
-        DD-09-01: When llm_client is provided, use _extract_content()
-        for reasoning model support (handles content="" via reasoning_content).
-        Falls back to msg.content when llm_client is None (backward compatible).
-        """
-        import json
-
-        msg = response.choices[0].message
-
-        # DD-09-01: Use _extract_content() for reasoning model support
-        if llm_client and hasattr(llm_client, '_extract_content'):
-            text = llm_client._extract_content(msg) or None
-        else:
-            text = msg.content or None
-
-        tool_calls: list[ToolCall] = []
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
-                tool_calls.append(ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=args,
-                ))
-        return cls(
-            text=text,
-            tool_calls=tool_calls,
-            usage=UsageInfo.from_openai_response(response),
-        )
-
-
-@dataclass
-class StreamDelta:
-    """A single delta fragment from streaming output."""
-    type: str
-    content: str = ""
-    tool_index: int | None = None
-    tool_name: str | None = None
-    tool_id: str | None = None
+# Monkey-patch ToolCallResponse.from_openai
+ToolCallResponse.from_openai = staticmethod(_tool_call_response_from_openai)  # type: ignore[assignment]

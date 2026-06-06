@@ -8,6 +8,7 @@ from typing import Any
 import typer
 from rich.prompt import Confirm, Prompt
 
+from agenthatch import __version__
 from agenthatch.cli import console
 from agenthatch.config import CONFIG_DIR, CONFIG_FILE
 from agenthatch.config.validators import validate_base_url, validate_provider_name
@@ -95,7 +96,7 @@ def init_command(
 def _init_interactive(force: bool) -> None:
     """Full interactive setup flow."""
     console.print()
-    console.print("[bold]agenthatch v0.2.0[/bold] — first-time setup")
+    console.print(f"[bold]agenthatch v{__version__}[/bold] — first-time setup")
     console.print()
     console.print("This will configure your LLM provider and API key.")
     console.print()

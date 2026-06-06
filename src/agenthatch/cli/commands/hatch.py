@@ -26,6 +26,7 @@ from rich.tree import Tree
 
 from agenthatch.cli import console
 from agenthatch.skill.parser import _is_skill_md, assemble_context
+from agenthatch.skill.spec import AgentConfig
 
 logger = logging.getLogger("agenthatch")
 
@@ -41,11 +42,11 @@ def hatch_command(
     ],
     output: Annotated[
         str | None,
-        typer.Option("--output", "-o", help="Output path for agenthatch.yaml"),
+        typer.Option("--output", "-o", help="Agent output directory (default: ./<skill-id>-agent/)"),
     ] = None,
     force: Annotated[
         bool,
-        typer.Option("--force", "-f", help="Overwrite existing agenthatch.yaml"),
+        typer.Option("--force", "-f", help="Overwrite existing output directory"),
     ] = False,
     trace: Annotated[
         bool,
@@ -53,24 +54,38 @@ def hatch_command(
     ] = False,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="Convert without writing files"),
+        typer.Option("--dry-run", help="Print generated files without writing"),
     ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Output as JSON instead of YAML"),
     ] = False,
+    no_generate: Annotated[
+        bool,
+        typer.Option("--no-generate", help="Skip Phase 3 — only produce agenthatch.yaml (review mode)"),
+    ] = False,
+    no_copy_skills: Annotated[
+        bool,
+        typer.Option("--no-copy-skills", help="Exclude original SKILL.md and resource files"),
+    ] = False,
+    framework: Annotated[
+        str,
+        typer.Option("--framework", help="Agent framework [python-typer]"),
+    ] = "python-typer",
 ) -> None:
-    """Standardize a SKILL.md into AHSSPEC middleware.
+    """Standardize a SKILL.md into AHSSPEC middleware and generate an independent Agent.
 
-    Runs the full Meta-Agent pipeline:
+    v0.6: hatch now runs the full three-phase pipeline by default:
       Phase 1: Deterministic context assembly (no AI)
       Phase 2: 5 AgentHarnesses inference (LLM-driven)
+      Phase 3: Agent generation via Jinja2 templates (default on)
 
     Examples:
         agenthatch hatch ~/skills/weather-reporter/
         agenthatch hatch ./SKILL.md --trace
         agenthatch hatch weather-reporter
-        agenthatch hatch . --json --dry-run
+        agenthatch hatch . --no-generate        # review mode: yaml only
+        agenthatch hatch . --dry-run            # preview without writing
     """
     from agenthatch.config import Config
     from agenthatch.skill.builder import build_ahspec
@@ -177,7 +192,13 @@ def hatch_command(
             f"E={cr.per_harness.get('E', 0):.2f}"
         )
 
-    # ── 6. Write outputs ──────────────────────────────────────────────
+    # ── 6. Ensure v0.6 agent status ──────────────────────────────────
+    if ahs_spec.agent is None:
+        ahs_spec.agent = AgentConfig(status="not_generated")
+    else:
+        ahs_spec.agent.status = "not_generated"
+
+    # ── 7. Write outputs ──────────────────────────────────────────────
     if dry_run:
         console.print()
         console.print("[yellow]Dry-run mode — no files written.[/yellow]")
@@ -196,27 +217,31 @@ def hatch_command(
     # Determine output path
     skill_dir = _resolve_skill_dir(skill_real_path)
     if output:
-        output_path = Path(output).expanduser().resolve()
+        # When --output is specified, it's the agent output directory.
+        # Write agenthatch.yaml inside it.
+        agent_output_dir = Path(output).expanduser().resolve()
+        yaml_output_path = agent_output_dir / "agenthatch.yaml"
     else:
-        output_path = skill_dir / "agenthatch.yaml"
+        agent_output_dir = None
+        yaml_output_path = skill_dir / "agenthatch.yaml"
 
-    if output_path.exists() and not force:
+    if yaml_output_path.exists() and not force:
         console.print(
-            f"[yellow]agenthatch.yaml already exists at {output_path}[/yellow]"
+            f"[yellow]agenthatch.yaml already exists at {yaml_output_path}[/yellow]"
         )
         console.print("Use --force to overwrite.")
         raise typer.Exit(code=2)
 
     # Write agenthatch.yaml
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_output_path.parent.mkdir(parents=True, exist_ok=True)
     yaml_str = yaml.dump(
         json.loads(ahs_spec.model_dump_json(exclude={"harness_traces", "confidence_report"})),
         allow_unicode=True,
         default_flow_style=False,
         sort_keys=False,
     )
-    output_path.write_text(yaml_str, encoding="utf-8")
-    console.print(f"  [ok]Written:[/ok] {output_path}")
+    yaml_output_path.write_text(yaml_str, encoding="utf-8")
+    console.print(f"  [ok]Written:[/ok] {yaml_output_path}")
 
     # Register in skillhouse.json
     skillhouse_config = config.get("skillhouse", {}) if "skillhouse" in config else {}
@@ -231,11 +256,45 @@ def hatch_command(
 
     from agenthatch.house.index import SkillhouseIndex
     idx = SkillhouseIndex(str(skillhouse_full_path))
-    idx.add_entry(ahs_spec.identity.id, ahs_spec, str(output_path))
-    console.print(f"  [ok]Registered:[/ok] {skillhouse_full_path} ({idx.entry_count} entries)")
+    try:
+        idx.add_entry(ahs_spec.identity.id, ahs_spec, str(yaml_output_path))
+        console.print(f"  [ok]Registered:[/ok] {skillhouse_full_path} ({idx.entry_count} entries)")
+    except Exception as e:
+        logger.warning(
+            f"Hatch succeeded but skillhouse index update failed: {e}. "
+            f"The agenthatch.yaml is valid and can be used."
+        )
+        console.print(f"[yellow]⚠ Skill indexed failed (non-fatal): {e}[/yellow]")
 
     console.print()
     console.print("[bold green]Hatch complete.[/bold green]")
+
+    # ── 8. Phase 3: Agent Generation (v0.6) ───────────────────────────
+    if no_generate:
+        console.print("[dim]Phase 3 skipped (--no-generate).[/dim]")
+        console.print(
+            "[dim]Run [bold]agenthatch hatch --no-generate[/bold] again "
+            "to review, or omit the flag to generate the Agent.[/dim]"
+        )
+        return
+
+    _run_phase3_generate(
+        ahs_spec=ahs_spec,
+        skill_dir=skill_dir,
+        output=output,
+        force=force,
+        dry_run=dry_run,
+        copy_skills=not no_copy_skills,
+        _framework=framework,
+    )
+
+    # Update skillhouse index with agent output path
+    agent_output_dir = _get_agent_output_dir(ahs_spec.identity.id, output)
+    if not dry_run and agent_output_dir.exists():
+        try:
+            idx.update_agent_output(ahs_spec.identity.id, str(agent_output_dir))
+        except Exception:
+            pass  # Non-fatal
 
 
 def _resolve_skill_dir(path: Path) -> Path:
@@ -243,6 +302,100 @@ def _resolve_skill_dir(path: Path) -> Path:
     if path.is_file() and path.suffix in (".md", ".markdown"):
         return path.parent
     return path
+
+
+def _get_agent_output_dir(agent_id: str, output: str | None) -> Path:
+    """Get the agent output directory path (same logic as _run_phase3_generate)."""
+    if output:
+        return Path(output).expanduser().resolve()
+    return Path.cwd() / f"{agent_id}-agent"
+
+
+# ── Phase 3: Agent Generation ───────────────────────────────────────────────
+
+def _run_phase3_generate(
+    ahs_spec: Any,
+    skill_dir: Path,
+    output: str | None,
+    force: bool,
+    dry_run: bool,
+    copy_skills: bool,
+    _framework: str,
+) -> None:
+    """Run Phase 3: generate an independent Agent directory from AHSSPEC.
+
+    Args:
+        ahs_spec: AHSSpec Pydantic model from Phase 2.
+        skill_dir: Source skill directory.
+        output: User-specified output directory (or None for default).
+        force: Overwrite existing output directory.
+        dry_run: Preview without writing.
+        copy_skills: Copy SKILL.md and resources.
+        framework: Unused (reserved for future framework support).
+    """
+    import json as _json
+
+    from agenthatch.generate.engine import generate_agent
+
+    # Determine output directory
+    agent_id = ahs_spec.identity.id
+    if output:
+        agent_output_dir = Path(output).expanduser().resolve()
+    else:
+        agent_output_dir = Path.cwd() / f"{agent_id}-agent"
+
+    console.print()
+    console.print("[bold]Phase 3: Agent Generation[/bold]")
+
+    if dry_run:
+        console.print(f"  [dim]Target:[/dim] {agent_output_dir} [yellow](dry-run)[/yellow]")
+    else:
+        console.print(f"  [dim]Target:[/dim] {agent_output_dir}")
+
+    # Convert AHSSpec to dict for template rendering
+    spec_dict = _json.loads(ahs_spec.model_dump_json())
+
+    try:
+        written = generate_agent(
+            ahspec=spec_dict,
+            output_dir=agent_output_dir,
+            dry_run=dry_run,
+            force=force,
+            copy_skills=copy_skills,
+            skill_dir=skill_dir,
+        )
+    except FileExistsError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        console.print("Use --force to overwrite.")
+        raise typer.Exit(code=2) from e
+    except Exception as e:
+        console.print(f"[red]Generation error: {e}[/red]")
+        raise typer.Exit(code=5) from e
+
+    if dry_run:
+        console.print(f"\n  [ok]Would generate {len(written)} files:[/ok]")
+        for f in written:
+            console.print(f"    [dim]{f.relative_to(agent_output_dir)}[/dim]")
+    else:
+        console.print(f"\n  [ok]Generated {len(written)} files:[/ok]")
+        for f in sorted(written):
+            try:
+                rel = f.relative_to(agent_output_dir)
+            except ValueError:
+                rel = f
+            console.print(f"    [dim]{rel}[/dim]")
+
+    console.print()
+    if dry_run:
+        console.print("[yellow]Dry-run complete. No files written.[/yellow]")
+    else:
+        console.print("[bold green]Agent generation complete.[/bold green]")
+        console.print()
+        console.print("[bold]Next steps:[/bold]")
+        console.print(f"  cd {agent_output_dir.name}")
+        console.print(f"  export PROVIDER_API_KEY=\"your-key-here\"")
+        console.print(f"  agenthatch run {agent_id}")
+        console.print(f"  # or: pip install -e {agent_output_dir.name}/ && {agent_id} serve")
 
 
 # ── Name Resolution (3-layer fallback) ─────────────────────────────────────

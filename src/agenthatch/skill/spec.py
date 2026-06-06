@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -366,7 +367,7 @@ class CompactConfig(BaseModel):
 
 
 class AgentRuntimeConfig(BaseModel):
-    """Skill 级别的 Agent 运行时配置 (v0.4 新增)."""
+    """Skill-level Agent runtime configuration (added in v0.4)."""
     provider: str | None = None
     model: str | None = None
     env: dict[str, str] = {}
@@ -377,8 +378,10 @@ class AgentRuntimeConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    """Agent 段 (v0.4 新增)."""
-    runtime: AgentRuntimeConfig = AgentRuntimeConfig()
+    """Agent metadata — pure spec info, runtime config moved to runtime.toml (v0.6)."""
+    status: Literal["generated", "not_generated"] = "not_generated"
+    generated_at: datetime | None = None
+    runtime: AgentRuntimeConfig | None = None  # DEPRECATED v0.6: kept for backward compat
 
 
 class AHSSpec(BaseModel):
@@ -394,7 +397,7 @@ class AHSSpec(BaseModel):
     resources: Resources = Resources()
     modes: Modes | None = None
     composition: Composition = Composition()
-    agent: AgentConfig | None = None   # v0.4 新增
+    agent: AgentConfig | None = None   # added in v0.4
 
     confidence_report: ConfidenceReport | None = None
     harness_traces: list[HarnessOutput] = []

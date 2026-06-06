@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.5.10"
+version = "0.6.0"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -25,6 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 dependencies = [
+    
     "typer>=0.15.0",
     "packaging>=24.0",
     "httpx>=0.28.0",
@@ -37,6 +38,8 @@ dependencies = [
     "instructor>=1.0",
     "sentence-transformers>=3.0",
     "rank-bm25>=0.2",
+    "jinja2>=3.1",
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]

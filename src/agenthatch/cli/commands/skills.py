@@ -76,11 +76,19 @@ def skills_command(
     table.add_column("Summary")
 
     for e in entries:
+        sid = e["id"]
+        raw_entry = idx.get_entry(sid) or {}
+        if raw_entry.get("status") == "discovered":
+            version_display = "[dim]not hatched[/dim]"
+            summary_display = "[dim](run 'agenthatch hatch' first)[/dim]"
+        else:
+            version_display = e["version"]
+            summary_display = e["summary"][:80] + ("..." if len(e["summary"]) > 80 else "")
         table.add_row(
             e["id"],
             e["display_name"],
-            e["version"],
-            e["summary"][:80] + ("..." if len(e["summary"]) > 80 else ""),
+            version_display,
+            summary_display,
         )
 
     console.print(table)
