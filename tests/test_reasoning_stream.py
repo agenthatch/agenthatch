@@ -14,7 +14,6 @@ from agenthatch.skill.llm_client import (
     ToolCallResponse,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers: mock OpenAI streaming chunks
 # ---------------------------------------------------------------------------

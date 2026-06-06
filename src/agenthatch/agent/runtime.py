@@ -124,7 +124,7 @@ class SkillAgent:
             warnings.warn(
                 "agent.runtime in agenthatch.yaml is deprecated. "
                 "Runtime config has moved to runtime.toml. "
-                "Run 'agenthatch migrate' to convert.",
+                "Run 'agenthatch hatch' to re-generate the agent.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -200,24 +200,25 @@ class SkillAgent:
     ) -> dict[str, Any]:
         """Resolve runtime config with 3-level priority: CLI > agenthatch.yaml > config.toml."""
         agent_cfg = self.spec.agent
-        has_runtime = agent_cfg is not None and agent_cfg.runtime is not None
+        rt = agent_cfg.runtime if agent_cfg is not None else None
+
         resolved: dict[str, Any] = {
             "provider": provider or (
-                agent_cfg.runtime.provider if has_runtime else None
+                rt.provider if rt is not None else None
             ) or get_default_provider(),
             "model": model or (
-                agent_cfg.runtime.model if has_runtime else None
+                rt.model if rt is not None else None
             ) or "",
             "api_key": api_key or "",
             "temperature": (
-                agent_cfg.runtime.temperature if has_runtime else 0.7
+                rt.temperature if rt is not None else 0.7
             ),
             "max_tokens": (
-                agent_cfg.runtime.max_tokens if has_runtime else 4096
+                rt.max_tokens if rt is not None else 4096
             ),
         }
 
-        agent_features = agent_cfg.runtime.features if has_runtime else {}
+        agent_features = rt.features if rt is not None else {}
         provider_features = getattr(
             get_provider(resolved["provider"]), "features", ProviderFeatures()
         )

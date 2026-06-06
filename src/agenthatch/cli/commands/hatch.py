@@ -42,7 +42,10 @@ def hatch_command(
     ],
     output: Annotated[
         str | None,
-        typer.Option("--output", "-o", help="Agent output directory (default: ./<skill-id>-agent/)"),
+        typer.Option(
+            "--output", "-o",
+            help="Agent output directory (default: ./<skill-id>-agent/)",
+        ),
     ] = None,
     force: Annotated[
         bool,
@@ -62,7 +65,10 @@ def hatch_command(
     ] = False,
     no_generate: Annotated[
         bool,
-        typer.Option("--no-generate", help="Skip Phase 3 — only produce agenthatch.yaml (review mode)"),
+        typer.Option(
+            "--no-generate",
+            help="Skip Phase 3 — only produce agenthatch.yaml (review mode)",
+        ),
     ] = False,
     no_copy_skills: Annotated[
         bool,
@@ -227,21 +233,22 @@ def hatch_command(
 
     if yaml_output_path.exists() and not force:
         console.print(
-            f"[yellow]agenthatch.yaml already exists at {yaml_output_path}[/yellow]"
+            f"[dim]agenthatch.yaml already exists at {yaml_output_path}, "
+            "skipping yaml generation.[/dim]"
         )
-        console.print("Use --force to overwrite.")
-        raise typer.Exit(code=2)
-
-    # Write agenthatch.yaml
-    yaml_output_path.parent.mkdir(parents=True, exist_ok=True)
-    yaml_str = yaml.dump(
-        json.loads(ahs_spec.model_dump_json(exclude={"harness_traces", "confidence_report"})),
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-    yaml_output_path.write_text(yaml_str, encoding="utf-8")
-    console.print(f"  [ok]Written:[/ok] {yaml_output_path}")
+        # Do NOT exit — continue to Phase 3 (Agent generation is independent
+        # of agenthatch.yaml)
+    else:
+        # Write agenthatch.yaml
+        yaml_output_path.parent.mkdir(parents=True, exist_ok=True)
+        yaml_str = yaml.dump(
+            json.loads(ahs_spec.model_dump_json(exclude={"harness_traces", "confidence_report"})),
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        yaml_output_path.write_text(yaml_str, encoding="utf-8")
+        console.print(f"  [ok]Written:[/ok] {yaml_output_path}")
 
     # Register in skillhouse.json
     skillhouse_config = config.get("skillhouse", {}) if "skillhouse" in config else {}
@@ -393,7 +400,7 @@ def _run_phase3_generate(
         console.print()
         console.print("[bold]Next steps:[/bold]")
         console.print(f"  cd {agent_output_dir.name}")
-        console.print(f"  export PROVIDER_API_KEY=\"your-key-here\"")
+        console.print("  export PROVIDER_API_KEY=\"your-key-here\"")
         console.print(f"  agenthatch run {agent_id}")
         console.print(f"  # or: pip install -e {agent_output_dir.name}/ && {agent_id} serve")
 

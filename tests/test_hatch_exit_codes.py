@@ -6,8 +6,6 @@ by returning the correct exit codes for each error scenario.
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestHatchExitCode1:
     """Exit code 1: Skill not found / invalid path."""
@@ -38,12 +36,18 @@ class TestHatchExitCode1:
 
 
 class TestHatchExitCode2:
-    """Exit code 2: agenthatch.yaml already exists without --force."""
+    """Exit code 2: agenthatch.yaml already exists without --force.
+
+    Note: As of v0.6.1, existing agenthatch.yaml no longer prevents
+    Phase 3 (Agent generation). The hatch command now skips yaml write
+    but continues to generate the Agent directory. Exit code 2 is no
+    longer returned for this scenario.
+    """
 
     def test_existing_output_without_force(
         self, runner, app, tmp_path, tmp_agenthatch_home, monkeypatch
     ):
-        """Existing agenthatch.yaml without --force should exit with code 2."""
+        """Existing agenthatch.yaml without --force should succeed and skip yaml write."""
         # Create a skill directory with SKILL.md
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
@@ -83,9 +87,8 @@ class TestHatchExitCode2:
         )
 
         result = runner.invoke(app, ["hatch", str(skill_dir)])
-        assert result.exit_code == 2
+        assert result.exit_code == 0
         assert "already exists" in result.output
-        assert "--force" in result.output
 
 
 class TestHatchExitCode3:

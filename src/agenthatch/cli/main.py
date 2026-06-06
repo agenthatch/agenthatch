@@ -16,7 +16,6 @@ from agenthatch.cli.commands.doctor import doctor_command
 from agenthatch.cli.commands.hatch import hatch_command
 from agenthatch.cli.commands.hello import hello_command
 from agenthatch.cli.commands.init import init_command
-from agenthatch.cli.commands.migrate import migrate_command
 from agenthatch.cli.commands.run import run_command
 from agenthatch.cli.commands.search import search_command
 from agenthatch.cli.commands.skills import skills_command
@@ -137,7 +136,6 @@ app.command(name="hatch")(hatch_command)
 app.command(name="search")(search_command)
 app.command(name="skills")(skills_command)
 app.command(name="run")(run_command)
-app.command(name="migrate")(migrate_command)
 app.command(name="assemble")(assemble_command)
 
 

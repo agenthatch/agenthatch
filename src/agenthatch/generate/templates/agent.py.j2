@@ -20,10 +20,10 @@ ANCHOR_RULES = [
 ]
 {% endif %}
 
+AGENT_CLASS = "{{ agent_class }}"
+
 class {{ agent_class }}(AHCoreAgent):
     """{{ description }}"""
-
-    AGENT_CLASS = "{{ agent_class }}"
 
     def __init__(self, runtime_config: dict | None = None):
         identity = AgentIdentity(

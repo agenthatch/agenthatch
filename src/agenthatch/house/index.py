@@ -146,7 +146,13 @@ class SkillhouseIndex:
             self._embedder_disabled = True
             return
         if embedder_error[0]:
-            raise embedder_error[0]
+            logger.warning(
+                "SentenceTransformer download failed: %s. "
+                "Embedding search disabled (keyword-only mode).",
+                embedder_error[0],
+            )
+            self._embedder_disabled = True
+            return
         self._embedder = embedder_result[0]
 
     # ── Search ────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +67,7 @@ class GenerateEngine:
 
     # ── variable extraction ───────────────────────────────────────────
 
-    def extract_variables(self, ahspec: dict) -> dict[str, Any]:
+    def extract_variables(self, ahspec: dict[str, Any]) -> dict[str, Any]:
         """Extract template variables from an AHSSPEC dict.
 
         Handles both raw YAML dicts and Pydantic model dumps.
@@ -127,7 +127,7 @@ class GenerateEngine:
         }
 
     @staticmethod
-    def _format_workflow(workflow: list) -> str:
+    def _format_workflow(workflow: list[dict[str, Any]]) -> str:
         """Format a list of workflow step dicts into a string."""
         lines: list[str] = []
         for step in workflow:
@@ -143,7 +143,7 @@ class GenerateEngine:
         return "\n".join(lines)
 
     @staticmethod
-    def _extract_requires(requires: list) -> list[str]:
+    def _extract_requires(requires: list[dict[str, Any]]) -> list[str]:
         """Extract requirement names from interface.requires."""
         result: list[str] = []
         for req in requires:
@@ -156,7 +156,7 @@ class GenerateEngine:
         return result
 
     @staticmethod
-    def _extract_tool_names(provides: list) -> list[str]:
+    def _extract_tool_names(provides: list[dict[str, Any]]) -> list[str]:
         """Extract tool names from interface.provides."""
         result: list[str] = []
         for cap in provides:
@@ -172,7 +172,7 @@ class GenerateEngine:
 
     def generate(
         self,
-        ahspec: dict,
+        ahspec: dict[str, Any],
         output_dir: Path,
         *,
         dry_run: bool = False,
@@ -261,7 +261,7 @@ class GenerateEngine:
         output_dir.mkdir(parents=True, exist_ok=True)
 
     def _write_ahspec_copy(
-        self, ahspec: dict, output_dir: Path, variables: dict
+        self, ahspec: dict[str, Any], output_dir: Path, variables: dict[str, Any]
     ) -> None:
         """Write a copy of agenthatch.yaml to the output root."""
         import yaml
@@ -273,11 +273,11 @@ class GenerateEngine:
         agent_cfg = ahspec_copy["agent"]
         if isinstance(agent_cfg, dict):
             agent_cfg["status"] = "generated"
-            agent_cfg["generated_at"] = datetime.now(timezone.utc).isoformat()
+            agent_cfg["generated_at"] = datetime.now(UTC).isoformat()
         else:
             ahspec_copy["agent"] = {
                 "status": "generated",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
             }
 
         yaml_path = output_dir / "agenthatch.yaml"
@@ -319,7 +319,7 @@ class GenerateEngine:
 
 
 def generate_agent(
-    ahspec: dict,
+    ahspec: dict[str, Any],
     output_dir: Path,
     *,
     dry_run: bool = False,

@@ -36,6 +36,8 @@ from agenthatch.exceptions import ProviderNotFoundError
 # Built-in providers (Codex CLI pattern: ModelProviderInfo in config_toml.rs)
 # ---------------------------------------------------------------------------
 
+_warned_providers: set[str] = set()
+
 ProviderKind = Literal["builtin", "custom"]
 
 
@@ -345,12 +347,14 @@ def resolve_api_key(
     # Level 3: Config file
     key = _read_config_key(provider, config)
     if key:
-        console.print(
-            f"[yellow]Warning: API key for '{provider}' read from config file.[/yellow]",
-        )
-        console.print(
-            f"[yellow]  Consider using {info.env_key} environment variable instead.[/yellow]",
-        )
+        if provider not in _warned_providers:
+            _warned_providers.add(provider)
+            console.print(
+                f"[yellow]Warning: API key for '{provider}' read from config file.[/yellow]",
+            )
+            console.print(
+                f"[yellow]  Consider using {info.env_key} environment variable instead.[/yellow]",
+            )
         return key
 
     # Level 4: Interactive prompt

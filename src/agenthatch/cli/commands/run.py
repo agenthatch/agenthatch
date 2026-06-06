@@ -12,17 +12,20 @@ import sys
 import tomllib
 from importlib import util as _importlib_util
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import typer
+from agenthatch_core.config import (  # type: ignore[import-untyped]
+    inherit_api_key,
+    resolve_runtime_config,
+)
+from agenthatch_core.loop.agent_loop import RichToolCallEvent  # type: ignore[import-untyped]
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
 
 from agenthatch.cli import console
-from agenthatch_core.config import resolve_runtime_config, inherit_api_key
-from agenthatch_core.loop.agent_loop import RichToolCallEvent
 
 
 def run_command(
@@ -114,6 +117,7 @@ def _find_hatched_agent(skill_name: str) -> Path:
 
     # Priority 4: Error
     _fail_agent_not_found(skill_name)
+    raise RuntimeError("unreachable")
 
 
 def _validate_agent_dir(agent_dir: Path) -> Path:
@@ -140,19 +144,19 @@ def _fail_agent_not_found(name: str) -> None:
 
 # ── Runtime Config Loading ──────────────────────────────────────────────────
 
-def _load_runtime_toml(agent_dir: Path) -> dict:
+def _load_runtime_toml(agent_dir: Path) -> dict[str, Any]:
     """Load and resolve runtime.toml from the Agent directory."""
     toml_path = agent_dir / "runtime.toml"
     if not toml_path.exists():
         return {}
     raw = tomllib.loads(toml_path.read_text())
     resolved = resolve_runtime_config(raw)
-    return inherit_api_key(resolved)
+    return cast("dict[str, Any]", inherit_api_key(resolved))
 
 
 # ── In-Process Launch ───────────────────────────────────────────────────────
 
-def _launch(agent_dir: Path, skill_name: str, runtime_config: dict) -> None:
+def _launch(agent_dir: Path, skill_name: str, runtime_config: dict[str, Any]) -> None:
     """Launch the Agent in-process with Rich Live TUI.
 
     Uses sys.path injection + importlib to import the Agent class,
@@ -349,7 +353,7 @@ def _handle_config_command(agent: Any) -> str | None:
     runtime_path = agent_dir / "runtime.toml"
 
     try:
-        import tomli_w
+        import tomli_w  # type: ignore[import-not-found]
     except ImportError:
         return "[warn]tomli_w not installed. Run: pip install tomli_w[/warn]"
 
@@ -390,7 +394,7 @@ def _handle_config_command(agent: Any) -> str | None:
     runtime_path.write_text(tomli_w.dumps(cfg))
 
     # Instant apply: rebuild LLMClient
-    from agenthatch_core.llm.client import LLMClient
+    from agenthatch_core.llm.client import LLMClient  # type: ignore[import-untyped]
     agent.llm = LLMClient(
         provider=llm.get("provider", "deepseek"),
         model=llm.get("model", "deepseek-v4-pro"),
@@ -402,7 +406,7 @@ def _handle_config_command(agent: Any) -> str | None:
 def _find_agent_dir_for_config(agent: Any) -> Path | None:
     """Find the agent directory for config persistence."""
     # Try to find from agent's _agent_root attribute
-    agent_root = getattr(agent, '_agent_root', None)
+    agent_root: Path | None = getattr(agent, '_agent_root', None)
     if agent_root and agent_root.exists():
         return agent_root
 
