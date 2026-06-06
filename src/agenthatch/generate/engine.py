@@ -79,11 +79,14 @@ class GenerateEngine:
         instructions = ahspec.get("instructions", {})
 
         agent_name = identity.get("id", "unknown-agent")
-        agent_class = identity.get("display_name", "UnknownAgent")
+        display_name = identity.get("display_name", "Unknown Agent")
         version = identity.get("version", "0.1.0")
 
         # Derive package_name: kebab-case → snake_case
         package_name = agent_name.replace("-", "_")
+
+        # Derive agent_class: valid Python identifier from display_name
+        agent_class = self._to_class_name(display_name)
 
         # Description from intent summary
         description = intent.get("summary", "")
@@ -113,6 +116,7 @@ class GenerateEngine:
         return {
             "agent_name": agent_name,
             "agent_class": agent_class,
+            "display_name": display_name,
             "version": version,
             "package_name": package_name,
             "description": description,
@@ -125,6 +129,41 @@ class GenerateEngine:
             "model": model,
             "tools": tools,
         }
+
+    @staticmethod
+    def _to_class_name(display_name: str) -> str:
+        """Convert a display name to a valid Python class name.
+
+        "Discover Search" → "DiscoverSearch"
+        "HTTP Client Tool" → "HTTPClientTool"
+        "3D Printer" → "ThreeDPrinter"
+        """
+        import re
+
+        # Split on whitespace/hyphens/underscores, strip non-alphanumeric
+        parts = re.split(r"[\s\-_]+", display_name.strip())
+        clean: list[str] = []
+        for p in parts:
+            p = re.sub(r"[^a-zA-Z0-9]", "", p)
+            if p:
+                # Uppercase first alpha char, preserve rest; strip leading digits
+                clean.append(p[0].upper() + p[1:])
+
+        result = "".join(clean)
+        if not result:
+            return "UnknownAgent"
+
+        # Python class name must not start with a digit
+        if result[0].isdigit():
+            num_words = {
+                "0": "Zero", "1": "One", "2": "Two", "3": "Three",
+                "4": "Four", "5": "Five", "6": "Six", "7": "Seven",
+                "8": "Eight", "9": "Nine",
+            }
+            prefix = num_words.get(result[0], "Num")
+            result = prefix + result[1:]
+
+        return result
 
     @staticmethod
     def _format_workflow(workflow: list[dict[str, Any]]) -> str:

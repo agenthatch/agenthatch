@@ -14,9 +14,9 @@ OUTPUT_TEMPLATE = """{{ output_tpl | python_escape }}"""
 
 {% if rules %}
 ANCHOR_RULES = [
-{%- for rule in rules %}
+{% for rule in rules %}
     {{ rule | python_repr }},
-{%- endfor %}
+{% endfor %}
 ]
 {% endif %}
 
@@ -28,7 +28,7 @@ class {{ agent_class }}(AHCoreAgent):
     def __init__(self, runtime_config: dict | None = None):
         identity = AgentIdentity(
             id="{{ agent_name }}",
-            display_name="{{ agent_class }}",
+            display_name="{{ display_name }}",
             version="{{ version }}",
         )
         super().__init__(

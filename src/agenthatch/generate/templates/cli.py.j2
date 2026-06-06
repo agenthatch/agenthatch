@@ -85,7 +85,7 @@ def serve(
     agent = {{ agent_class }}(runtime_config=runtime)
 
     console.print(Panel(
-        f"[bold bright_blue]{{ agent_class }}[/] ({{ agent_name }} v{{ version }})",
+        f"[bold bright_blue]{{ display_name }}[/] ({{ agent_name }} v{{ version }})",
         title="Agent", border_style="bright_blue"
     ))
 

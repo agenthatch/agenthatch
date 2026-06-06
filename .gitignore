@@ -35,5 +35,8 @@ Thumbs.db
 docs/
 .agenthatch/
 
+# Generated agent output
+*-agent/
+
 # claude specific
 .claude/
