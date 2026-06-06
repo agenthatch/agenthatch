@@ -79,7 +79,9 @@ class GenerateEngine:
         instructions = ahspec.get("instructions", {})
 
         agent_name = identity.get("id", "unknown-agent")
-        display_name = identity.get("display_name", "Unknown Agent")
+        display_name = self._humanize_display_name(
+            identity.get("display_name", "Unknown Agent"), agent_name
+        )
         version = identity.get("version", "0.1.0")
 
         # Derive package_name: kebab-case → snake_case
@@ -130,6 +132,32 @@ class GenerateEngine:
             "tools": tools,
             "requires": requires,
         }
+
+    @staticmethod
+    def _humanize_display_name(display_name: str, agent_id: str) -> str:
+        """Convert kebab-case or snake_case display_name to human-readable form.
+
+        "agent-browser" → "Agent Browser"
+        "pdf_tool" → "PDF Tool"
+        Preserves already-human names like "Weather Reporter".
+        """
+        import re
+
+        # If the display_name is identical to the kebab-case ID, humanize it
+        if display_name == agent_id:
+            parts = re.split(r"[-_]", display_name)
+            return " ".join(p.capitalize() for p in parts if p)
+
+        # If it already has spaces or mixed case, it's likely fine
+        if " " in display_name or any(c.isupper() for c in display_name[1:]):
+            return display_name
+
+        # Looks like a machine name: kebab/snake_case with no spaces
+        if "-" in display_name or "_" in display_name:
+            parts = re.split(r"[-_]", display_name)
+            return " ".join(p.capitalize() for p in parts if p)
+
+        return display_name
 
     @staticmethod
     def _to_class_name(display_name: str) -> str:

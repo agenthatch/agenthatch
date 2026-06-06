@@ -160,6 +160,12 @@ class SkillAgent:
         self.capbus = CapBus()
         self.sandbox = Sandbox()
 
+        # ── v0.5: Wire hooks + state management ──
+        self.hooks = HooksManager()
+        self.state = StateManager(
+            Path(".agenthatch") / "state" / self.spec.identity.id
+        )
+
         self.llm = LLMClient(
             provider_name=runtime_config["provider"],
             model=runtime_config["model"],
@@ -170,12 +176,7 @@ class SkillAgent:
             capbus=self.capbus,
             sandbox=self.sandbox,
             ctx=self.ctx,
-        )
-
-        # ── v0.5: Wire hooks + state management ──
-        self.hooks = HooksManager()
-        self.state = StateManager(
-            Path(".agenthatch") / "state" / self.spec.identity.id
+            hooks=self.hooks,
         )
 
         self.ctx._hooks = self.hooks

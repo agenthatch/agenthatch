@@ -14,6 +14,9 @@ class StreamDelta:
     reasoning_content: str | None = None
     tool_name: str | None = None
     tool_id: str | None = None
+    tool_index: int | None = None
+    elapsed: float | None = None
+    result_preview: str | None = None
 
 
 @dataclass

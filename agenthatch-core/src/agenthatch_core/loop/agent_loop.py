@@ -24,13 +24,21 @@ MAX_TOOL_RESULT_CHARS = 10000
 def _route_with_timeout(
     capbus: CapBus, tool_name: str, arguments: dict[str, Any], timeout: int = 120
 ) -> str:
-    """Execute tool with timeout to prevent infinite hangs."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    """Execute tool with timeout to prevent infinite hangs.
+
+    Uses explicit executor management with shutdown(wait=False) because
+    Python threads cannot be killed — if the tool thread is stuck in I/O,
+    shutdown(wait=True) would deadlock the entire agent conversation.
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
         future = executor.submit(capbus.route, tool_name, arguments)
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             return f"Error: tool '{tool_name}' timed out after {timeout}s"
+    finally:
+        executor.shutdown(wait=False)
 
 
 class RichToolCallEvent:

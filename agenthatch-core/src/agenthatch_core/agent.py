@@ -159,6 +159,16 @@ class AHCoreAgent:
         requires = interface.get("requires", [])
         mcp_servers = interface.get("mcp_servers", [])
         api_templates = interface.get("api_templates", [])
+        resources = spec.get("resources", {})
+        instructions = spec.get("instructions", {})
+
+        # Build capability → script mapping from resources + workflow
+        scripts_dir: Path | None = None
+        if self._agent_root:
+            scripts_dir = self._agent_root / "skills" / "scripts"
+        cap_to_script = _build_cap_to_script(
+            provides, resources, instructions, scripts_dir,
+        )
 
         # 1. provides → Sandbox script executors
         for cap in provides:
@@ -167,7 +177,8 @@ class AHCoreAgent:
                 continue
             schema = cap.get("input_schema", cap.get("schema", {}))
             executor = _provide_script_executor(
-                cap_name, self.sandbox, self._agent_root
+                cap_name, self.sandbox, self._agent_root,
+                script_name=cap_to_script.get(cap_name),
             )
             self.capbus.register(
                 name=cap_name,
@@ -308,22 +319,128 @@ class AHCoreAgent:
 # ── internal helpers ──────────────────────────────────────────────────
 
 def _provide_script_executor(
-    tool_name: str, sandbox: Sandbox, agent_root: Path | None
+    tool_name: str, sandbox: Sandbox, agent_root: Path | None,
+    script_name: str | None = None,
 ) -> Callable[[dict], str]:
-    """Create a Sandbox executor for a 'provides' capability."""
+    """Create a Sandbox executor for a 'provides' capability.
+
+    If script_name is provided, uses that as the command (looked up from
+    resources.scripts or workflow steps). Otherwise falls back to the
+    legacy behaviour of running 'python {tool_name}.py'.
+    """
     def execute(arguments: dict) -> str:
         env = {f"AH_ARG_{k.upper()}": str(v) for k, v in arguments.items()}
         script_dir = (
             agent_root / "skills" / "scripts" if agent_root else None
         )
-        cwd = str(script_dir) if script_dir and script_dir.is_dir() else None
-        result = sandbox.run(f"python {tool_name}.py", cwd=cwd, env=env)
+
+        if script_name and script_dir and script_dir.is_dir():
+            script_file = script_dir / script_name
+            if script_file.exists():
+                cmd = str(script_file)
+                cwd = str(script_dir)
+            else:
+                return (
+                    f"Error: script '{script_name}' not found in {script_dir}. "
+                    f"Available: {sorted(p.name for p in script_dir.iterdir())}"
+                )
+        elif script_name:
+            return f"Error: script directory not found for capability '{tool_name}'"
+        else:
+            # Legacy fallback: use tool_name as filename
+            cwd = str(script_dir) if script_dir and script_dir.is_dir() else None
+            cmd = f"python {tool_name}.py"
+
+        result = sandbox.run(cmd, cwd=cwd, env=env)
         return result.stdout
     return execute
 
 
+def _build_cap_to_script(
+    provides: list[dict],
+    resources: dict,
+    instructions: dict,
+    scripts_dir: Path | None,
+) -> dict[str, str]:
+    """Build a mapping from capability name to script filename.
+
+    Examines workflow steps, resources.scripts, and the scripts directory
+    to find which script file implements each provided capability.
+    """
+    cap_to_script: dict[str, str] = {}
+    cap_names = {c.get("capability", c.get("name", "")) for c in provides}
+    cap_names.discard("")
+
+    # Approach 1: workflow steps that mention a capability name + have a script
+    workflow = instructions.get("workflow", [])
+    if isinstance(workflow, list):
+        for step in workflow:
+            if not isinstance(step, dict):
+                continue
+            script = step.get("script")
+            if not script:
+                continue
+            desc = step.get("description", "").lower()
+            for cap_name in cap_names:
+                if cap_name in cap_to_script:
+                    continue
+                if cap_name.replace("_", " ") in desc or cap_name in desc:
+                    cap_to_script[cap_name] = script
+                    break
+
+    # Approach 2: resources.scripts entries
+    res_scripts = resources.get("scripts", [])
+    if isinstance(res_scripts, list):
+        for entry in res_scripts:
+            if not isinstance(entry, dict):
+                continue
+            script_name = entry.get("name", "")
+            if not script_name:
+                continue
+            script_stem = Path(script_name).stem
+            for cap_name in cap_names:
+                if cap_name in cap_to_script:
+                    continue
+                cap_flat = cap_name.replace("_", "")
+                stem_flat = script_stem.replace("_", "").replace("-", "")
+                if cap_flat in stem_flat or stem_flat in cap_flat:
+                    cap_to_script[cap_name] = script_name
+                    break
+
+    # Approach 3: direct filename matching from scripts directory
+    if scripts_dir and scripts_dir.is_dir():
+        for cap_name in cap_names:
+            if cap_name in cap_to_script:
+                continue
+            for ext in (".py", ".sh", ".js", ".rb"):
+                candidate = f"{cap_name}{ext}"
+                if (scripts_dir / candidate).exists():
+                    cap_to_script[cap_name] = candidate
+                    break
+            if cap_name in cap_to_script:
+                continue
+            # Fuzzy: script stem contains or is contained by capability name
+            cap_flat = cap_name.replace("_", "")
+            for sf in scripts_dir.iterdir():
+                if not sf.is_file():
+                    continue
+                stem_flat = sf.stem.replace("_", "").replace("-", "")
+                if len(stem_flat) >= 4 and (
+                    cap_flat in stem_flat or stem_flat in cap_flat
+                ):
+                    cap_to_script[cap_name] = sf.name
+                    break
+
+    return cap_to_script
+
+
 def _lookup_builtin(name: str) -> Any | None:
-    """Look up a builtin tool by name.  Returns instance or None."""
+    """Look up a builtin tool by name.  Returns instance or None.
+
+    Checks agenthatch-core registry first (extensibility point), then
+    falls back to the canonical agenthatch.agent.builtins registry which
+    contains the actual implementations (http_client, bash_runtime, etc).
+    """
     try:
         from agenthatch_core.tools.builtins import BUILTIN_REGISTRY
         cls = BUILTIN_REGISTRY.get(name)
@@ -331,6 +448,16 @@ def _lookup_builtin(name: str) -> Any | None:
             return cls()
     except ImportError:
         pass
+
+    # Fall back to agenthatch builtins (canonical registry)
+    try:
+        from agenthatch.agent.builtins import BUILTIN_REGISTRY as AH_BUILTINS
+        cls = AH_BUILTINS.get(name)
+        if cls is not None:
+            return cls()
+    except ImportError:
+        pass
+
     return None
 
 

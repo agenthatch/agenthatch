@@ -252,8 +252,6 @@ def _run_interactive_tui(agent: Any) -> None:
 
     try:
         while True:
-            # Safety: clear any active Rich Live context before prompting
-            console.clear_live()
             user_input = Prompt.ask("[bold green]You[/]")
             if not user_input.strip():
                 continue

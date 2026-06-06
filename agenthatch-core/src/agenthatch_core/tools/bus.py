@@ -87,7 +87,7 @@ class CapBus:
             builtin = self.builtins[tool_name]
             if hasattr(builtin, "execute"):
                 try:
-                    return str(builtin.execute(arguments))
+                    return str(builtin.execute(**arguments))
                 except Exception as e:
                     return f"Error executing builtin '{tool_name}': {e}"
 

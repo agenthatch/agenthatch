@@ -15,6 +15,7 @@ class SandboxConfig:
     isolated: bool = False
     timeout: str = "60s"
     env: dict[str, str] = field(default_factory=dict)
+    extra_allowed_commands: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -23,11 +24,15 @@ class Sandbox:
 
     config: SandboxConfig = field(default_factory=SandboxConfig)
 
-    _ALLOWED_COMMANDS = {
+    _allowed_commands: set[str] = field(default_factory=lambda: {
         "python3", "python", "bash", "node", "curl", "jq",
         "cat", "head", "tail", "grep", "awk", "sed", "echo",
         "ls", "find", "wc", "sort", "uniq", "cut", "tr",
-    }
+    })
+
+    def extend_whitelist(self, *commands: str) -> None:
+        """Add commands to the sandbox whitelist."""
+        self._allowed_commands.update(commands)
 
     def configure(
         self,
@@ -45,6 +50,8 @@ class Sandbox:
             self.config.timeout = timeout
         if env is not None:
             self.config.env = env
+        if self.config.extra_allowed_commands:
+            self._allowed_commands.update(self.config.extra_allowed_commands)
 
     def setenv(self, name: str, value: str) -> None:
         """Set an environment variable."""
@@ -80,10 +87,10 @@ class Sandbox:
             return "Error: empty command"
 
         cmd_name = cmd_parts[0]
-        if cmd_name not in self._ALLOWED_COMMANDS:
+        if cmd_name not in self._allowed_commands:
             return (
                 f"Error: command '{cmd_name}' is not in the sandbox whitelist. "
-                f"Allowed: {', '.join(sorted(self._ALLOWED_COMMANDS))}"
+                f"Allowed: {', '.join(sorted(self._allowed_commands))}"
             )
 
         try:

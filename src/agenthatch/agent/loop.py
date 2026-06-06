@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Generator
 from typing import Any
 
+from agenthatch.agent.hooks import HookPoint
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.cap.bus import CapBus
 from agenthatch.exceptions import CapabilityNotFoundError
@@ -61,13 +62,15 @@ class ConversationLoop:
         capbus: CapBus,
         sandbox: Sandbox,
         ctx: Any,
+        hooks: Any = None,
     ):
         self.llm = llm
         self.capbus = capbus
         self.sandbox = sandbox
         self.ctx = ctx
+        self._hooks = hooks
 
-        self._max_retries: int = 3
+        self._max_retries: int = 1
         self._retry_base_delay: float = 1.0
         self._retry_max_delay: float = 30.0
         self._retryable_statuses: set[int] = {429, 500, 502, 503, 504}
@@ -83,7 +86,16 @@ class ConversationLoop:
     def run(self, user_input: str) -> str:
         """Execute one conversation turn synchronously."""
         self.ctx._turn_count += 1
-        self.ctx.auto_compact_check(self.llm.model_max_tokens or 4096)
+
+        # PRE_TURN hook
+        if self._hooks:
+            turn_ctx: dict[str, Any] = {
+                "user_input": user_input,
+                "turn_count": self.ctx._turn_count,
+            }
+            self._hooks.execute(HookPoint.PRE_TURN, turn_ctx)
+
+        self.ctx.auto_compact_check(self.llm.context_window)
 
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
@@ -129,32 +141,25 @@ class ConversationLoop:
                 tool_calls=assistant_msg.get("tool_calls"),
             )
 
-            for tc in response.tool_calls:
-                t0 = time.time()
-                logger.info(
-                    "  Executing: %s(%s)...", tc.name,
-                    ", ".join(
-                        f"{k}={v}" for k, v in tc.arguments.items()
-                        if k != "url"
-                    ),
-                )
-                try:
-                    result = _route_with_timeout(self.capbus, tc.name, tc.arguments)
-                    elapsed = time.time() - t0
-                    logger.info(
-                        "  %s -> %d chars (%.1fs)", tc.name,
-                        len(str(result)), elapsed,
-                    )
-                except CapabilityNotFoundError as e:
-                    elapsed = time.time() - t0
-                    logger.warning("Tool call failed: %s (%.1fs)", e, elapsed)
-                    result = f"Error: {e}"
-                except Exception as e:
-                    elapsed = time.time() - t0
-                    logger.warning("Tool execution failed: %s (%.1fs)", e, elapsed)
-                    result = f"Error: {e}"
-                # Truncate large tool results to prevent token overflow
-                result_str = str(result)
+            # PRE_TOOL_CALL hook
+            if self._hooks and response.tool_calls:
+                self._hooks.execute(HookPoint.PRE_TOOL_CALL, {
+                    "tool_calls": [
+                        {"name": tc.name, "arguments": tc.arguments}
+                        for tc in response.tool_calls
+                    ],
+                })
+
+            parallel = (
+                self.llm.features.supports_parallel_tool_calls
+                and len(response.tool_calls) > 1
+            )
+            for entry in self._execute_tool_calls(
+                response.tool_calls, parallel=parallel
+            ):
+                tc = entry["tc"]
+                elapsed = entry["elapsed"]
+                result_str = entry["result"]
                 if len(result_str) > MAX_TOOL_RESULT_CHARS:
                     result_str = result_str[:MAX_TOOL_RESULT_CHARS] + "\n... (truncated)"
                 messages.append({
@@ -164,9 +169,18 @@ class ConversationLoop:
                 })
                 self.ctx.add_to_history(
                     "tool",
-                    f"[{tc.name}]: {str(result)[:500]}",
+                    f"[{tc.name}]: {str(result_str)[:500]}",
                     tool_call_id=tc.id,
                 )
+
+                # POST_TOOL_CALL hook
+                if self._hooks:
+                    self._hooks.execute(HookPoint.POST_TOOL_CALL, {
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "result": result_str,
+                        "elapsed": elapsed,
+                    })
 
             # ── DD-05-16: Circuit breaker for inner LLM call ──
             if not self._cb_allow():
@@ -193,6 +207,13 @@ class ConversationLoop:
         final_text = response.text if response and response.text else ""
         if final_text:
             self.ctx.add_to_history("assistant", final_text)
+
+        # POST_TURN hook
+        if self._hooks:
+            self._hooks.execute(HookPoint.POST_TURN, {
+                "turn_count": self.ctx._turn_count,
+                "final_text": final_text,
+            })
 
         self._checkpoint()
         return final_text or "(no response)"
@@ -265,44 +286,71 @@ class ConversationLoop:
                     "Circuit breaker: HALF_OPEN -> OPEN (probe failed)"
                 )
 
-    def _commit_tool_round(
+    def _execute_tool_calls(
         self,
-        messages: list[dict[str, Any]],
         tool_calls: list[Any],
-        route_results: list[tuple[str, str, str]],
-    ) -> None:
-        """Commit a complete tool round to messages and history."""
-        assistant_tool_calls = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.name,
-                    "arguments": json.dumps(tc.arguments),
-                },
-            }
-            for tc in tool_calls
-        ]
-        messages.append({
-            "role": "assistant",
-            "content": None,
-            "tool_calls": assistant_tool_calls,
-        })
-        self.ctx.add_to_history(
-            "assistant", None, tool_calls=assistant_tool_calls
-        )
+        *,
+        parallel: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Execute tool calls, optionally in parallel via ThreadPoolExecutor.
 
-        for (tc_id, tool_name, result) in route_results:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": result,
-            })
-            self.ctx.add_to_history(
-                "tool",
-                f"[{tool_name}]: {str(result)[:500]}",
-                tool_call_id=tc_id,
-            )
+        Returns a list of result dicts in the same order as input tool_calls,
+        each with keys: tc, result (str), elapsed (float).
+        Single-call or parallel=False uses a fast sequential path.
+        """
+        if not parallel or len(tool_calls) <= 1:
+            results: list[dict[str, Any]] = []
+            for tc in tool_calls:
+                t0 = time.time()
+                logger.info(
+                    "  Executing: %s(%s)...", tc.name,
+                    ", ".join(
+                        f"{k}={v}" for k, v in tc.arguments.items()
+                        if k != "url"
+                    ),
+                )
+                try:
+                    result = _route_with_timeout(self.capbus, tc.name, tc.arguments)
+                    elapsed = time.time() - t0
+                    logger.info(
+                        "  %s -> %d chars (%.1fs)", tc.name,
+                        len(str(result)), elapsed,
+                    )
+                except CapabilityNotFoundError as e:
+                    elapsed = time.time() - t0
+                    logger.warning("Tool call failed: %s (%.1fs)", e, elapsed)
+                    result = f"Error: {e}"
+                except Exception as e:
+                    elapsed = time.time() - t0
+                    logger.warning("Tool execution failed: %s (%.1fs)", e, elapsed)
+                    result = f"Error: {e}"
+                results.append({"tc": tc, "result": str(result), "elapsed": elapsed})
+            return results
+
+        # Parallel path: submit all, collect with as_completed, sort back
+        results_by_index: dict[int, dict[str, Any]] = {}
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures: dict[concurrent.futures.Future[str], int] = {}
+            for i, tc in enumerate(tool_calls):
+                logger.info("  Dispatching (parallel): %s(%s)...", tc.name,
+                            ", ".join(f"{k}={v}" for k, v in tc.arguments.items() if k != "url"))
+                future = executor.submit(
+                    self.capbus.route, tc.name, tc.arguments
+                )
+                futures[future] = i
+
+            for future in concurrent.futures.as_completed(futures):
+                i = futures[future]
+                tc = tool_calls[i]
+                try:
+                    result = str(future.result(timeout=120))
+                except (CapabilityNotFoundError, Exception) as e:
+                    logger.warning("Parallel tool '%s' failed: %s", tc.name, e)
+                    result = f"Error: {e}"
+                results_by_index[i] = {"tc": tc, "result": result, "elapsed": 0.0}
+                logger.info("  %s -> %d chars (parallel)", tc.name, len(result))
+
+        return [results_by_index[i] for i in range(len(tool_calls))]
 
     def _checkpoint(self) -> None:
         """Save checkpoint after each turn."""
@@ -336,7 +384,15 @@ class ConversationLoop:
     ) -> Generator[RichToolCallEvent | str, None, str]:
         """Streaming conversation for TUI Live rendering."""
         self.ctx._turn_count += 1
-        self.ctx.auto_compact_check(self.llm.model_max_tokens or 4096)
+
+        # PRE_TURN hook
+        if self._hooks:
+            self._hooks.execute(HookPoint.PRE_TURN, {
+                "user_input": user_input,
+                "turn_count": self.ctx._turn_count,
+            })
+
+        self.ctx.auto_compact_check(self.llm.context_window)
 
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
@@ -413,17 +469,25 @@ class ConversationLoop:
                 "assistant", None, tool_calls=assistant_tool_calls
             )
 
-            for tc in response.tool_calls:
-                t0 = time.time()
-                try:
-                    result = _route_with_timeout(self.capbus, tc.name, tc.arguments)
-                except CapabilityNotFoundError as e:
-                    logger.warning("Tool call failed: %s", e)
-                    result = f"Error: {e}"
-                except Exception as e:
-                    logger.warning("Tool execution failed: %s", e)
-                    result = f"Error: {e}"
-                elapsed = time.time() - t0
+            # PRE_TOOL_CALL hook (streaming)
+            if self._hooks and response.tool_calls:
+                self._hooks.execute(HookPoint.PRE_TOOL_CALL, {
+                    "tool_calls": [
+                        {"name": tc.name, "arguments": tc.arguments}
+                        for tc in response.tool_calls
+                    ],
+                })
+
+            parallel = (
+                self.llm.features.supports_parallel_tool_calls
+                and len(response.tool_calls) > 1
+            )
+            for entry in self._execute_tool_calls(
+                response.tool_calls, parallel=parallel
+            ):
+                tc = entry["tc"]
+                elapsed = entry["elapsed"]
+                result = entry["result"]
 
                 yield RichToolCallEvent(
                     phase="done",
@@ -432,8 +496,7 @@ class ConversationLoop:
                     result_preview=result[:200],
                 )
 
-                # Truncate large tool results to prevent token overflow
-                result_str = str(result)
+                result_str = result
                 if len(result_str) > MAX_TOOL_RESULT_CHARS:
                     result_str = result_str[:MAX_TOOL_RESULT_CHARS] + "\n... (truncated)"
                 messages.append({
@@ -447,10 +510,26 @@ class ConversationLoop:
                     tool_call_id=tc.id,
                 )
 
+                # POST_TOOL_CALL hook (streaming)
+                if self._hooks:
+                    self._hooks.execute(HookPoint.POST_TOOL_CALL, {
+                        "tool_name": tc.name,
+                        "arguments": tc.arguments,
+                        "result": result_str,
+                        "elapsed": elapsed,
+                    })
+
         self.ctx.add_to_history("user", user_input)
         final_text = full_response_text or accumulated_text
         if final_text:
             self.ctx.add_to_history("assistant", final_text)
+
+        # POST_TURN hook (streaming)
+        if self._hooks:
+            self._hooks.execute(HookPoint.POST_TURN, {
+                "turn_count": self.ctx._turn_count,
+                "final_text": final_text,
+            })
 
         self._checkpoint()
         return final_text or "(no response)"

@@ -25,9 +25,63 @@ def _load_runtime(config_path: Path) -> dict:
     return inherit_api_key(resolved)
 
 
+def _dump_toml(data: dict, prefix: str = "") -> list[str]:
+    """Inline TOML serializer (no tomli_w dependency)."""
+    lines: list[str] = []
+    tables: list[tuple[str, dict]] = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            tables.append((f"{prefix}{key}", value))
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    lines.append(f"[[{prefix}{key}]]")
+                    for k, v in item.items():
+                        lines.append(f"{k} = {_toml_value(v)}")
+                else:
+                    lines.append(f"{key} = {_toml_value(value)}")
+                    break
+        elif isinstance(value, str):
+            lines.append(f"{key} = {_toml_value(value)}")
+        elif isinstance(value, bool):
+            lines.append(f"{key} = {'true' if value else 'false'}")
+        elif isinstance(value, (int, float)):
+            lines.append(f"{key} = {value}")
+        elif value is None:
+            continue
+        else:
+            lines.append(f"{key} = {_toml_value(str(value))}")
+    for table_key, table_dict in tables:
+        lines.append("")
+        lines.append(f"[{table_key}]")
+        for k, v in table_dict.items():
+            if isinstance(v, dict):
+                lines.append("")
+                lines.append(f"[{table_key}.{k}]")
+                for k2, v2 in v.items():
+                    lines.append(f"{k2} = {_toml_value(v2)}")
+            elif isinstance(v, str):
+                lines.append(f"{k} = {_toml_value(v)}")
+            elif isinstance(v, bool):
+                lines.append(f"{k} = {'true' if v else 'false'}")
+            elif isinstance(v, (int, float)):
+                lines.append(f"{k} = {v}")
+            elif v is not None:
+                lines.append(f"{k} = {_toml_value(str(v))}")
+    return lines
+
+
+def _toml_value(v: str) -> str:
+    """Format a string value for TOML."""
+    if "\n" in v or '"' in v or "'" in v:
+        escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"""{escaped}"""'
+    return f'"{v}"'
+
+
 def _cmd_config(agent, runtime_path: Path):
     """Interactive API key configuration. Instant apply + persist to runtime.toml."""
-    import tomllib, tomli_w
+    import tomllib
 
     if not runtime_path.exists():
         runtime_path.write_text("[llm]\nprovider = \"openai\"\nmodel = \"gpt-4o\"\n")
@@ -64,15 +118,19 @@ def _cmd_config(agent, runtime_path: Path):
         return
 
     # Persist
-    runtime_path.write_text(tomli_w.dumps(cfg))
+    runtime_path.write_text("\n".join(_dump_toml(cfg)))
 
-    # Instant apply: rebuild LLMClient with the new key
-    from agenthatch_core.llm.client import LLMClient
+    # Instant apply: rebuild LLMClient with full config (base_url + features)
+    from agenthatch_core.llm.client import LLMClient, ProviderFeatures
+    features_cfg = cfg.get("features", {})
     agent.llm = LLMClient(
         provider=llm.get("provider", "openai"),
         model=llm.get("model", "gpt-4o"),
         api_key=llm.get("api_key"),
+        base_url=llm.get("base_url"),
     )
+    if features_cfg:
+        agent.llm._features = ProviderFeatures(**features_cfg)
     console.print("[bold green]✓ Configuration updated and applied[/bold green]")
 
 

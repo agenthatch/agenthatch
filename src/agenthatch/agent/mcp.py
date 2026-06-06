@@ -33,7 +33,7 @@ class Transport(ABC):
         ...
 
     @abstractmethod
-    def send_request(self, request: dict[str, Any]) -> dict[str, Any]:
+    def send_request(self, request: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         """Send JSON-RPC request, return response dict.
 
         Returns {} on transport-level failure (connection lost).
@@ -64,6 +64,7 @@ class MCPServerConfig:
       - sse: {url, headers, auth_token}
     """
     transport: str = "stdio"
+    timeout: float = 30.0
     # stdio fields
     command: str = ""
     args: list[str] = field(default_factory=list)
@@ -94,13 +95,14 @@ class StdioTransport(Transport):
             env={**os.environ, **self._config.env},
         )
 
-    def send_request(self, request: dict[str, Any]) -> dict[str, Any]:
+    def send_request(self, request: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if not self._proc or not self._proc.stdin or not self._proc.stdout:
             return {}
         payload = json.dumps(request)
         self._proc.stdin.write(payload + "\n")
         self._proc.stdin.flush()
-        deadline = time.time() + _TIMEOUT_SECONDS
+        effective_timeout = timeout if timeout is not None else self._config.timeout
+        deadline = time.time() + effective_timeout
         while time.time() < deadline:
             line = self._proc.stdout.readline()
             if not line:
@@ -109,7 +111,7 @@ class StdioTransport(Transport):
                 return cast(dict[str, Any], json.loads(line))
             except json.JSONDecodeError:
                 continue
-        logger.warning("MCP StdioTransport timed out after %ds", _TIMEOUT_SECONDS)
+        logger.warning("MCP StdioTransport timed out after %.1fs", effective_timeout)
         return {}
 
     def disconnect(self) -> None:
@@ -137,6 +139,7 @@ class StreamableHTTPTransport(Transport):
     """
 
     def __init__(self, config: MCPServerConfig) -> None:
+        self._config = config
         self._url = config.url.rstrip("/")
         self._headers: dict[str, str] = {
             "Content-Type": "application/json",
@@ -151,7 +154,7 @@ class StreamableHTTPTransport(Transport):
 
     def connect(self) -> None:
         import httpx
-        self._client = httpx.Client(timeout=60.0)
+        self._client = httpx.Client(timeout=self._config.timeout)
         init_resp = self.send_request({
             "jsonrpc": "2.0",
             "id": 0,
@@ -170,13 +173,16 @@ class StreamableHTTPTransport(Transport):
                 headers=self._headers,
             )
 
-    def send_request(self, request: dict[str, Any]) -> dict[str, Any]:
+    def send_request(self, request: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if not self._client:
             return {}
         if "jsonrpc" not in request:
             request = {"jsonrpc": "2.0", "id": 1, **request}
         try:
-            resp = self._client.post(self._url, json=request, headers=self._headers)
+            resp = self._client.post(
+                self._url, json=request, headers=self._headers,
+                timeout=timeout if timeout is not None else self._config.timeout,
+            )
             if resp.status_code == 200:
                 content_type = resp.headers.get("content-type", "")
                 if "text/event-stream" in content_type:
@@ -224,6 +230,7 @@ class SSETransport(Transport):
     """
 
     def __init__(self, config: MCPServerConfig) -> None:
+        self._config = config
         self._url = config.url.rstrip("/")
         self._headers: dict[str, str] = {}
         if config.auth_token:
@@ -234,8 +241,8 @@ class SSETransport(Transport):
 
     def connect(self) -> None:
         import httpx
-        self._client = httpx.Client(timeout=60.0)
-        # MCP protocol handshake: initialize → notifications/initialized
+        self._client = httpx.Client(timeout=self._config.timeout)
+        # MCP protocol handshake: initialize -> notifications/initialized
         init_response = self.send_request({
             "method": "initialize",
             "params": {
@@ -247,13 +254,16 @@ class SSETransport(Transport):
         if init_response:
             self.send_request({"method": "notifications/initialized"})
 
-    def send_request(self, request: dict[str, Any]) -> dict[str, Any]:
+    def send_request(self, request: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if not self._client:
             return {}
         if "jsonrpc" not in request:
             request = {"jsonrpc": "2.0", "id": 1, **request}
         try:
-            resp = self._client.post(self._url, json=request, headers=self._headers)
+            resp = self._client.post(
+                self._url, json=request, headers=self._headers,
+                timeout=timeout if timeout is not None else self._config.timeout,
+            )
             if resp.status_code == 200:
                 return cast(dict[str, Any], resp.json())
             return {}
@@ -398,7 +408,8 @@ class MCPClient:
             )
 
     def call_tool(
-        self, server_name: str, tool_name: str, arguments: dict[str, Any]
+        self, server_name: str, tool_name: str, arguments: dict[str, Any],
+        timeout: float | None = None,
     ) -> str:
         if server_name in self._unavailable:
             return (
@@ -411,12 +422,13 @@ class MCPClient:
                 f"MCP server '{server_name}' not connected. "
                 f"Available servers: {list(self._transports.keys())}"
             )
+        effective_timeout = timeout or self._servers.get(server_name, MCPServerConfig()).timeout
         resp = transport.send_request({
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments},
-        })
+        }, timeout=effective_timeout)
         if "error" in resp:
             return (
                 f"MCP error from '{server_name}/{tool_name}': "

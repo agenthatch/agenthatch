@@ -12,7 +12,9 @@ Usage:
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
+import random
+import time
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any
@@ -35,13 +37,16 @@ class LLMClient:
     structured (Instructor) output calls.
     """
 
-    def __init__(self, provider_name: str | None = None, model: str | None = None):
+    def __init__(self, provider_name: str | None = None, model: str | None = None,
+                 context_window: int | None = None):
         """Initialize LLM client for a provider.
 
         Args:
             provider_name: Provider name (openai/anthropic/deepseek/ollama/custom.<name>).
                            If None, uses the default provider from config.
             model: Model name. If None, uses provider's default_model.
+            context_window: Total context window size for compaction threshold.
+                            If None, defaults to 128000.
         """
         name = provider_name or get_default_provider()
         self._info = get_provider(name)
@@ -53,6 +58,9 @@ class LLMClient:
         self._model = model or self._info.default_model
         self._features = self._info.features
         self._max_tokens = 4096
+        self._context_window: int = context_window or getattr(
+            self._info, 'context_window', 128000
+        )
 
         # BUG-04-06: Anthropic uses Messages API, not Chat Completions
         if self._features.requires_anthropic_adapter:
@@ -86,6 +94,45 @@ class LLMClient:
     def features(self) -> ProviderFeatures:
         return self._features
 
+    @property
+    def context_window(self) -> int:
+        return self._context_window
+
+    # ── Retry ──────────────────────────────────────────────────────────
+
+    def _retry(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        max_retries: int = 3,
+        retryable_statuses: set[int] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Call fn with exponential backoff on transient HTTP errors."""
+        if retryable_statuses is None:
+            retryable_statuses = {429, 500, 502, 503, 504}
+
+        for attempt in range(max_retries + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                status = (
+                    getattr(e, "status_code", None)
+                    or getattr(getattr(e, "response", None), "status_code", None)
+                    or getattr(e, "code", None)
+                )
+                if status not in retryable_statuses:
+                    raise
+                if attempt == max_retries:
+                    raise
+                delay = min(1.0 * (2 ** attempt), 30.0)
+                delay *= random.uniform(0.75, 1.25)
+                logger.warning(
+                    "LLM retry %d/%d after %.1fs: %s",
+                    attempt + 1, max_retries, delay, e,
+                )
+                time.sleep(delay)
+
     # ── Simple chat ──────────────────────────────────────────────────
 
     def chat(
@@ -96,9 +143,10 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> str:
         """Simple chat completion. Returns response text."""
-        response = self._client.chat.completions.create(
+        response = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -137,7 +185,7 @@ class LLMClient:
         try:
             return client.chat.completions.create(
                 model=model or self._model,
-                messages=messages,  # type: ignore[arg-type]
+                messages=messages,
                 response_model=response_model,
                 max_retries=max_retries,
             )
@@ -146,9 +194,10 @@ class LLMClient:
 
         # DD-08-03: Fallback for reasoning models — instructor failed,
         # try extracting content via _extract_content and parse manually
-        response = self._client.chat.completions.create(
+        response = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
-            messages=messages,  # type: ignore[arg-type]
+            messages=messages,
             temperature=0.0,
             max_tokens=4096,
         )
@@ -202,7 +251,8 @@ class LLMClient:
             )
             return ToolCallResponse(text=text, tool_calls=[])
 
-        response = self._client.chat.completions.create(  # type: ignore[call-overload]
+        response = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
             messages=messages,
             tools=tools,
@@ -274,10 +324,11 @@ class LLMClient:
         """Native streaming with tool calling (OpenAI-compatible)."""
         import json
 
-        stream = self._client.chat.completions.create(
+        stream = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
-            messages=messages,  # type: ignore[arg-type]
-            tools=tools,  # type: ignore[arg-type]
+            messages=messages,
+            tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
@@ -288,7 +339,7 @@ class LLMClient:
         tc_accum: dict[int, dict[str, str]] = {}
 
         for event in stream:
-            delta = event.choices[0].delta if event.choices else None  # type: ignore[union-attr]
+            delta = event.choices[0].delta if event.choices else None
             if delta is None:
                 continue
 

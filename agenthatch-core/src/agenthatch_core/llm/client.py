@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Generator
+import random
+import time
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field as dc_field
 from typing import Any
 
@@ -50,6 +52,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         features: ProviderFeatures | None = None,
+        context_window: int | None = None,
         **kwargs: Any,
     ):
         if not api_key:
@@ -59,6 +62,7 @@ class LLMClient:
         self._model = model
         self._features = features or ProviderFeatures()
         self._max_tokens = max_tokens or 4096
+        self._context_window = context_window or 128000
 
         if self._features.requires_anthropic_adapter:
             raise ProviderCapabilityError(
@@ -89,6 +93,45 @@ class LLMClient:
     def features(self) -> ProviderFeatures:
         return self._features
 
+    @property
+    def context_window(self) -> int:
+        return self._context_window
+
+    # ── Retry ──────────────────────────────────────────────────────────
+
+    def _retry(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        max_retries: int = 3,
+        retryable_statuses: set[int] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Call fn with exponential backoff on transient HTTP errors."""
+        if retryable_statuses is None:
+            retryable_statuses = {429, 500, 502, 503, 504}
+
+        for attempt in range(max_retries + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                status = (
+                    getattr(e, "status_code", None)
+                    or getattr(getattr(e, "response", None), "status_code", None)
+                    or getattr(e, "code", None)
+                )
+                if status not in retryable_statuses:
+                    raise
+                if attempt == max_retries:
+                    raise
+                delay = min(1.0 * (2 ** attempt), 30.0)
+                delay *= random.uniform(0.75, 1.25)
+                logger.warning(
+                    "LLM retry %d/%d after %.1fs: %s",
+                    attempt + 1, max_retries, delay, e,
+                )
+                time.sleep(delay)
+
     # ── Simple chat ──────────────────────────────────────────────────
 
     def chat(
@@ -99,7 +142,8 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> str:
         """Simple chat completion. Returns response text."""
-        response = self._client.chat.completions.create(
+        response = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
             temperature=temperature,
@@ -126,7 +170,8 @@ class LLMClient:
         rather than using empty tool lists (which can trigger tool_choice
         anomalies in some models).
         """
-        stream = self._client.chat.completions.create(
+        stream = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
             temperature=temperature,
@@ -148,6 +193,7 @@ class LLMClient:
 
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_parts.append(delta.reasoning_content)
+                yield delta.reasoning_content
 
         text = "".join(text_parts)
         if not text and reasoning_parts:
@@ -184,7 +230,8 @@ class LLMClient:
             pass
 
         # Fallback for reasoning models
-        response = self._client.chat.completions.create(
+        response = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
             temperature=0.0,
@@ -231,7 +278,8 @@ class LLMClient:
             )
             return ToolCallResponse(text=text, tool_calls=[])
 
-        response = self._client.chat.completions.create(  # type: ignore[call-overload]
+        response = self._retry(
+            self._client.chat.completions.create,  # type: ignore[call-overload]
             model=model or self._model,
             messages=messages,
             tools=tools,
@@ -283,7 +331,8 @@ class LLMClient:
         max_tokens: int,
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Native streaming with tool calling."""
-        stream = self._client.chat.completions.create(
+        stream = self._retry(
+            self._client.chat.completions.create,
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
             tools=tools,  # type: ignore[arg-type]
@@ -307,6 +356,9 @@ class LLMClient:
 
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_parts.append(delta.reasoning_content)
+                yield StreamDelta(
+                    type="reasoning", content=delta.reasoning_content
+                )
 
             if delta.tool_calls:
                 for tc_delta in delta.tool_calls:
@@ -431,6 +483,12 @@ class LLMClient:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning and isinstance(reasoning, str) and reasoning.strip():
                 return reasoning
+
+        # Always fallback to reasoning_content for reasoning models
+        # even when the feature flag isn't explicitly set
+        reasoning = getattr(message, "reasoning_content", None)
+        if reasoning and isinstance(reasoning, str) and reasoning.strip():
+            return reasoning
 
         return ""
 

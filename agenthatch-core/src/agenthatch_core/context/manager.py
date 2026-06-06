@@ -590,18 +590,51 @@ class ContextManager:
         return messages
 
     def _generate_summary(self) -> CompactSummary:
-        """Call LLM to generate a CompactSummary from conversation history."""
+        """Call LLM to generate a CompactSummary from conversation history.
+
+        Tries structured output first (Instructor/JSON mode).  Falls back to
+        raw chat with balanced-JSON extraction when structured mode fails
+        (common with reasoning models like deepseek-v4-pro).
+        """
         messages = self._build_compact_messages()
 
-        if self._llm is not None:
+        if self._llm is None:
+            raise RuntimeError("No LLM client available for compaction")
+
+        try:
             result = self._llm.chat_structured(
                 messages=messages,
                 response_model=CompactSummary,
                 max_retries=2,
             )
             return result  # type: ignore[no-any-return]
+        except Exception as e:
+            logger.warning(
+                "Structured compaction failed (%s), falling back to raw chat", e
+            )
 
-        raise RuntimeError("No LLM client available for compaction")
+        # Fallback: raw chat with JSON extraction
+        try:
+            raw = self._llm.chat(messages=messages)
+            json_candidates = _extract_balanced_json(raw)
+            if json_candidates:
+                for candidate in json_candidates:
+                    try:
+                        data = json.loads(candidate)
+                        return CompactSummary(**data)
+                    except Exception:
+                        continue
+            # Minimal fallback: use the raw text as session_intent
+            return CompactSummary(
+                session_intent=raw[:500],
+                current_state="compact_fallback",
+            )
+        except Exception as e2:
+            logger.error("Raw chat compaction also failed: %s", e2)
+            return CompactSummary(
+                session_intent="compaction failed",
+                current_state="error",
+            )
 
     def set_batch_scope(self, total: int) -> None:
         """Set batch scope for progress tracking."""
