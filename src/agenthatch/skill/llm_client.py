@@ -57,6 +57,7 @@ class LLMClient:
         self._provider_name = name
         self._model = model or self._info.default_model
         self._features = self._info.features
+        self.last_usage: UsageInfo | None = None
         self._max_tokens = 4096
         self._context_window: int = context_window or getattr(
             self._info, 'context_window', 128000
@@ -151,6 +152,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        self.last_usage = UsageInfo.from_openai_response(response)
         choice = response.choices[0]
         if choice.finish_reason == "length":
             logger.warning(

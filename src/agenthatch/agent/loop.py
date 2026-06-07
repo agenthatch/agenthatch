@@ -70,12 +70,14 @@ class ConversationLoop:
         sandbox: Sandbox,
         ctx: Any,
         hooks: Any = None,
+        token_counter: Any = None,
     ):
         self.llm = llm
         self.capbus = capbus
         self.sandbox = sandbox
         self.ctx = ctx
         self._hooks = hooks
+        self._token_counter = token_counter
 
         self._max_retries: int = 1
         self._retry_base_delay: float = 1.0
@@ -89,6 +91,20 @@ class ConversationLoop:
         self._cb_opened_at: float = 0.0
 
         self._checkpoint_mgr: Any = None
+
+    def _record_usage(self, response: Any) -> None:
+        """Record token usage from LLM response into token counter."""
+        if self._token_counter is None:
+            return
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        self._token_counter.add_usage({
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "reasoning_tokens": usage.reasoning_tokens,
+        })
 
     def run(self, user_input: str) -> str:
         """Execute one conversation turn synchronously."""
@@ -116,6 +132,7 @@ class ConversationLoop:
                 self.llm.chat_with_tools, messages=messages, tools=tools,
             )
             self._cb_record(True)
+            self._record_usage(response)
         except Exception as e:
             self._cb_record(False)
             logger.error("LLM API call failed: %s", e)
@@ -171,6 +188,7 @@ class ConversationLoop:
                         self.llm.chat_with_tools, messages, tools,
                     )
                     self._cb_record(True)
+                    self._record_usage(response)
                 except Exception as e:
                     self._cb_record(False)
                     logger.error("LLM API call failed in tool loop: %s", e)
@@ -254,6 +272,7 @@ class ConversationLoop:
                     self.llm.chat_with_tools, messages, tools,
                 )
                 self._cb_record(True)
+                self._record_usage(response)
             except Exception as e:
                 self._cb_record(False)
                 logger.error("LLM API call failed in tool loop: %s", e)
@@ -278,6 +297,7 @@ class ConversationLoop:
                     self.llm.chat_with_tools, messages, tools,
                 )
                 self._cb_record(True)
+                self._record_usage(response)
             except Exception as e:
                 self._cb_record(False)
                 logger.error("Fallback summarization failed: %s", e)
@@ -531,6 +551,8 @@ class ConversationLoop:
             if response is None:
                 break
 
+            self._record_usage(response)
+
             # v0.6: detect task_complete signal
             if response.has_tool_calls:
                 tc_names = [tc.name for tc in response.tool_calls]
@@ -661,6 +683,7 @@ class ConversationLoop:
                     self.llm.chat_with_tools, messages, tools,
                 )
                 self._cb_record(True)
+                self._record_usage(response)
                 full_response_text = response.text or ""
             except Exception as e:
                 self._cb_record(False)

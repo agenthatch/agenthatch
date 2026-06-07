@@ -14,7 +14,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-
 @dataclass
 class GuardRule:
     """A single compiled guard rule."""
@@ -40,6 +39,41 @@ class GuardRule:
             return text, False
         result, count = self._compiled.subn(self.replacement, text)
         return result, count > 0
+
+
+# Compile built-in security patterns once at module load.
+# Must be after GuardRule class definition.
+def _compile_builtin_patterns() -> list[GuardRule]:
+    patterns: list[tuple[str, str, str, str]] = [
+        (r"\bsk-[A-Za-z0-9]{24,}\b", "API key leak (sk-...)",
+         "redact", "***API_KEY***"),
+        (r"\bsk-ant-[A-Za-z0-9]{24,}\b", "Anthropic API key leak",
+         "redact", "***ANTHROPIC_KEY***"),
+        (r"Bearer\s+[A-Za-z0-9\-_\.]{20,}", "Bearer token leak",
+         "redact", "***BEARER_TOKEN***"),
+        (r"api[_-]?key[=:]\s*[A-Za-z0-9\-_]{20,}", "API key in output",
+         "redact", "api_key=***REDACTED***"),
+        (r"secret[=:]\s*[A-Za-z0-9\-_]{16,}", "Secret in output",
+         "redact", "secret=***REDACTED***"),
+        (r"password[=:]\s*\S+", "Password in output",
+         "redact", "password=***REDACTED***"),
+        (r"token[=:]\s*[A-Za-z0-9\-_]{16,}", "Token in output",
+         "redact", "token=***REDACTED***"),
+    ]
+    rules: list[GuardRule] = []
+    for pat, desc, action, repl in patterns:
+        try:
+            compiled = re.compile(pat, re.IGNORECASE | re.MULTILINE)
+            rules.append(GuardRule(
+                pattern=pat, description=desc, action=action,
+                replacement=repl, _compiled=compiled,
+            ))
+        except re.error:
+            pass
+    return rules
+
+
+_BUILTIN_SECURITY_PATTERNS: list[GuardRule] = _compile_builtin_patterns()
 
 
 @dataclass
@@ -90,11 +124,13 @@ class OutputGuard:
 
         String-only rules are skipped during validation (they're guidelines,
         not regex patterns). Only dict rules with valid patterns are compiled.
+
+        Built-in security patterns (API key leaks, tokens, credentials) are
+        always included regardless of skill rules.
         """
-        compiled = []
+        compiled = list(_BUILTIN_SECURITY_PATTERNS)  # always include
         for r in rules:
             if isinstance(r, str):
-                # String-only rules are guidelines, skip pattern compilation
                 continue
             if isinstance(r, dict) and "pattern" in r:
                 compiled.append(GuardRule(

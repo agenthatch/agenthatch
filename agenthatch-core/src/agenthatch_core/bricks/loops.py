@@ -24,15 +24,18 @@ class DirectLoop:
         self,
         llm: Any,
         ctx: Any,
+        token_counter: Any = None,
     ):
         self._llm = llm
         self._ctx = ctx
+        self._token_counter = token_counter
 
     def run(self, user_input: str) -> str:
         """Execute a single turn: build messages, call LLM, return result."""
         messages = self._ctx.build_messages(user_input)
         result = self._llm.chat(messages)
         self._ctx.add_assistant_message(result)
+        self._record_usage()
         return result
 
     def stream(self, user_input: str):  # Generator[str, None, str]
@@ -46,4 +49,19 @@ class DirectLoop:
 
         full_text = "".join(text_parts)
         self._ctx.add_assistant_message(full_text)
+        self._record_usage()
         return full_text
+
+    def _record_usage(self) -> None:
+        """Record token usage from last LLM call."""
+        if self._token_counter is None:
+            return
+        usage = getattr(self._llm, "last_usage", None)
+        if usage is None:
+            return
+        self._token_counter.add_usage({
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "reasoning_tokens": usage.reasoning_tokens,
+        })

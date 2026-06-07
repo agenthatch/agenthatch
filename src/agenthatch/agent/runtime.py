@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier  # type: ignore[import-untyped]
+from agenthatch_core.bricks.stubs import _NullCapBus, _NullHooks, _NullSandbox  # type: ignore[import-untyped]
 from pydantic import ValidationError
 
 from agenthatch.agent.compact import CompactSummary
@@ -29,8 +31,6 @@ from agenthatch.house.resolver import is_builtin
 from agenthatch.providers import ProviderFeatures, get_default_provider, get_provider
 from agenthatch.skill.llm_client import LLMClient
 from agenthatch.skill.spec import AHSSpec
-from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
-from agenthatch_core.bricks.stubs import _NullCapBus, _NullSandbox, _NullHooks
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +139,11 @@ class SkillAgent:
     @staticmethod
     def _build_manifest(spec: AHSSpec) -> BrickManifest:
         """Build a BrickManifest from skill classification."""
-        from agenthatch_core.bricks.archetypes import (
+        from agenthatch_core.bricks.archetypes import (  # type: ignore[import-untyped]
             SkillArchetype,
             classify_skill,
         )
-        from agenthatch_core.bricks.guards import OutputGuard
+        from agenthatch_core.bricks.guards import OutputGuard  # type: ignore[import-untyped]
 
         # Dump spec to dict for classify_skill
         spec_dict = spec.model_dump() if hasattr(spec, "model_dump") else {}
@@ -171,7 +171,11 @@ class SkillAgent:
             SkillArchetype.PROMPT_ONLY, SkillArchetype.EXTERNAL_TOOL
         )
 
-        api_templates = spec.interface.api_templates if hasattr(spec.interface, "api_templates") else []
+        api_templates = (
+            spec.interface.api_templates
+            if hasattr(spec.interface, "api_templates")
+            else []
+        )
         credential_vault = bool(api_templates)
 
         file_processor = archetype in (
@@ -237,7 +241,7 @@ class SkillAgent:
         if self._manifest.sandbox != SandboxTier.NONE and hasattr(
             self.sandbox, "configure"
         ):
-            from agenthatch_core.bricks.sandboxes import SandboxWhitelist
+            from agenthatch_core.bricks.sandboxes import SandboxWhitelist  # type: ignore[import-untyped]
             whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
             self.sandbox._allowed_commands = whitelist.commands
 
@@ -253,17 +257,17 @@ class SkillAgent:
         # ── v0.7: CredentialVault ──
         self.vault: Any = None
         if self._manifest.credential_vault:
-            from agenthatch_core.bricks.credential_vault import CredentialVault
+            from agenthatch_core.bricks.credential_vault import CredentialVault  # type: ignore[import-untyped]
             self.vault = CredentialVault()
 
         # ── v0.7: FileProcessor ──
         self.file_processor: Any = None
         if self._manifest.file_processor:
-            from agenthatch_core.bricks.file_processor import FileProcessor
+            from agenthatch_core.bricks.file_processor import FileProcessor  # type: ignore[import-untyped]
             self.file_processor = FileProcessor()
 
         # ── v0.7: TokenCounter (unconditional) ──
-        from agenthatch_core.loop.token_counter import TokenCounter
+        from agenthatch_core.loop.token_counter import TokenCounter  # type: ignore[import-untyped]
         self.token_counter = TokenCounter()
 
         self.llm = LLMClient(
@@ -277,6 +281,7 @@ class SkillAgent:
             sandbox=self.sandbox,
             ctx=self.ctx,
             hooks=self.hooks,
+            token_counter=self.token_counter,
         )
 
         self.ctx._hooks = self.hooks
@@ -530,8 +535,10 @@ class SkillAgent:
     def chat(self, user_input: str) -> str:
         """Single-turn synchronous chat."""
         if self._manifest.loop_engine == LoopKind.DIRECT:
-            from agenthatch_core.bricks.loops import DirectLoop
-            result = DirectLoop(self.llm, self.ctx).run(user_input)
+            from agenthatch_core.bricks.loops import DirectLoop  # type: ignore[import-untyped]
+            result = DirectLoop(
+                self.llm, self.ctx, token_counter=self.token_counter
+            ).run(user_input)
         else:
             result = self.loop.run(user_input)
 
@@ -549,8 +556,10 @@ class SkillAgent:
     def chat_stream(self, user_input: str) -> Any:
         """Streaming chat for TUI consumption."""
         if self._manifest.loop_engine == LoopKind.DIRECT:
-            from agenthatch_core.bricks.loops import DirectLoop
-            result = yield from DirectLoop(self.llm, self.ctx).stream(user_input)
+            from agenthatch_core.bricks.loops import DirectLoop  # type: ignore[import-untyped]
+            result = yield from DirectLoop(
+                self.llm, self.ctx, token_counter=self.token_counter
+            ).stream(user_input)
         else:
             result = yield from self.loop.stream(user_input)
 
