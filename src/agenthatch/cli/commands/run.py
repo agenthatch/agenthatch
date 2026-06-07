@@ -20,12 +20,18 @@ from agenthatch_core.config import (  # type: ignore[import-untyped]
     resolve_runtime_config,
 )
 from agenthatch_core.loop.agent_loop import RichToolCallEvent  # type: ignore[import-untyped]
+from prompt_toolkit import prompt as pt_prompt
+from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
 
 from agenthatch.cli import console
+
+PT_STYLE = PTStyle.from_dict({
+    "prompt": "bold green",
+})
 
 
 def run_command(
@@ -252,7 +258,15 @@ def _run_interactive_tui(agent: Any) -> None:
 
     try:
         while True:
-            user_input = Prompt.ask("[bold green]You[/]")
+            # prompt_toolkit replaces Rich.Prompt for CJK input correctness
+            # (macOS libedit bug: backspace drifts on multi-byte characters)
+            try:
+                user_input = pt_prompt(
+                    [("class:prompt", "You: ")],
+                    style=PT_STYLE,
+                )
+            except EOFError:
+                raise
             if not user_input.strip():
                 continue
 

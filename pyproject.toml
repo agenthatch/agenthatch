@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.6.5"
+version = "0.6.6"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -40,6 +40,7 @@ dependencies = [
     "rank-bm25>=0.2",
     "jinja2>=3.1",
     "tomli-w>=1.0",
+    "prompt-toolkit>=3.0",
 ]
 
 [project.optional-dependencies]
