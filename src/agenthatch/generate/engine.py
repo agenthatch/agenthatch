@@ -229,8 +229,8 @@ class GenerateEngine:
         Returns None if classification fails (backward-compatible fallback).
         """
         try:
-            from agenthatch_core.bricks.archetypes import classify_skill, SkillArchetype
-            from agenthatch_core.bricks.manifest import LoopKind, SandboxTier
+            from agenthatch_core.bricks.archetypes import SkillArchetype, classify_skill  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.manifest import LoopKind, SandboxTier  # type: ignore[import-untyped]
         except ImportError:
             return None
 
@@ -252,6 +252,8 @@ class GenerateEngine:
             sandbox = SandboxTier.NONE
         elif archetype == SkillArchetype.EXTERNAL_TOOL:
             sandbox = SandboxTier.EXTENDED
+        elif archetype == SkillArchetype.MCP_CONNECTOR:
+            sandbox = SandboxTier.NONE
         else:
             sandbox = SandboxTier.STANDARD
 
@@ -287,26 +289,6 @@ class GenerateEngine:
             "archetype": archetype.value,
             "archetype_confidence": result.confidence,
         }
-        """Read default provider, model, and base_url from global config.
-
-        Returns ("openai", "gpt-4o", "https://api.openai.com/v1") if no config found.
-        """
-        import tomllib as _tomllib
-
-        config_path = Path.home() / ".agenthatch" / "config.toml"
-        if not config_path.exists():
-            return ("openai", "gpt-4o", "https://api.openai.com/v1")
-
-        try:
-            cfg = _tomllib.loads(config_path.read_text())
-        except Exception:
-            return ("openai", "gpt-4o", "https://api.openai.com/v1")
-
-        provider = cfg.get("providers", {}).get("default", "openai")
-        provider_cfg = cfg.get("providers", {}).get(provider, {})
-        model = provider_cfg.get("default_model", "gpt-4o")
-        base_url = provider_cfg.get("base_url", "https://api.openai.com/v1")
-        return (provider, model, base_url)
 
     @staticmethod
     def _format_workflow(workflow: list[dict[str, Any]]) -> str:

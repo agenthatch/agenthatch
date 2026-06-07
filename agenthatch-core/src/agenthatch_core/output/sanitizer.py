@@ -70,7 +70,7 @@ class OutputSanitizer:
     @staticmethod
     def _flush_art_block(art_lines: list[str], result: list[str]) -> None:
         """Wrap collected art lines in a code block."""
-        if len(art_lines) >= 2:
+        if len(art_lines) >= 1:
             result.append("```text")
             result.extend(art_lines)
             result.append("```")

@@ -29,6 +29,8 @@ from agenthatch.house.resolver import is_builtin
 from agenthatch.providers import ProviderFeatures, get_default_provider, get_provider
 from agenthatch.skill.llm_client import LLMClient
 from agenthatch.skill.spec import AHSSpec
+from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
+from agenthatch_core.bricks.stubs import _NullCapBus, _NullSandbox, _NullHooks
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +130,70 @@ class SkillAgent:
                 DeprecationWarning,
                 stacklevel=2,
             )
-        return cls(spec, skill_dir=ahs_path.parent, **overrides)
+
+        # Build BrickManifest from skill classification
+        manifest = cls._build_manifest(spec)
+
+        return cls(spec, skill_dir=ahs_path.parent, brick_manifest=manifest, **overrides)
+
+    @staticmethod
+    def _build_manifest(spec: AHSSpec) -> BrickManifest:
+        """Build a BrickManifest from skill classification."""
+        from agenthatch_core.bricks.archetypes import (
+            SkillArchetype,
+            classify_skill,
+        )
+        from agenthatch_core.bricks.guards import OutputGuard
+
+        # Dump spec to dict for classify_skill
+        spec_dict = spec.model_dump() if hasattr(spec, "model_dump") else {}
+        classification = classify_skill(spec_dict)
+        archetype = classification.archetype
+
+        # Map archetype → loop engine
+        if archetype == SkillArchetype.PROMPT_ONLY:
+            loop_engine = LoopKind.DIRECT
+        else:
+            loop_engine = LoopKind.CONVERSATION
+
+        # Map archetype → sandbox tier
+        if archetype == SkillArchetype.PROMPT_ONLY:
+            sandbox = SandboxTier.NONE
+        elif archetype == SkillArchetype.EXTERNAL_TOOL:
+            sandbox = SandboxTier.EXTENDED
+        elif archetype == SkillArchetype.MCP_CONNECTOR:
+            sandbox = SandboxTier.NONE
+        else:
+            sandbox = SandboxTier.STANDARD
+
+        capbus = archetype != SkillArchetype.PROMPT_ONLY
+        hooks = archetype not in (
+            SkillArchetype.PROMPT_ONLY, SkillArchetype.EXTERNAL_TOOL
+        )
+
+        api_templates = spec.interface.api_templates if hasattr(spec.interface, "api_templates") else []
+        credential_vault = bool(api_templates)
+
+        file_processor = archetype in (
+            SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
+        )
+
+        rules = list(spec.instructions.rules) if hasattr(spec.instructions, "rules") else []
+        guard_active = bool(rules) and archetype != SkillArchetype.PROMPT_ONLY
+        guard = OutputGuard.from_rules(rules) if guard_active else None
+
+        return BrickManifest(
+            loop_engine=loop_engine,
+            capbus=capbus,
+            sandbox=sandbox,
+            hooks=hooks,
+            guard=guard,
+            guard_active=guard_active,
+            credential_vault=credential_vault,
+            file_processor=file_processor,
+            archetype=archetype.value,
+            archetype_confidence=classification.confidence,
+        )
 
     def __init__(
         self,
@@ -137,6 +202,7 @@ class SkillAgent:
         provider: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        brick_manifest: BrickManifest | None = None,
     ):
         self.spec = ahs_spec
         self.skill_dir = skill_dir
@@ -144,6 +210,9 @@ class SkillAgent:
         self.ctx._skill_dir = skill_dir
         self.ctx._rich_prompt = False
         self._rich_prompt: bool = False
+
+        # ── v0.7: BrickManifest-driven chassis assembly ──
+        self._manifest = brick_manifest or BrickManifest()
 
         # ── v0.5: Apply per-skill compact config ──
         agent_cfg = self.spec.agent
@@ -157,14 +226,45 @@ class SkillAgent:
 
         runtime_config = self._resolve_runtime_config(provider, api_key, model)
 
-        self.capbus = CapBus()
-        self.sandbox = Sandbox()
+        # ── v0.7: Assemble bricks via manifest (real or null stubs) ──
+        self.capbus: Any = CapBus() if self._manifest.capbus else _NullCapBus()
+        self.sandbox: Any = (
+            Sandbox() if self._manifest.sandbox != SandboxTier.NONE
+            else _NullSandbox()
+        )
+
+        # Apply sandbox whitelist tier
+        if self._manifest.sandbox != SandboxTier.NONE and hasattr(
+            self.sandbox, "configure"
+        ):
+            from agenthatch_core.bricks.sandboxes import SandboxWhitelist
+            whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
+            self.sandbox._allowed_commands = whitelist.commands
 
         # ── v0.5: Wire hooks + state management ──
-        self.hooks = HooksManager()
+        self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
         self.state = StateManager(
             Path(".agenthatch") / "state" / self.spec.identity.id
         )
+
+        # ── v0.7: OutputGuard ──
+        self.guard: Any = self._manifest.guard
+
+        # ── v0.7: CredentialVault ──
+        self.vault: Any = None
+        if self._manifest.credential_vault:
+            from agenthatch_core.bricks.credential_vault import CredentialVault
+            self.vault = CredentialVault()
+
+        # ── v0.7: FileProcessor ──
+        self.file_processor: Any = None
+        if self._manifest.file_processor:
+            from agenthatch_core.bricks.file_processor import FileProcessor
+            self.file_processor = FileProcessor()
+
+        # ── v0.7: TokenCounter (unconditional) ──
+        from agenthatch_core.loop.token_counter import TokenCounter
+        self.token_counter = TokenCounter()
 
         self.llm = LLMClient(
             provider_name=runtime_config["provider"],
@@ -429,9 +529,38 @@ class SkillAgent:
 
     def chat(self, user_input: str) -> str:
         """Single-turn synchronous chat."""
-        return self.loop.run(user_input)
+        if self._manifest.loop_engine == LoopKind.DIRECT:
+            from agenthatch_core.bricks.loops import DirectLoop
+            result = DirectLoop(self.llm, self.ctx).run(user_input)
+        else:
+            result = self.loop.run(user_input)
+
+        # v0.7: OutputGuard validation
+        if self._manifest.guard_active and self.guard is not None:
+            cleaned, violations = self.guard.validate(result)
+            if violations:
+                for v in violations:
+                    logger.warning("OutputGuard: %s", v)
+            if cleaned:
+                result = cleaned
+
+        return result
 
     def chat_stream(self, user_input: str) -> Any:
         """Streaming chat for TUI consumption."""
-        result = yield from self.loop.stream(user_input)
+        if self._manifest.loop_engine == LoopKind.DIRECT:
+            from agenthatch_core.bricks.loops import DirectLoop
+            result = yield from DirectLoop(self.llm, self.ctx).stream(user_input)
+        else:
+            result = yield from self.loop.stream(user_input)
+
+        # v0.7: OutputGuard validation
+        if self._manifest.guard_active and self.guard is not None:
+            cleaned, violations = self.guard.validate(result)
+            if violations:
+                for v in violations:
+                    logger.warning("OutputGuard: %s", v)
+            if cleaned:
+                result = cleaned
+
         return result

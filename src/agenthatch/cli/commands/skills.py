@@ -1,4 +1,4 @@
-"""agenthatch skills — List registered skills in skillhouse.json."""
+"""agenthatch skills — List registered skills and discover new ones."""
 
 from __future__ import annotations
 
@@ -20,13 +20,18 @@ def skills_command(
         str | None,
         typer.Option("--type", help="Filter by capability type"),
     ] = None,
+    discover: Annotated[
+        bool,
+        typer.Option("--discover", help="Auto-discover skills from filesystem"),
+    ] = True,
 ) -> None:
-    """List all registered skills in skillhouse.json.
+    """List all registered skills and discover new ones.
 
     Examples:
         agenthatch skills
         agenthatch skills --type data
         agenthatch skills --json
+        agenthatch skills --no-discover
     """
     from agenthatch.house.index import SkillhouseIndex
 
@@ -48,6 +53,21 @@ def skills_command(
 
     idx = SkillhouseIndex(str(sh_path))
     entries = idx.list_all()
+
+    # v0.7: Auto-discover skills not yet in skillhouse
+    if discover:
+        from agenthatch.house.discovery import discover_all
+        discovery_result = discover_all()
+        registered_ids = {e["id"] for e in entries}
+        for skill in discovery_result.skills:
+            if skill.skill_id not in registered_ids:
+                entries.append({
+                    "id": skill.skill_id,
+                    "display_name": skill.skill_id,
+                    "version": "0.0.0",
+                    "summary": f"[discovered] from {skill.source}",
+                    "status": "discovered",
+                })
 
     # Apply type filter if specified
     if type_filter:

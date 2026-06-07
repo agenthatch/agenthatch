@@ -175,6 +175,17 @@ class ContextManager:
             "politely decline and suggest what you CAN help with."
         )
 
+        # v0.7: Language directive
+        parts.append("")
+        parts.append("## Language")
+        parts.append(
+            "You MUST respond in the same language as the user's input. "
+            "Detect the user's language and match it exactly. "
+            "If the user writes in Chinese, respond in Chinese. "
+            "If the user writes in English, respond in English. "
+            "Never switch languages mid-response unless the user does."
+        )
+
         workflow = (
             instructions.get("workflow", "")
             if isinstance(instructions, dict)

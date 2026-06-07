@@ -182,6 +182,16 @@ class ContextManager:
             parts.append("\n## Operational Guidance")
             parts.append(body)
 
+        # v0.7: Language directive
+        parts.append("\n## Language")
+        parts.append(
+            "You MUST respond in the same language as the user's input. "
+            "Detect the user's language and match it exactly. "
+            "If the user writes in Chinese, respond in Chinese. "
+            "If the user writes in English, respond in English. "
+            "Never switch languages mid-response unless the user does."
+        )
+
         # Resource summary
         if self.spec.resources.references:
             parts.append("\n## Reference Documents")

@@ -286,6 +286,16 @@ def _run_interactive_tui(agent: Any) -> None:
                 continue
 
             console.print(Markdown(response_text))
+            # v0.7: Show token usage if available
+            if hasattr(agent, "token_counter"):
+                snap = agent.token_counter.snapshot()
+                if snap["total_tokens"] > 0:
+                    parts = [f"Tokens: {snap['total_tokens']:,}"]
+                    if snap["prompt_tokens"]:
+                        parts.append(f"(in: {snap['prompt_tokens']:,}")
+                    if snap["completion_tokens"]:
+                        parts.append(f"out: {snap['completion_tokens']:,})")
+                    console.print(f"[dim]{' '.join(parts)}[/dim]")
             console.print()
 
     except (KeyboardInterrupt, SystemExit, EOFError):

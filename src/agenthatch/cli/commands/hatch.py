@@ -395,9 +395,11 @@ def hatch_command(
         _render_harness_traces(harness_outputs)
 
     # ── 7.5. Phase 2.5: Skill Classification (v0.7) ─────────────────
-    from agenthatch_core.bricks.archetypes import classify_skill
+    from agenthatch_core.bricks.archetypes import classify_skill  # type: ignore[import-untyped]
 
-    classification = classify_skill(ahs_spec.model_dump() if hasattr(ahs_spec, "model_dump") else ahs_spec)
+    classification = classify_skill(
+        ahs_spec.model_dump() if hasattr(ahs_spec, "model_dump") else ahs_spec
+    )
     console.print(
         f"     [dim]Archetype: {classification.archetype.value} "
         f"(confidence: {classification.confidence:.0%})[/dim]"

@@ -1,7 +1,8 @@
 """MCP (Model Context Protocol) tool loader (agenthatch-core).
 
-Provides the ability to connect to MCP servers and register their tools
-on the CapBus.  This is a stub; full implementation lives in agenthatch.
+Connects to MCP servers and registers their tools on the CapBus.
+Delegates to the full agenthatch.agent.mcp implementation when available;
+degrades gracefully when running standalone (agenthatch-core only).
 """
 
 from __future__ import annotations
@@ -19,10 +20,44 @@ def load_mcp_tools(capbus: Any, mcp_cfg: dict) -> None:
         capbus: CapBus instance to register tools on.
         mcp_cfg: MCP server configuration dict with keys:
             - name: server name
-            - config: server-specific config (url, command, etc.)
+            - config: server-specific config dict with keys:
+                - command: command to run (for stdio transport)
+                - args: list of arguments
+                - env: environment variables dict
+                - transport: "stdio", "streamable_http", or "sse"
+                - url: server URL (for HTTP/SSE transports)
     """
-    logger.warning(
-        "MCP loader not fully implemented in agenthatch-core. "
-        "Server '%s' tools will not be available.",
-        mcp_cfg.get("name", "unknown"),
-    )
+    server_name = mcp_cfg.get("name", "unknown")
+    server_config = mcp_cfg.get("config", {})
+
+    try:
+        from agenthatch.agent.mcp import MCPClient, MCPServerConfig
+    except ImportError:
+        logger.warning(
+            "MCP client not available in standalone mode. "
+            "Server '%s' tools will not be available.",
+            server_name,
+        )
+        return
+
+    try:
+        client = MCPClient()
+        config = MCPServerConfig(
+            command=server_config.get("command", ""),
+            args=server_config.get("args", []),
+            env=server_config.get("env", {}),
+            transport=server_config.get("transport", "stdio"),
+            url=server_config.get("url", ""),
+            headers=server_config.get("headers", {}),
+            auth_token=server_config.get("auth_token", ""),
+            timeout=server_config.get("timeout", 30.0),
+        )
+        client.add_server(server_name, config)
+        client.connect_all()
+        client.register_with_capbus(capbus)
+        logger.info("MCP server '%s' connected and tools registered.", server_name)
+    except Exception as e:
+        logger.warning(
+            "Failed to connect MCP server '%s': %s",
+            server_name, e,
+        )

@@ -12,17 +12,80 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Known AI tool skill directories (ordered by priority)
 KNOWN_SKILL_ROOTS: list[Path] = [
+    # Primary — agenthatch native
     Path.home() / ".agents" / "skills",
+    # Claude ecosystem
     Path.home() / ".claude" / "skills",
+    # Codex ecosystem
     Path.home() / ".codex" / "skills",
+    # OpenCode
+    Path.home() / ".opencode" / "skills",
+    # Continue.dev
+    Path.home() / ".continue" / "skills",
+    # Aider
+    Path.home() / ".aider" / "skills",
+    # Cline
+    Path.home() / ".cline" / "skills",
+    # Roo Code
+    Path.home() / ".roo" / "skills",
+    # Cursor
+    Path.home() / ".cursor" / "skills",
+    # Windsurf
+    Path.home() / ".windsurf" / "skills",
+    # Copilot / GitHub
+    Path.home() / ".github-copilot" / "skills",
+    Path.home() / ".copilot" / "skills",
+    # Cody (Sourcegraph)
+    Path.home() / ".cody" / "skills",
+    # Tabby
+    Path.home() / ".tabby" / "skills",
+    # Goose
+    Path.home() / ".goose" / "skills",
+    # OpenHands
+    Path.home() / ".openhands" / "skills",
+    # GPT-Engineer
+    Path.home() / ".gpt-engineer" / "skills",
+    # Sweep
+    Path.home() / ".sweep" / "skills",
+    # Devin
+    Path.home() / ".devin" / "skills",
+    # Qodo
+    Path.home() / ".qodo" / "skills",
+    # Augment
+    Path.home() / ".augment" / "skills",
+    # Amazon Q
+    Path.home() / ".amazonq" / "skills",
+    # CodeRabbit
+    Path.home() / ".coderabbit" / "skills",
+    # Gemini CLI
+    Path.home() / ".gemini" / "skills",
+    # Qwen / Alibaba
+    Path.home() / ".qwen" / "skills",
+    # Replit
+    Path.home() / ".replit" / "skills",
+    # TaskMaster
+    Path.home() / ".taskmaster" / "skills",
+    # Open Interpreter
+    Path.home() / ".open-interpreter" / "skills",
+    # Kodu
+    Path.home() / ".kodu" / "skills",
+    # Pieces
+    Path.home() / ".pieces" / "skills",
+    # Ollama
+    Path.home() / ".ollama" / "skills",
+    # LM Studio
+    Path.home() / ".lm-studio" / "skills",
+    # Jan
+    Path.home() / ".jan" / "skills",
 ]
 
 # Directories to skip during scan
@@ -170,7 +233,6 @@ def _scan_root(
 
         has_skill_md = False
         skill_md_path: Path | None = None
-        has_ahs = False
         ahs_path: Path | None = None
         has_scripts = False
         subdirs: list[Path] = []
@@ -185,7 +247,6 @@ def _scan_root(
                     has_skill_md = True
                     skill_md_path = entry
                 elif name == "agenthatch.yaml":
-                    has_ahs = True
                     ahs_path = entry
             elif entry.is_dir() and depth < max_depth:
                 if not entry.name.startswith(".") and entry.name not in EXCLUDED_DIRS:
