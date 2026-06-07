@@ -81,7 +81,7 @@ class ContextManager:
 
     ANCHOR_RULES: list[str] = []
     _skill_dir: Path | None = None
-    mcp_status_note: str = ""  # DD-09-05: MCP server status injected into system prompt
+    mcp_status_note: str = ""  # MCP server status injected into system prompt
 
     def __init__(self, ahs_spec: AHSSpec):
         self.spec = ahs_spec
@@ -174,7 +174,7 @@ class ContextManager:
             if s.plan_required:
                 parts.append("\nAlways create a plan before executing.")
 
-        # ── DD-05-10: Operational guidance from raw_body ──
+        # Operational guidance from raw_body
         if self.spec.instructions.raw_body:
             body = self.spec.instructions.raw_body
             if len(body) > 3000:
@@ -182,7 +182,7 @@ class ContextManager:
             parts.append("\n## Operational Guidance")
             parts.append(body)
 
-        # ── DD-05-09: Resource summary ──
+        # Resource summary
         if self.spec.resources.references:
             parts.append("\n## Reference Documents")
             parts.append(
@@ -207,7 +207,7 @@ class ContextManager:
                     f")"
                 )
 
-        # ── DD-05-21: External tool summary ──
+        # External tool summary
         if self._capbus is not None:
             external_tools = []
             for name, cap in self._capbus.capabilities.items():
@@ -228,7 +228,7 @@ class ContextManager:
             parts.append(
                 "## Output Format (MANDATORY — enforced every turn)"
             )
-            # ── DD-05-19: Template guard — reinforced every turn ──
+            # Template guard — reinforced every turn
             if self.summary is not None:
                 parts.append(
                     "This is a long-running session. "
@@ -242,7 +242,7 @@ class ContextManager:
             )
             parts.append(f"\n{self.spec.instructions.output_template}")
 
-        # ── DD-05-18: Anchor rules survive compaction ──
+        # Anchor rules survive compaction
         should_inject = self.summary is not None or (
             self._turn_count > 0 and self._turn_count % 20 == 0
         )
@@ -256,7 +256,7 @@ class ContextManager:
             for rule in self.ANCHOR_RULES:
                 parts.append(f"- {rule}")
 
-        # ── DD-05-20: Batch progress gating ──
+        # Batch progress gating
         if self._batch_total > 0:
             parts.append("")
             parts.append("## Progress Tracking")
@@ -268,7 +268,7 @@ class ContextManager:
                 "Do NOT repeat already-completed items."
             )
 
-        # ── DD-05-38: Rich prompt mode — reference summaries ──
+        # Rich prompt mode — reference summaries
         if rich and self.spec.resources.references and self._skill_dir:
             parts.append("\n## Reference Summaries")
             for ref in self.spec.resources.references[:5]:
@@ -278,7 +278,7 @@ class ContextManager:
                     content = ref_file.read_text()[:500]
                     parts.append(f"\n### {ref_path}\n{content}")
 
-        # ── DD-09-05: MCP server status injection ──
+        # MCP server status injection
         if getattr(self, 'mcp_status_note', ''):
             parts.append("")
             parts.append(self.mcp_status_note)
@@ -311,7 +311,7 @@ class ContextManager:
                         }
             isolated.insert(0, msg)
 
-        # ── DD-05-04: Reorder orphaned tool messages instead of stripping ──
+        # Reorder orphaned tool messages instead of stripping
         reordered: list[dict[str, Any]] = []
         pending_orphan_tools: list[dict[str, Any]] = []
         last_assistant_had_tool_calls = False
@@ -350,7 +350,7 @@ class ContextManager:
 
         isolated = reordered
 
-        # ── DD-08-02 Part B: Validate tool call chain completeness ──
+        # Validate tool call chain completeness
         validated: list[dict[str, Any]] = []
         pending_tc_ids: dict[str, list[int]] = {}
         tool_results: set[str] = set()
@@ -584,7 +584,7 @@ class ContextManager:
             prompt += self.summary.to_text()
             prompt += "\n\nUpdate this summary to include the recent conversation below."
 
-        # ── DD-05-18: Inject anchor rules into compact prompt ──
+        # Inject anchor rules into compact prompt
         if self.ANCHOR_RULES:
             prompt += (
                 "\n\nIMPORTANT: Preserve these rules in your summary: "
@@ -628,7 +628,7 @@ class ContextManager:
                 temperature=0.1,
                 max_tokens=1000,
             )
-            # ── DD-05-40: Brace-balanced extraction (replaces non-greedy regex) ──
+            # Brace-balanced extraction (replaces non-greedy regex)
             blocks = _extract_balanced_json(text)
             if blocks:
                 blocks.sort(key=lambda b: -len(b))

@@ -587,7 +587,7 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             return {}
 
     def _compute_structural_confidence(self, ahs_dict: dict[str, Any]) -> float:
-        """DD-09-07: Compute confidence based on structural checks, not LLM self-assessment."""
+        """Compute confidence based on structural checks, not LLM self-assessment."""
         checks = 0
         passed = 0
 
@@ -721,7 +721,7 @@ class InferMCPServersHarness(AgentHarness):
                     "config": {"transport": "auto"},
                 })
 
-        # DD-08-05 Part C: Verify against actual mcp__ patterns in body
+        # Verify against actual mcp__ patterns in body
         mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
         referenced = set(mcp_pattern.findall(body))
         for server in llm_servers:
@@ -895,21 +895,21 @@ class Orchestrator:
         try:
             ahs_dict = outputs["E"].result.get("ahs_spec", {})
 
-            # ── DD-05-08: Wire resources into ahs_dict ──
+            # Wire resources into ahs_dict
             ahs_dict["resources"] = resources
 
-            # ── DD-05-10: Inject raw_body into instructions ──
+            # Inject raw_body into instructions
             if "instructions" not in ahs_dict:
                 ahs_dict["instructions"] = {}
             ahs_dict["instructions"]["raw_body"] = context.body
 
-            # ── DD-05-14: API template detection ──
+            # API template detection
             api_templates = self._detect_api_templates(context.body)
             if "interface" not in ahs_dict:
                 ahs_dict["interface"] = {}
             ahs_dict["interface"]["api_templates"] = api_templates
 
-            # ── DD-05-25: Merge MCP servers from Harness F ──
+            # Merge MCP servers from Harness F
             mcp_servers: list[dict[str, Any]] = []
             if "F" in outputs:
                 f_output: Any = outputs["F"]
@@ -917,7 +917,7 @@ class Orchestrator:
                     f_output.result.get("mcp_servers", [])
                     if hasattr(f_output, "result") else []
                 )
-            # DD-09-04 Part B: Enrich MCP servers from SKILL.md body patterns
+            # Enrich MCP servers from SKILL.md body patterns
             mcp_servers = self._enrich_mcp_from_body(mcp_servers, context.body)
             if mcp_servers:
                 if "interface" not in ahs_dict:
@@ -944,7 +944,7 @@ class Orchestrator:
     def _classify(self, context: ContextPack) -> str:
         """Pre-flight skill type classification (deterministic heuristics).
 
-        Uses flat FileManifest (DD-E01: Phase 1 makes no semantic judgment,
+        Uses flat FileManifest (Phase 1 makes no semantic judgment,
         but Phase 2 pre-flight can use basic heuristics for routing).
         """
         _SCRIPT_SUFFIXES = {".py", ".sh", ".js", ".ts", ".rb", ".go", ".rs"}
@@ -981,7 +981,7 @@ class Orchestrator:
         e_client, e_model = _resolve("E")
         f_client, f_model = _resolve("F")
 
-        # DD-08-10: Extend timeout for reasoning models
+        # Extend timeout for reasoning models
         d_timeout = 60
         if d_client and hasattr(d_client, '_features'):
             if d_client._features.supports_reasoning_content:
@@ -1050,7 +1050,7 @@ class Orchestrator:
     def _enrich_mcp_from_body(
         servers: list[dict[str, Any]], body: str
     ) -> list[dict[str, Any]]:
-        """DD-09-04B: Scan SKILL.md body for mcp__ patterns.
+        """Scan SKILL.md body for mcp__ patterns.
 
         Fills in missing server info from mcp__SERVER__TOOL references.
         Never fabricates URLs — if no URL in SKILL.md, transport stays empty.
@@ -1120,7 +1120,7 @@ class Orchestrator:
         instructions = Instructions(**ahs_dict.get("instructions", {}))
         composition = Composition(**ahs_dict.get("composition", {})) if ahs_dict.get("composition") else Composition()  # noqa: E501
 
-        # ── DD-05-12: Agent section stub ──
+        # Agent section stub
         agent_config = ahs_dict.get("agent", {})
         if isinstance(agent_config, dict) and agent_config:
             agent = AgentConfig(runtime=AgentRuntimeConfig(**agent_config))

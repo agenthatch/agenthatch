@@ -6,11 +6,7 @@ Three-step processing, zero AI participation:
   Step 3: YAML best-effort parsing → frontmatter dict | body raw
 
 Phase 1 makes NO semantic classification of files.
-That is LLM's responsibility (Phase 2 Harness). See DD-E01.
-
-Patterns drawn from:
-  - OpenAI Codex loader.rs: discover_skills_under_root() BFS
-  - smolagents tools.py: get_source() graceful decode pattern
+That is LLM's responsibility (Phase 2 Harness).
 """
 
 from __future__ import annotations
@@ -44,7 +40,7 @@ _BIN_SIGS: list[bytes] = [
     b"\xca\xfe\xba\xbe",
 ]
 
-# SKILL.md case-insensitive matching (DD-E06)
+# SKILL.md case-insensitive matching
 _SKILL_MD_VARIANTS = {"skill.md", "skil.md"}
 
 # Directories to exclude during file discovery
@@ -59,7 +55,6 @@ def _is_skill_md(filename: str) -> bool:
     """Case-insensitive SKILL.md check.
 
     Matching filenames: SKILL.md, skill.md, Skill.md, SKILL.MD, skil.md, etc.
-    See DD-E06 for rationale.
     """
     return filename.lower() in _SKILL_MD_VARIANTS
 
@@ -114,8 +109,7 @@ def _resolve_skill_directory(path: Path) -> Path:
 def _discover_files(skill_dir: Path) -> FileManifest:
     """Walk entire skill dir, collect ALL readable text files.
 
-    Pattern: codex loader.rs discover_skills_under_root() — BFS tree walk.
-    Key difference from Codex: we read file contents in addition to metadata,
+    BFS tree walk. We read file contents in addition to metadata,
     and we don't classify by extension.
 
     Returns:
@@ -156,7 +150,7 @@ def _discover_files(skill_dir: Path) -> FileManifest:
 def _try_read_text(filepath: Path) -> str | None:
     """Attempt to read file as text using binary-signature detection.
 
-    Pattern: smolagents get_source() — try decode, fail gracefully.
+    Try decode, fail gracefully.
     Returns content string (truncated to _MAX_FILE_CHARS) or None.
     """
     # Stage 1: Read binary head for signature detection

@@ -108,11 +108,9 @@ class ConversationLoop:
         if not self._cb_allow():
             return "Service temporarily unavailable. Please wait and try again."
 
-        # v0.6: first round forces tool choice (Instructor pattern — LLM must act)
         try:
             response = self._call_with_retry(
                 self.llm.chat_with_tools, messages=messages, tools=tools_for_api,
-                tool_choice="required",
             )
             self._cb_record(True)
         except Exception as e:
@@ -121,6 +119,7 @@ class ConversationLoop:
             return f"I encountered an error communicating with the model provider: {e}"
 
         task_completed = False
+        has_executed_tools = False
         for _ in range(self.MAX_TOOL_ROUNDS):
             # v0.6: detect task_complete signal, return summary
             if response.tool_calls:
@@ -144,7 +143,10 @@ class ConversationLoop:
                     response.tool_calls = work_tools
 
             if not response.tool_calls:
-                # v0.6: Auto-continuation — text-only is a status update
+                # v0.6: Auto-continuation only after tools executed
+                # (needsFollowUp pattern)
+                if not has_executed_tools:
+                    break
                 messages.append({
                     "role": "assistant",
                     "content": response.text or "",
@@ -224,6 +226,7 @@ class ConversationLoop:
                     f"[{tc.name}]: {str(result)[:500]}",
                     tool_call_id=tc.id,
                 )
+                has_executed_tools = True
 
             if not self._cb_allow():
                 break
@@ -390,9 +393,10 @@ class ConversationLoop:
             yield "Service temporarily unavailable. Please wait and try again."
             return "Service temporarily unavailable."
 
-        # ── v0.6: First round forces tool choice ──
+        # ── v0.6: Autonomous task completion ──
         task_completed = False
-        for round_idx in range(self.MAX_TOOL_ROUNDS):
+        has_executed_tools = False
+        for _ in range(self.MAX_TOOL_ROUNDS):
             accumulated_text = ""
             has_yielded_tool_header = False
 
@@ -401,7 +405,6 @@ class ConversationLoop:
                     self.llm.stream_chat_with_tools,
                     messages=messages,
                     tools=tools_for_api,
-                    tool_choice="required" if round_idx == 0 else "auto",
                 )
                 self._cb_record(True)
             except Exception as e:
@@ -458,7 +461,11 @@ class ConversationLoop:
                     response.tool_calls = work_tools
 
             if not response.tool_calls:
-                # v0.6: Auto-continuation — text-only is a status update
+                # v0.6: Auto-continuation only after tools executed
+                # (needsFollowUp pattern)
+                if not has_executed_tools:
+                    full_response_text = response.text or accumulated_text
+                    break
                 messages.append({
                     "role": "assistant",
                     "content": response.text or accumulated_text,
@@ -522,6 +529,7 @@ class ConversationLoop:
                     f"[{tc.name}]: {str(result)[:500]}",
                     tool_call_id=tc.id,
                 )
+                has_executed_tools = True
         else:
             task_completed = True
 

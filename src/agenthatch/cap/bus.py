@@ -84,7 +84,7 @@ class CapBus:
         if tool_name == "task_complete":
             return "Task completed."
 
-        # DD-05-11: External handlers first (most specific)
+        # External handlers first (most specific)
         if tool_name in self._external_handlers:
             return self._external_handlers[tool_name](**arguments)
 

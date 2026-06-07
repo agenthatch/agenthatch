@@ -21,7 +21,6 @@ class FileEntry:
 
     Deliberately does NOT include extension classification.
     Semantic classification is LLM's responsibility (Phase 2 Harness).
-    See DD-E01 for rationale.
     """
     path: str                       # relative path (e.g. "tools/update.sh")
     hash: str                       # SHA-256 hex digest
@@ -34,7 +33,7 @@ class FileManifest:
     """Flat list of all files in a skill directory.
 
     Replaces the old 4-category model (scripts/references/assets/other).
-    No classification — that's LLM's job (DD-E01).
+    No classification — that's LLM's job.
     """
     entries: list[FileEntry] = field(default_factory=list)
     entrypoint: str = ""            # relative path of SKILL.md (or variant)

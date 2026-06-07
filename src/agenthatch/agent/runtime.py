@@ -105,7 +105,7 @@ MIN_GENERATION_TOKENS = 1024
 class SkillAgent:
     """Base Brick — the entry point for v0.4 Agent runtime."""
 
-    # DD-09-03: Reasoning models share a single max_tokens budget between
+    # Reasoning models share a single max_tokens budget between
     # reasoning and content tokens. Multiply default budget by this factor
     # to ensure adequate content token allocation (≈40% of total).
     REASONING_MAX_TOKENS_MULTIPLIER: float = 2.5
@@ -251,14 +251,15 @@ class SkillAgent:
         )
         resolved["features"] = merged_features
 
-        # BUG-04-02: Dynamic max_tokens based on estimated input tokens
+        # NOTE: Dynamic max_tokens based on estimated input tokens
+        # https://github.com/agenthatch/agenthatch/issues
         requested_max = resolved["max_tokens"]
         estimated_input = self.ctx.estimate_input_tokens()
         if not isinstance(estimated_input, int):
             estimated_input = 0
         safe_max = max(MIN_GENERATION_TOKENS, requested_max - estimated_input)
 
-        # DD-09-03: Reasoning models share a single max_tokens budget
+        # Reasoning models share a single max_tokens budget
         # between reasoning and content. The old 0.7x reduction was wrong —
         # it starved content tokens. Instead, INFLATE the budget.
         user_set_max_tokens = (
@@ -284,7 +285,7 @@ class SkillAgent:
 
     def _assemble(self) -> None:
         """Assemble capabilities from AHSSPEC."""
-        # ── DD-05-18: Extract anchor rules from instructions.rules ──
+        # Extract anchor rules from instructions.rules
         self.ctx.ANCHOR_RULES = list(self.spec.instructions.rules)
 
         skill_brick = SkillBrick(self.spec, self.skill_dir, self.sandbox)
@@ -330,7 +331,7 @@ class SkillAgent:
             env={e.name: e.description for e in self.spec.base.env},
         )
 
-        # ── DD-05-11: MCP integration ──
+        # MCP integration
         self._mcp_client = MCPClient()
         for server_ref in self.spec.interface.mcp_servers:
             config = MCPServerConfig(
@@ -343,7 +344,7 @@ class SkillAgent:
         self._mcp_client.connect_all()
         self._mcp_client.register_with_capbus(self.capbus)
 
-        # ── DD-09-05: Inject MCP server status into system prompt ──
+        # Inject MCP server status into system prompt
         if self.spec.interface.mcp_servers:
             status_lines = ["## MCP Server Status"]
             for srv in self.spec.interface.mcp_servers:
@@ -356,7 +357,7 @@ class SkillAgent:
                 status_lines.append(f"- {srv.name}: {status}")
             self.ctx.mcp_status_note = "\n".join(status_lines)
 
-        # ── DD-05-14: API template registration ──
+        # API template registration
         http_client = self.capbus.builtins.get("http_client")
         for tpl in self.spec.interface.api_templates:
             if http_client is not None:
@@ -369,8 +370,8 @@ class SkillAgent:
                     executor.execute,
                 )
 
-        # ── DD-05-17: Checkpoint restore ──
-        # DD-09-08: Use project-local directory to avoid sandbox permission denial
+        # Checkpoint restore
+        # Use project-local directory to avoid sandbox permission denial
         self._checkpoint_mgr = CheckpointManager(
             Path.cwd() / ".agenthatch" / "sessions" / self.spec.identity.id
         )
@@ -390,7 +391,7 @@ class SkillAgent:
                 self.ctx.history = cp.history
                 if cp.summary:
                     summary_dict = dict(cp.summary)
-                    # DD-09-02: Remap key_findings → key_decisions for checkpoint compat.
+                    # Remap key_findings → key_decisions for checkpoint compat.
                     # v0.5.7/v0.5.8 early versions serialized @property key_findings
                     # into checkpoint, but CompactSummary.__init__() only accepts
                     # key_decisions. Without this remap, TypeError crashes the agent.
@@ -416,7 +417,7 @@ class SkillAgent:
 
         self.loop._checkpoint_mgr = self._checkpoint_mgr
 
-        # ── DD-05-21: CapBus wiring to context ──
+        # CapBus wiring to context
         self.ctx._capbus = self.capbus
 
         if self.spec.instructions.output_template:

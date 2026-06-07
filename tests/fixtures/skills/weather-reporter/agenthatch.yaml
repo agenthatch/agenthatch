@@ -46,18 +46,26 @@ interface:
       days: number
   requires:
   - capability: http_client
-    type: transport
+    type: action
     input_schema: {}
   - capability: json_parser
-    type: utility
+    type: data
     input_schema: {}
   - capability: bash_runtime
-    type: runtime
+    type: action
     input_schema: {}
   compatible_with:
   - slack-notifier
   - dashboard-builder
   - alert-system
+  mcp_servers: []
+  api_templates:
+  - name: get_data_2_5_weather
+    url: https://api.openweathermap.org/data/2.5/weather?q=${CITY}&appid=${OPENWEATHER_API_KEY}&units=metric
+    method: GET
+    params: []
+    headers: {}
+    auth_env_var: null
 base:
   runtime: bash
   sandbox: true
@@ -96,10 +104,29 @@ instructions:
   output_template: "Weather in {city}, {country}:\n  Temperature: {temp}°C (feels\
     \ like {feels_like}°C)\n  Condition: {description}\n  Humidity: {humidity}%\n\
     \  Wind: {wind_speed} m/s"
+  raw_body: "# Weather Reporter\n\nQuery weather data from OpenWeatherMap API.\n\n\
+    ## Quick Start\n\n```bash\ncurl -s \"https://api.openweathermap.org/data/2.5/weather?q=${CITY}&appid=${OPENWEATHER_API_KEY}&units=metric\"\
+    \ | jq .\n```\n\n## Workflow\n\n1. Extract city name from user query\n2. Call\
+    \ the API with `scripts/query_weather.sh <city>`\n3. Parse JSON response and format\
+    \ as human-readable text\n4. For forecasts, use `scripts/forecast_weather.sh <city>\
+    \ <days>`\n\n## Output Format\n\n```\nWeather in {city}, {country}:\n  Temperature:\
+    \ {temp}°C (feels like {feels_like}°C)\n  Condition: {description}\n  Humidity:\
+    \ {humidity}%\n  Wind: {wind_speed} m/s\n```\n\n## Gotchas\n\n- City names with\
+    \ spaces must be URL-encoded (e.g., \"New York\" → \"New%20York\")\n- The free\
+    \ API tier limits to 60 calls/min\n- Always specify `units=metric` unless user\
+    \ explicitly requests imperial"
 resources:
-  scripts: []
-  references: []
+  scripts:
+  - name: scripts/query_weather.sh
+    hash: 513ec12a4857b0770a0362cd8268b08556119e3544e6dedc7de48c62ebd4f2c9
+  references:
+  - name: agenthatch.yaml
+    hash: 3692cc677098fcd7af1352098053bcf9a2914a0bf239ba619adf8ca400dfc72c
   assets: []
 modes: null
 composition:
   event_listeners: []
+agent:
+  status: not_generated
+  generated_at: null
+  runtime: null

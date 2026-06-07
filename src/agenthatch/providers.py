@@ -1,7 +1,6 @@
 """Provider registry and API key resolution.
 
 v0.2 single source of truth for all LLM providers.
-References: Codex CLI auth/manager.rs, Claude Code utils/auth.ts.
 
 Priority chain (highest to lowest):
 1. Provider-specific env var    (e.g., OPENAI_API_KEY)
@@ -33,7 +32,7 @@ from agenthatch.config import CONFIG_FILE
 from agenthatch.exceptions import ProviderNotFoundError
 
 # ---------------------------------------------------------------------------
-# Built-in providers (Codex CLI pattern: ModelProviderInfo in config_toml.rs)
+# Built-in providers
 # ---------------------------------------------------------------------------
 
 _warned_providers: set[str] = set()
@@ -304,7 +303,7 @@ def get_default_provider(config: dict[str, Any] | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# API Key resolution (Claude Code pattern: getAnthropicApiKeyWithSource)
+# API Key resolution
 # ---------------------------------------------------------------------------
 
 def resolve_api_key(
@@ -334,7 +333,8 @@ def resolve_api_key(
     if config is None:
         config = _load_config_safe()
 
-    # BUG-04-07: Builtin providers without env_key (e.g. Ollama) don't need API keys
+    # NOTE: Builtin providers without env_key (e.g. Ollama) don't need API keys
+    # https://github.com/agenthatch/agenthatch/issues
     if info.kind == "builtin" and not info.env_key:
         return "local-no-key"
 

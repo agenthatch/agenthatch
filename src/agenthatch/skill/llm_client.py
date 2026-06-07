@@ -62,7 +62,8 @@ class LLMClient:
             self._info, 'context_window', 128000
         ) or 128000
 
-        # BUG-04-06: Anthropic uses Messages API, not Chat Completions
+        # NOTE: Anthropic uses Messages API, not Chat Completions
+        # https://github.com/agenthatch/agenthatch/issues
         if self._features.requires_anthropic_adapter:
             raise ProviderCapabilityError(
                 f"Provider '{name}' requires an Anthropic API adapter which is "
@@ -192,7 +193,7 @@ class LLMClient:
         except instructor.core.InstructorRetryException:
             pass
 
-        # DD-08-03: Fallback for reasoning models — instructor failed,
+        # Fallback for reasoning models — instructor failed,
         # try extracting content via _extract_content and parse manually
         response = self._retry(
             self._client.chat.completions.create,
@@ -210,7 +211,7 @@ class LLMClient:
             )
         import json as _json
 
-        # DD-09-06: Try balanced JSON extraction for reasoning models
+        # Try balanced JSON extraction for reasoning models
         # that return markdown+JSON mixtures in reasoning_content
         try:
             parsed = _json.loads(content)
@@ -261,7 +262,8 @@ class LLMClient:
             max_tokens=max_tokens,
         )
         result = ToolCallResponse.from_openai(response, llm_client=self)
-        # BUG-04-01: Apply content extraction for reasoning/content split
+        # NOTE: Apply content extraction for reasoning/content split
+        # https://github.com/agenthatch/agenthatch/issues
         msg = response.choices[0].message
         extracted = self._extract_content(msg)
         if extracted:
@@ -480,7 +482,7 @@ class LLMClient:
 
         Used by ALL call paths: chat_with_tools, chat_structured, chat, etc.
 
-        DD-09-09: Handles three formats:
+        Handles three formats:
           1. content as string (OpenAI-compatible)
           2. content as list (Anthropic Messages API)
           3. reasoning_content fallback (reasoning models)
@@ -500,7 +502,7 @@ class LLMClient:
             if texts:
                 return "\n".join(texts)
 
-        # DD-09-09: Reasoning fallback — return FULL reasoning_content
+        # Reasoning fallback — return FULL reasoning_content
         if self._features.supports_reasoning_content:
             reasoning = getattr(message, "reasoning_content", None)
             if reasoning and isinstance(reasoning, str) and reasoning.strip():
@@ -562,7 +564,7 @@ class ToolCallResponse:
     def from_openai(cls, response: Any, llm_client: Any | None = None) -> ToolCallResponse:
         """Construct from an OpenAI ChatCompletion object.
 
-        DD-09-01: When llm_client is provided, use _extract_content()
+        When llm_client is provided, use _extract_content()
         for reasoning model support (handles content="" via reasoning_content).
         Falls back to msg.content when llm_client is None (backward compatible).
         """
@@ -570,7 +572,7 @@ class ToolCallResponse:
 
         msg = response.choices[0].message
 
-        # DD-09-01: Use _extract_content() for reasoning model support
+        # Use _extract_content() for reasoning model support
         if llm_client and hasattr(llm_client, '_extract_content'):
             text = llm_client._extract_content(msg) or None
         else:

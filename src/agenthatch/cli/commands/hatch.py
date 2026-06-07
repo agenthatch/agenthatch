@@ -677,9 +677,9 @@ def _resolve_search_roots(config: dict[str, Any]) -> list[Path]:
     Sources:
       1. [skills].search_dirs from config (user-specified)
       2. _KNOWN_SKILL_HOST_DIRS under $HOME (auto-discovered AI tool dirs)
-      3. Project-level .agents/skills/ (Codex convention, up to 3 parent levels)
+      3. Project-level .agents/skills/ (convention, up to 3 parent levels)
 
-    Pattern: codex skill_roots() — explicit enumeration of known paths.
+    Pattern: skill_roots() — explicit enumeration of known paths.
 
     Returns:
         Deduplicated list of existing directory paths.
@@ -703,7 +703,7 @@ def _resolve_search_roots(config: dict[str, Any]) -> list[Path]:
         if candidate.is_dir():
             roots.append(candidate.resolve())
 
-    # Source 3: Project-level .agents/skills/ (Codex convention)
+    # Source 3: Project-level .agents/skills/ (convention)
     cwd = Path.cwd().resolve()
     for parent in [cwd] + list(cwd.parents)[:3]:
         candidate = parent / ".agents" / "skills"

@@ -1,6 +1,6 @@
 """AgentHatch Capability Layer — v0.4 CapBus + type matching.
 
-v0.3 defines the protocol contract (DD-008) between AHSSPEC.interface.provides/requires
+Defines the protocol contract between AHSSPEC.interface.provides/requires
 and v0.4's CapBus runtime. v0.4 will register, match, and route capabilities.
 """
 
