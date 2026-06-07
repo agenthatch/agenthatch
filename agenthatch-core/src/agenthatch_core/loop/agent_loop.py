@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_RESULT_CHARS = 10000
 
+# ── v0.6 Autonomous task completion ──────────────────────────────────
+_TASK_COMPLETE_TOOL = "task_complete"
+_CONTINUE_NUDGE = (
+    "Task not complete. Continue working on the user's request. "
+    "If all steps are done, call task_complete with a summary."
+)
+
 
 def _route_with_timeout(
     capbus: CapBus, tool_name: str, arguments: dict[str, Any], timeout: int = 120
@@ -101,9 +108,11 @@ class ConversationLoop:
         if not self._cb_allow():
             return "Service temporarily unavailable. Please wait and try again."
 
+        # v0.6: first round forces tool choice (Instructor pattern — LLM must act)
         try:
             response = self._call_with_retry(
                 self.llm.chat_with_tools, messages=messages, tools=tools_for_api,
+                tool_choice="required",
             )
             self._cb_record(True)
         except Exception as e:
@@ -111,9 +120,53 @@ class ConversationLoop:
             logger.error("LLM API call failed: %s", e)
             return f"I encountered an error communicating with the model provider: {e}"
 
+        task_completed = False
         for _ in range(self.MAX_TOOL_ROUNDS):
+            # v0.6: detect task_complete signal, return summary
+            if response.tool_calls:
+                tc_names = [tc.name for tc in response.tool_calls]
+                if _TASK_COMPLETE_TOOL in tc_names:
+                    work_tools = [tc for tc in response.tool_calls
+                                  if tc.name != _TASK_COMPLETE_TOOL]
+                    if not work_tools:
+                        summary = response.tool_calls[
+                            tc_names.index(_TASK_COMPLETE_TOOL)
+                        ].arguments.get("summary", "Done.")
+                        self.ctx.add_to_history("user", user_input)
+                        self.ctx.add_to_history("assistant", summary)
+                        self._checkpoint()
+                        return summary
+                    logger.warning(
+                        "task_complete called alongside %d other tools — "
+                        "executing work tools, deferring completion",
+                        len(work_tools),
+                    )
+                    response.tool_calls = work_tools
+
             if not response.tool_calls:
-                break
+                # v0.6: Auto-continuation — text-only is a status update
+                messages.append({
+                    "role": "assistant",
+                    "content": response.text or "",
+                })
+                self.ctx.add_to_history("assistant", response.text)
+                messages.append({"role": "user", "content": _CONTINUE_NUDGE})
+
+                if not self._cb_allow():
+                    break
+                try:
+                    response = self._call_with_retry(
+                        self.llm.chat_with_tools, messages, tools_for_api,
+                    )
+                    self._cb_record(True)
+                except Exception as e:
+                    self._cb_record(False)
+                    logger.error("LLM API call failed in tool loop: %s", e)
+                    response = ToolCallResponse(
+                        text=f"Error communicating with model provider: {e}",
+                        tool_calls=[],
+                    )
+                continue
 
             assistant_msg: dict[str, Any] = {
                 "role": "assistant",
@@ -173,10 +226,6 @@ class ConversationLoop:
                 )
 
             if not self._cb_allow():
-                response = ToolCallResponse(
-                    text="Service temporarily unavailable. Please wait and try again.",
-                    tool_calls=[],
-                )
                 break
 
             try:
@@ -189,6 +238,29 @@ class ConversationLoop:
                 logger.error("LLM API call failed in tool loop: %s", e)
                 response = ToolCallResponse(
                     text=f"Error communicating with model provider: {e}",
+                    tool_calls=[],
+                )
+        else:
+            # v0.6: Max rounds exhausted — synthesize best-effort summary
+            task_completed = True
+
+        # ── v0.6: Max-rounds fallback ──
+        if task_completed:
+            self.ctx.add_to_history("user", user_input)
+            messages.append({
+                "role": "user",
+                "content": "Summarize what you accomplished in 1-3 sentences.",
+            })
+            try:
+                response = self._call_with_retry(
+                    self.llm.chat_with_tools, messages, tools_for_api,
+                )
+                self._cb_record(True)
+            except Exception as e:
+                self._cb_record(False)
+                logger.error("Fallback summarization failed: %s", e)
+                response = ToolCallResponse(
+                    text="(Task partially completed — max rounds reached)",
                     tool_calls=[],
                 )
 
@@ -318,7 +390,9 @@ class ConversationLoop:
             yield "Service temporarily unavailable. Please wait and try again."
             return "Service temporarily unavailable."
 
-        for _ in range(self.MAX_TOOL_ROUNDS):
+        # ── v0.6: First round forces tool choice ──
+        task_completed = False
+        for round_idx in range(self.MAX_TOOL_ROUNDS):
             accumulated_text = ""
             has_yielded_tool_header = False
 
@@ -327,6 +401,7 @@ class ConversationLoop:
                     self.llm.stream_chat_with_tools,
                     messages=messages,
                     tools=tools_for_api,
+                    tool_choice="required" if round_idx == 0 else "auto",
                 )
                 self._cb_record(True)
             except Exception as e:
@@ -359,9 +434,41 @@ class ConversationLoop:
             if response is None:
                 break
 
+            # v0.6: detect task_complete signal
+            if response.tool_calls:
+                tc_names = [tc.name for tc in response.tool_calls]
+                if _TASK_COMPLETE_TOOL in tc_names:
+                    work_tools = [tc for tc in response.tool_calls
+                                  if tc.name != _TASK_COMPLETE_TOOL]
+                    if not work_tools:
+                        idx = tc_names.index(_TASK_COMPLETE_TOOL)
+                        summary = response.tool_calls[idx].arguments.get(
+                            "summary", "Done."
+                        )
+                        yield summary if not full_response_text else ""
+                        self.ctx.add_to_history("user", user_input)
+                        self.ctx.add_to_history("assistant", summary)
+                        self._checkpoint()
+                        return summary
+                    logger.warning(
+                        "task_complete called alongside %d other tools — "
+                        "executing work tools, deferring completion",
+                        len(work_tools),
+                    )
+                    response.tool_calls = work_tools
+
             if not response.tool_calls:
-                full_response_text = response.text or accumulated_text
-                break
+                # v0.6: Auto-continuation — text-only is a status update
+                messages.append({
+                    "role": "assistant",
+                    "content": response.text or accumulated_text,
+                })
+                self.ctx.add_to_history("assistant", response.text or accumulated_text)
+                messages.append({"role": "user", "content": _CONTINUE_NUDGE})
+
+                if not self._cb_allow():
+                    break
+                continue
 
             assistant_tool_calls = [
                 {
@@ -415,6 +522,26 @@ class ConversationLoop:
                     f"[{tc.name}]: {str(result)[:500]}",
                     tool_call_id=tc.id,
                 )
+        else:
+            task_completed = True
+
+        # ── v0.6: Max-rounds fallback ──
+        if task_completed:
+            yield "(Max rounds reached, summarizing...)"
+            messages.append({
+                "role": "user",
+                "content": "Summarize what you accomplished in 1-3 sentences.",
+            })
+            try:
+                response = self._call_with_retry(
+                    self.llm.chat_with_tools, messages, tools_for_api,
+                )
+                self._cb_record(True)
+                full_response_text = response.text or ""
+            except Exception as e:
+                self._cb_record(False)
+                logger.error("Fallback summarization failed: %s", e)
+                full_response_text = "(Task partially completed — max rounds reached)"
 
         self.ctx.add_to_history("user", user_input)
         final_text = full_response_text or accumulated_text

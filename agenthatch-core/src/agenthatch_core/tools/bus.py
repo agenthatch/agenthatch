@@ -70,6 +70,11 @@ class CapBus:
 
     def route(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Route a tool call to the appropriate executor."""
+
+        # v0.6: task_complete signal tool — LLM calls this to mark task done
+        if tool_name == "task_complete":
+            return "Task completed."
+
         # 1. Check capabilities
         cap = self.capabilities.get(tool_name)
         if cap is None:
@@ -143,6 +148,27 @@ class CapBus:
                         ),
                     }
                 ))
+
+        # v0.6: task_complete signal tool — LLM must explicitly call this to terminate
+        tools.append(ToolDefinition(
+            function={
+                "name": "task_complete",
+                "description": (
+                    "Call this tool when the user's request has been fully completed. "
+                    "Only invoke this after all required steps are done and results are confirmed."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {
+                            "type": "string",
+                            "description": "Brief summary of what was accomplished (1-2 sentences).",
+                        },
+                    },
+                    "required": ["summary"],
+                },
+            }
+        ))
 
         return tools
 

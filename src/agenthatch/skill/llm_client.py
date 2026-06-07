@@ -60,7 +60,7 @@ class LLMClient:
         self._max_tokens = 4096
         self._context_window: int = context_window or getattr(
             self._info, 'context_window', 128000
-        )
+        ) or 128000
 
         # BUG-04-06: Anthropic uses Messages API, not Chat Completions
         if self._features.requires_anthropic_adapter:
@@ -185,7 +185,7 @@ class LLMClient:
         try:
             return client.chat.completions.create(
                 model=model or self._model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]
                 response_model=response_model,
                 max_retries=max_retries,
             )
@@ -277,6 +277,7 @@ class LLMClient:
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        tool_choice: str = "auto",
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Streaming chat completion with tool calling.
 
@@ -289,10 +290,12 @@ class LLMClient:
                    to Phase 1 (synchronous with synthetic streaming).
         """
         if not self._features.supports_stream_tools:
-            return self._stream_synthetic_fallback(messages, tools, model, temperature, max_tokens)
+            return self._stream_synthetic_fallback(
+                messages, tools, model, temperature, max_tokens, tool_choice
+            )
 
         try:
-            return self._stream_native(messages, tools, model, temperature, max_tokens)
+            return self._stream_native(messages, tools, model, temperature, max_tokens, tool_choice)
         except Exception as e:
             if self._is_stream_tools_error(e):
                 logger.warning(
@@ -309,7 +312,7 @@ class LLMClient:
                     available_models=self._features.available_models,
                 )
                 return self._stream_synthetic_fallback(
-                    messages, tools, model, temperature, max_tokens
+                    messages, tools, model, temperature, max_tokens, tool_choice
                 )
             raise
 
@@ -320,6 +323,7 @@ class LLMClient:
         model: str | None,
         temperature: float,
         max_tokens: int,
+        tool_choice: str = "auto",
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Native streaming with tool calling (OpenAI-compatible)."""
         import json
@@ -329,6 +333,7 @@ class LLMClient:
             model=model or self._model,
             messages=messages,
             tools=tools,
+            tool_choice=tool_choice,
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
@@ -413,6 +418,7 @@ class LLMClient:
         model: str | None,
         temperature: float,
         max_tokens: int,
+        tool_choice: str = "auto",
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Synthetic streaming: call chat_with_tools() synchronously,
         then yield result as StreamDelta chunks.
@@ -427,6 +433,7 @@ class LLMClient:
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            tool_choice=tool_choice,
         )
 
         if response.text:

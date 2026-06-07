@@ -303,13 +303,14 @@ class LLMClient:
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        tool_choice: str = "auto",
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Streaming chat completion with tool calling."""
         if not self._features.supports_stream_tools:
-            return self._stream_synthetic_fallback(messages, tools, model, temperature, max_tokens)
+            return self._stream_synthetic_fallback(messages, tools, model, temperature, max_tokens, tool_choice)
 
         try:
-            return self._stream_native(messages, tools, model, temperature, max_tokens)
+            return self._stream_native(messages, tools, model, temperature, max_tokens, tool_choice)
         except Exception as e:
             if self._is_stream_tools_error(e):
                 logger.warning(
@@ -318,7 +319,7 @@ class LLMClient:
                 )
                 self._features.supports_stream_tools = False
                 return self._stream_synthetic_fallback(
-                    messages, tools, model, temperature, max_tokens
+                    messages, tools, model, temperature, max_tokens, tool_choice
                 )
             raise
 
@@ -329,6 +330,7 @@ class LLMClient:
         model: str | None,
         temperature: float,
         max_tokens: int,
+        tool_choice: str = "auto",
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Native streaming with tool calling."""
         stream = self._retry(
@@ -336,6 +338,7 @@ class LLMClient:
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
             tools=tools,  # type: ignore[arg-type]
+            tool_choice=tool_choice,
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
@@ -421,6 +424,7 @@ class LLMClient:
         model: str | None,
         temperature: float,
         max_tokens: int,
+        tool_choice: str = "auto",
     ) -> Generator[StreamDelta, None, ToolCallResponse]:
         """Synthetic streaming fallback."""
         response = self.chat_with_tools(
@@ -429,6 +433,7 @@ class LLMClient:
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            tool_choice=tool_choice,
         )
 
         if response.text:
