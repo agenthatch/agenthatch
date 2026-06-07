@@ -47,7 +47,7 @@ def doctor_command() -> None:
     for check_fn in checks:
         result = check_fn()
         if result.passed:
-            console.print(f"  [green]OK[/green]  {result.message}")
+            console.print(f"  [ok]OK[/ok]  {result.message}")
         else:
             all_passed = False
             console.print(f"  [red]FAIL[/red] {result.message}")

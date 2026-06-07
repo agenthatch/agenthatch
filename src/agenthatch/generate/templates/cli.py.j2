@@ -12,6 +12,7 @@ from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.styles import Style as PTStyle
 
 from {{ package_name }}.agent import {{ agent_class }}
+from agenthatch_core.output.sanitizer import OutputSanitizer
 
 PT_STYLE = PTStyle.from_dict({
     "prompt": "bold green",
@@ -19,6 +20,7 @@ PT_STYLE = PTStyle.from_dict({
 
 app = typer.Typer(name="{{ agent_name }}", help="{{ description }}")
 console = Console()
+_sanitizer = OutputSanitizer()
 
 RUNTIME_PATH = Path(__file__).resolve().parent.parent.parent / "runtime.toml"
 
@@ -201,7 +203,7 @@ def serve(
                         full_text.append(str(event))
                     live.update(Panel(_render(), title="Agent"))
 
-            console.print(Markdown("".join(full_text)))
+            console.print(Markdown(_sanitizer.sanitize("".join(full_text))))
             console.print()
         except (KeyboardInterrupt, EOFError):
             break
@@ -215,4 +217,4 @@ def chat(
     """Single-turn chat mode."""
     runtime = _load_runtime(config)
     agent = {{ agent_class }}(runtime_config=runtime)
-    console.print(agent.chat(message))
+    console.print(_sanitizer.sanitize(agent.chat(message)))

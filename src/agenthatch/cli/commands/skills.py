@@ -92,4 +92,4 @@ def skills_command(
         )
 
     console.print(table)
-    console.print(f"\n[d]{len(entries)} skill(s) registered[/d]")
+    console.print(f"\n[dim]{len(entries)} skill(s) registered[/dim]")

@@ -2,6 +2,12 @@
 
 from agenthatch_core import AHCoreAgent, ConversationLoop, CapBus, Sandbox, ContextManager, LLMClient
 from agenthatch_core.types import AgentIdentity
+{% if brick_manifest %}
+from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
+{% if brick_manifest.guard_active %}
+from agenthatch_core.bricks.guards import OutputGuard
+{% endif %}
+{% endif %}
 from pathlib import Path
 
 {% if workflow %}
@@ -31,8 +37,28 @@ class {{ agent_class }}(AHCoreAgent):
             display_name="{{ display_name }}",
             version="{{ version }}",
         )
+{% if brick_manifest %}
+        manifest = BrickManifest(
+            loop_engine=LoopKind.{{ brick_manifest.loop_engine.upper() }},
+            capbus={{ brick_manifest.capbus | pybool }},
+            sandbox=SandboxTier.{{ brick_manifest.sandbox.upper() }},
+            hooks={{ brick_manifest.hooks | pybool }},
+{% if brick_manifest.guard_active %}
+            guard=OutputGuard.from_rules(ANCHOR_RULES),
+            guard_active=True,
+{% else %}
+            guard_active=False,
+{% endif %}
+            credential_vault={{ brick_manifest.credential_vault | pybool }},
+            file_processor={{ brick_manifest.file_processor | pybool }},
+            archetype="{{ brick_manifest.archetype }}",
+        )
+{% else %}
+        manifest = None
+{% endif %}
         super().__init__(
             identity=identity,
             runtime_config=runtime_config or {},
             spec_path=Path(__file__).parent.parent.parent / "agenthatch.yaml",
+            brick_manifest=manifest,
         )

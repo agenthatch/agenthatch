@@ -97,6 +97,49 @@ class LLMClient:
     def context_window(self) -> int:
         return self._context_window
 
+    def _effective_tool_choice(
+        self,
+        tool_choice: str = "auto",
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str | dict[str, Any] | None:
+        """Resolve effective tool_choice value respecting provider capabilities.
+
+        Returns:
+            - None if tools is empty or None (skip tool_choice param)
+            - "auto" for standard tool calling
+            - "required" to force a tool call (when explicitly requested)
+            - dict like {"type": "function", "function": {"name": "x"}} for
+              forced specific tool (when tool_choice names a specific function)
+
+        Some providers (e.g. Ollama) don't support tool_choice at all.
+        Some models need "required" to reliably call tools.
+        """
+        if not tools:
+            return None
+
+        if not self._features.supports_tools:
+            return None
+
+        if tool_choice == "auto":
+            return "auto"
+
+        if tool_choice == "required":
+            return "required"
+
+        if tool_choice == "none":
+            return "none"
+
+        # Named tool — check it exists in the tools list
+        tool_names = {
+            t.get("function", {}).get("name", "")
+            for t in tools
+            if isinstance(t, dict)
+        }
+        if tool_choice in tool_names:
+            return {"type": "function", "function": {"name": tool_choice}}
+
+        return "auto"
+
     # ── Retry ──────────────────────────────────────────────────────────
 
     def _retry(

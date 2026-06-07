@@ -12,6 +12,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
+from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
+from agenthatch_core.bricks.stubs import _NullCapBus, _NullSandbox, _NullHooks
 from agenthatch_core.config import resolve_runtime_config
 from agenthatch_core.context.manager import ContextManager
 from agenthatch_core.hooks import HooksManager
@@ -45,14 +47,45 @@ class AHCoreAgent:
         spec_path: Path | None = None,
         tools: list[Callable] | None = None,
         knowledge: Any | None = None,
+        brick_manifest: BrickManifest | None = None,
     ):
         self.identity = identity
         self.llm: LLMClient | None = None
-        self.capbus = CapBus()
-        self.sandbox = Sandbox()
         self._agent_root: Path | None = spec_path.parent if spec_path else None
-        self.hooks = HooksManager()
         self._knowledge = knowledge
+
+        # v0.7: BrickManifest drives chassis decomposition
+        self._manifest = brick_manifest or BrickManifest()
+
+        # Assemble bricks — use null stubs for disabled features
+        self.capbus: Any = CapBus() if self._manifest.capbus else _NullCapBus()
+        self.sandbox: Any = Sandbox() if self._manifest.sandbox != SandboxTier.NONE else _NullSandbox()
+        self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
+
+        # Apply sandbox tier
+        if self._manifest.sandbox != SandboxTier.NONE and hasattr(self.sandbox, 'configure'):
+            from agenthatch_core.bricks.sandboxes import SandboxWhitelist
+            whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
+            self.sandbox._ALLOWED_COMMANDS = whitelist.commands
+
+        # OutputGuard (v0.7) — compiled regex validators from ANCHOR_RULES
+        self.guard: Any = self._manifest.guard
+
+        # CredentialVault + APITemplateExecutor (v0.7)
+        self.vault: Any = None
+        if self._manifest.credential_vault:
+            from agenthatch_core.bricks.credential_vault import CredentialVault
+            self.vault = CredentialVault()
+
+        # FileProcessor (v0.7)
+        self.file_processor: Any = None
+        if self._manifest.file_processor:
+            from agenthatch_core.bricks.file_processor import FileProcessor
+            self.file_processor = FileProcessor()
+
+        # TokenCounter (v0.7)
+        from agenthatch_core.loop.token_counter import TokenCounter
+        self.token_counter = TokenCounter()
 
         # Build raw spec from yaml or fallback constants
         self._raw_spec = self._build_raw_spec(identity, spec_path)
@@ -122,6 +155,12 @@ class AHCoreAgent:
     def _apply_runtime_config(self, config: dict) -> None:
         """Consume runtime.toml fields to wire up LLM client."""
         llm_cfg = config.get("llm", {})
+
+        # Pass context_window from config if available, else from BrickManifest
+        context_window = llm_cfg.get("context_window")
+        if context_window is None and "context_window" in config:
+            context_window = config.get("context_window")
+
         self.llm = LLMClient(
             provider=llm_cfg.get("provider", "openai"),
             model=llm_cfg.get("model", "gpt-4o"),
@@ -129,6 +168,7 @@ class AHCoreAgent:
             base_url=llm_cfg.get("base_url"),
             temperature=llm_cfg.get("temperature"),
             max_tokens=llm_cfg.get("max_tokens"),
+            context_window=context_window,
         )
 
         # Merge provider features from config
@@ -212,11 +252,12 @@ class AHCoreAgent:
             name = tmpl.get("name", "")
             if not name:
                 continue
-            executor = _api_template_executor(tmpl)
+            from agenthatch_core.bricks.api_executor import APITemplateExecutor
+            executor = APITemplateExecutor.from_template(tmpl, vault=self.vault)
             self.capbus.register_external_tool(
                 f"api__{name}",
                 tmpl.get("schema", {}),
-                executor,
+                executor.execute,
             )
 
     def _register_python_tool(self, tool: Callable) -> None:
@@ -262,8 +303,25 @@ class AHCoreAgent:
             raise RuntimeError(
                 "LLM client not initialized. Provide runtime_config."
             )
-        loop = ConversationLoop(self.llm, self.capbus, self.sandbox, self.ctx)
-        return loop.run(user_input)
+
+        # v0.7: Loop dispatch from BrickManifest
+        if self._manifest.loop_engine == LoopKind.DIRECT:
+            from agenthatch_core.bricks.loops import DirectLoop
+            result = DirectLoop(self.llm, self.ctx).run(user_input)
+        else:
+            loop = ConversationLoop(self.llm, self.capbus, self.sandbox, self.ctx)
+            result = loop.run(user_input)
+
+        # v0.7: OutputGuard validation
+        if self._manifest.guard_active and self.guard is not None:
+            cleaned, violations = self.guard.validate(result)
+            if violations:
+                for v in violations:
+                    logger.warning("OutputGuard: %s", v)
+            if cleaned:
+                result = cleaned
+
+        return result
 
     def chat_stream(
         self, user_input: str
@@ -273,8 +331,25 @@ class AHCoreAgent:
             raise RuntimeError(
                 "LLM client not initialized. Provide runtime_config."
             )
-        loop = ConversationLoop(self.llm, self.capbus, self.sandbox, self.ctx)
-        yield from loop.stream(user_input)
+
+        # v0.7: Loop dispatch from BrickManifest
+        if self._manifest.loop_engine == LoopKind.DIRECT:
+            from agenthatch_core.bricks.loops import DirectLoop
+            result = yield from DirectLoop(self.llm, self.ctx).stream(user_input)
+        else:
+            loop = ConversationLoop(self.llm, self.capbus, self.sandbox, self.ctx)
+            result = yield from loop.stream(user_input)
+
+        # v0.7: OutputGuard validation (on final result only)
+        if self._manifest.guard_active and self.guard is not None:
+            cleaned, violations = self.guard.validate(result)
+            if violations:
+                for v in violations:
+                    logger.warning("OutputGuard: %s", v)
+            if cleaned:
+                result = cleaned
+
+        return result
 
     # ── classmethod constructors ──────────────────────────────────────
 

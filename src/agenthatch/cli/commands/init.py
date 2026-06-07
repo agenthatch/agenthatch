@@ -148,7 +148,7 @@ def _configure_builtin_provider(name: str, force: bool) -> None:
     _write_multi_provider_config(name, api_key, model, info.base_url, force)
 
     console.print()
-    console.print("[green]Setup complete.[/green]")
+    console.print("[ok]Setup complete.[/ok]")
     console.print(f"  Config:   [accent]{CONFIG_FILE}[/accent]")
     console.print(f"  Provider: [accent]{name}[/accent]")
     if api_key and info.env_key:
@@ -204,7 +204,7 @@ def _configure_custom_provider(
     _write_custom_provider_config(name, api_key or "", model, url, env_key, force)
 
     console.print()
-    console.print(f"[green]Custom provider '{name}' configured.[/green]")
+    console.print(f"[ok]Custom provider '{name}' configured.[/ok]")
     console.print(f"  Use with: agenthatch --provider custom.{name}")
     console.print()
     console.print("Next: run [bold]agenthatch doctor[/bold] to verify connectivity.")
@@ -479,7 +479,7 @@ def _init_non_interactive(force: bool) -> None:
     if is_custom:
         name = provider.removeprefix("custom.")
         _write_custom_provider_config(name, "", model, base_url, "", force)
-        console.print(f"[green]Non-interactive setup: custom.{name}[/green]")
+        console.print(f"[ok]Non-interactive setup: custom.{name}[/ok]")
     else:
         if provider not in BUILTIN_PROVIDER_NAMES:
             console.print(f"[yellow]Unknown provider '{provider}', defaulting to openai[/yellow]")
@@ -491,7 +491,7 @@ def _init_non_interactive(force: bool) -> None:
             base_url=base_url,
             force=force,
         )
-        console.print(f"[green]Non-interactive setup: {provider}[/green]")
+        console.print(f"[ok]Non-interactive setup: {provider}[/ok]")
 
     console.print(f"  Config: [accent]{CONFIG_FILE}[/accent]")
     console.print("  API key: [ok]read from environment variables[/ok]")
@@ -506,11 +506,8 @@ def _discover_all_skills(
 ) -> list[Path]:
     """BFS scan a search root, discover ALL directories containing SKILL.md.
 
-    Pattern: codex discover_skills_under_root():
-      - BFS with deque
-      - MAX_SCAN_DEPTH limit
-      - MAX_DIRS_PER_ROOT upper bound
-      - Skip dot-prefixed directories
+    BFS with deque, depth limit, dir count limit,
+    skip dot-prefixed directories.
       - Deduplication via canonical path set
 
     Returns:

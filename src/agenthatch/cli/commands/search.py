@@ -1,7 +1,6 @@
 """agenthatch search — Search for skills in skillhouse.json.
 
 Uses hybrid search: keyword (triggers) + embedding (satisfies).
-Draws from semantic-router's HybridRouter double-layer matching.
 """
 
 from __future__ import annotations

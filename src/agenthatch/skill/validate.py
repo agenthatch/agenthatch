@@ -10,7 +10,7 @@ Token savings (vs full re-run of all 5 Harnesses, ~8000 tokens):
   - cross-field inconsistency → only Harness E (~1000 tokens, save 87%)
   - average: ~1250 tokens (~84% savings)
 
-Draws from instructor's retry_sync loop pattern:
+Dual-layer targeted retry loop:
 failure context + original inputs → LLM fix → validate → max 2 retries.
 """
 

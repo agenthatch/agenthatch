@@ -1,7 +1,6 @@
 """skillhouse.json — Minimal index repository.
 
 Hybrid search: BM25 keyword (triggers) + embedding (satisfies).
-Draws from semantic-router's HybridRouter double-layer matching.
 alpha=0.7: keyword match weighted higher for precise trigger matching.
 
 Operations: load, save, search, add_entry, remove_entry, list_all,
@@ -19,6 +18,10 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("agenthatch")
+
+# Suppress sentence-transformers/huggingface_hub retry logs at module level
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
 
 
 @dataclass
@@ -124,6 +127,10 @@ class SkillhouseIndex:
         """
         if self._embedder is not None or self._embedder_disabled:
             return
+
+        import io as _io
+        import sys as _sys
+
         from sentence_transformers import SentenceTransformer
 
         embedder_result: list[Any] = [None]
@@ -131,7 +138,17 @@ class SkillhouseIndex:
 
         def _load() -> None:
             try:
-                embedder_result[0] = SentenceTransformer(self._embedding_model_name)
+                # Suppress huggingface_hub stderr noise (SSL errors, retry messages)
+                hf_log = logging.getLogger("huggingface_hub")
+                hf_level = hf_log.level
+                hf_log.setLevel(logging.ERROR)
+                _stderr = _sys.stderr
+                _sys.stderr = _io.StringIO()
+                try:
+                    embedder_result[0] = SentenceTransformer(self._embedding_model_name)
+                finally:
+                    _sys.stderr = _stderr
+                    hf_log.setLevel(hf_level)
             except Exception as e:
                 embedder_error[0] = e
 
@@ -333,7 +350,7 @@ class SkillhouseIndex:
         Full metadata is populated later by hatch itself.
         This avoids duplicate scanning on subsequent lookups.
 
-        Pattern: codex loader.rs — skills are registered by path first,
+        Skills are registered by path first,
         full metadata loaded on-demand.
         """
         if skill_id in self._data["entries"]:

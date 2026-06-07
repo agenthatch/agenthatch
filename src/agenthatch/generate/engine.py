@@ -63,6 +63,7 @@ class GenerateEngine:
 
         env.filters["python_escape"] = python_escape
         env.filters["python_repr"] = python_repr
+        env.filters["pybool"] = lambda v: "True" if v else "False"
         return env
 
     # ── variable extraction ───────────────────────────────────────────
@@ -115,6 +116,9 @@ class GenerateEngine:
         # Tools: list of provide capability names
         tools = self._extract_tool_names(interface.get("provides", []))
 
+        # v0.7: Brick manifest from skill classification
+        brick_manifest = self._build_brick_manifest(ahspec)
+
         return {
             "agent_name": agent_name,
             "agent_class": agent_class,
@@ -131,6 +135,7 @@ class GenerateEngine:
             "base_url": base_url,
             "tools": tools,
             "requires": requires,
+            "brick_manifest": brick_manifest,
         }
 
     @staticmethod
@@ -196,6 +201,92 @@ class GenerateEngine:
 
     @staticmethod
     def _read_default_provider() -> tuple[str, str, str]:
+        """Read default provider, model, and base_url from global config.
+
+        Returns ("openai", "gpt-4o", "https://api.openai.com/v1") if no config found.
+        """
+        import tomllib as _tomllib
+
+        config_path = Path.home() / ".agenthatch" / "config.toml"
+        if not config_path.exists():
+            return ("openai", "gpt-4o", "https://api.openai.com/v1")
+
+        try:
+            cfg = _tomllib.loads(config_path.read_text())
+        except Exception:
+            return ("openai", "gpt-4o", "https://api.openai.com/v1")
+
+        provider = cfg.get("providers", {}).get("default", "openai")
+        provider_cfg = cfg.get("providers", {}).get(provider, {})
+        model = provider_cfg.get("default_model", "gpt-4o")
+        base_url = provider_cfg.get("base_url", "https://api.openai.com/v1")
+        return (provider, model, base_url)
+
+    @staticmethod
+    def _build_brick_manifest(ahspec: dict[str, Any]) -> dict[str, Any] | None:
+        """v0.7: Build BrickManifest dict from skill classification.
+
+        Returns None if classification fails (backward-compatible fallback).
+        """
+        try:
+            from agenthatch_core.bricks.archetypes import classify_skill, SkillArchetype
+            from agenthatch_core.bricks.manifest import LoopKind, SandboxTier
+        except ImportError:
+            return None
+
+        try:
+            result = classify_skill(ahspec)
+        except Exception:
+            return None
+
+        archetype = result.archetype
+
+        # Map archetype → loop engine
+        if archetype == SkillArchetype.PROMPT_ONLY:
+            loop_engine = LoopKind.DIRECT
+        else:
+            loop_engine = LoopKind.CONVERSATION
+
+        # Map archetype → sandbox tier
+        if archetype == SkillArchetype.PROMPT_ONLY:
+            sandbox = SandboxTier.NONE
+        elif archetype == SkillArchetype.EXTERNAL_TOOL:
+            sandbox = SandboxTier.EXTENDED
+        else:
+            sandbox = SandboxTier.STANDARD
+
+        # Map archetype → capbus
+        capbus = archetype != SkillArchetype.PROMPT_ONLY
+
+        # Map archetype → hooks (only for multi-step)
+        hooks = archetype not in (
+            SkillArchetype.PROMPT_ONLY, SkillArchetype.EXTERNAL_TOOL
+        )
+
+        # CredentialVault only if api_templates are present
+        api_templates = ahspec.get("interface", {}).get("api_templates", [])
+        credential_vault = bool(api_templates)
+
+        # FileProcessor only for tool-wrapper and multi-step
+        file_processor = archetype in (
+            SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
+        )
+
+        # Guard active only if ANCHOR_RULES exist and not prompt-only
+        rules = ahspec.get("instructions", {}).get("rules", [])
+        guard_active = bool(rules) and archetype != SkillArchetype.PROMPT_ONLY
+
+        return {
+            "loop_engine": loop_engine.value,
+            "capbus": capbus,
+            "sandbox": sandbox.value,
+            "hooks": hooks,
+            "guard_active": guard_active,
+            "credential_vault": credential_vault,
+            "file_processor": file_processor,
+            "archetype": archetype.value,
+            "archetype_confidence": result.confidence,
+        }
         """Read default provider, model, and base_url from global config.
 
         Returns ("openai", "gpt-4o", "https://api.openai.com/v1") if no config found.
