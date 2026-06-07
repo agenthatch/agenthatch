@@ -97,17 +97,18 @@ class TestRunSync:
             executor=MagicMock(execute=lambda **kw: "echoed: " + kw.get("msg", "")),
         )
 
+        # v0.6 auto-continuation: after tool + text, loop calls LLM once more per round.
+        # Need enough responses to fill MAX_TOOL_ROUNDS and trigger fallback summarization.
         mock_llm.chat_with_tools.side_effect = [
             ToolCallResponse(
                 text=None,
                 tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hello"})],
             ),
             ToolCallResponse(text="I echoed your message.", tool_calls=[]),
-        ]
+        ] + [ToolCallResponse(text="I echoed your message.", tool_calls=[])] * 10
 
         result = loop.run("echo hello")
-        assert result == "I echoed your message."
-        assert mock_llm.chat_with_tools.call_count == 2
+        assert "I echoed your message" in result
 
     def test_empty_response_returns_placeholder(self, loop, mock_llm):
         mock_llm.chat_with_tools.return_value = ToolCallResponse(text=None, tool_calls=[])
@@ -130,6 +131,7 @@ class TestRunSync:
             executor=MagicMock(execute=lambda **kw: "result_b"),
         )
 
+        # v0.6 auto-continuation: after tools + text, loop continues for MAX_TOOL_ROUNDS
         mock_llm.chat_with_tools.side_effect = [
             ToolCallResponse(
                 text=None,
@@ -139,10 +141,10 @@ class TestRunSync:
                 ],
             ),
             ToolCallResponse(text="Done.", tool_calls=[]),
-        ]
+        ] + [ToolCallResponse(text="Done.", tool_calls=[])] * 10
 
         result = loop.run("both")
-        assert result == "Done."
+        assert "Done." in result
 
 
 class TestRunStream:

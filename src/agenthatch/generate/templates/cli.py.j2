@@ -20,7 +20,7 @@ PT_STYLE = PTStyle.from_dict({
 app = typer.Typer(name="{{ agent_name }}", help="{{ description }}")
 console = Console()
 
-RUNTIME_PATH = Path(__file__).resolve().parent.parent / "runtime.toml"
+RUNTIME_PATH = Path(__file__).resolve().parent.parent.parent / "runtime.toml"
 
 
 def _load_runtime(config_path: Path) -> dict:

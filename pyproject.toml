@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.6.7"
+version = "0.6.8"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -65,7 +65,7 @@ Issues = "https://github.com/agenthatch/agenthatch/issues"
 agenthatch = "agenthatch.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agenthatch"]
+packages = ["src/agenthatch", "agenthatch-core/src/agenthatch_core"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
