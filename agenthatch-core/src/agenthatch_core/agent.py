@@ -309,7 +309,11 @@ class AHCoreAgent:
             from agenthatch_core.bricks.loops import DirectLoop
             result = DirectLoop(self.llm, self.ctx).run(user_input)
         else:
-            loop = ConversationLoop(self.llm, self.capbus, self.sandbox, self.ctx)
+            loop = ConversationLoop(
+                self.llm, self.capbus, self.sandbox, self.ctx,
+                hooks=self.hooks,
+                token_counter=self.token_counter,
+            )
             result = loop.run(user_input)
 
         # v0.7: OutputGuard validation
@@ -337,7 +341,11 @@ class AHCoreAgent:
             from agenthatch_core.bricks.loops import DirectLoop
             result = yield from DirectLoop(self.llm, self.ctx).stream(user_input)
         else:
-            loop = ConversationLoop(self.llm, self.capbus, self.sandbox, self.ctx)
+            loop = ConversationLoop(
+                self.llm, self.capbus, self.sandbox, self.ctx,
+                hooks=self.hooks,
+                token_counter=self.token_counter,
+            )
             result = yield from loop.stream(user_input)
 
         # v0.7: OutputGuard validation (on final result only)

@@ -48,11 +48,11 @@ def _run_phase3_generate(
     dry_run: bool,
     copy_skills: bool,
     _framework: str,
-) -> tuple[int, Path]:
+) -> tuple[int, Path, float]:
     """Run Phase 3: generate an independent Agent directory from AHSSPEC.
 
     Returns:
-        (file_count, agent_output_dir)
+        (file_count, agent_output_dir, elapsed_seconds)
     """
     import json as _json
 
@@ -65,9 +65,10 @@ def _run_phase3_generate(
         agent_output_dir = Path.cwd() / f"{agent_id}-agent"
 
     spec_dict = _json.loads(ahs_spec.model_dump_json())
+    t3_start = time.time()
 
     # Progress: classify archetype (in engine's internal pipeline)
-    console.print("  [dim]Classifying skill archetype...[/dim]", end="\r")
+    console.print("  [dim]Classifying skill archetype...[/dim]")
 
     try:
         written = generate_agent(
@@ -78,6 +79,14 @@ def _run_phase3_generate(
             copy_skills=copy_skills,
             skill_dir=skill_dir,
         )
+
+        # Show archetype info if embedded in generated manifest
+        _manifest = spec_dict.get("_manifest", {})
+        archetype = _manifest.get("archetype", "unknown")
+        confidence = _manifest.get("archetype_confidence", 0.0)
+        if archetype and archetype != "unknown":
+            console.print(f"  [dim]→ {archetype} (confidence: {confidence:.0%})[/dim]")
+        console.print("  [dim]Rendering templates...[/dim]")
     except FileExistsError as e:
         console.print(f"[yellow]{e}[/yellow]")
         console.print("Use --force to overwrite.")
@@ -86,7 +95,8 @@ def _run_phase3_generate(
         console.print(f"[error]Generation error: {e}[/error]")
         raise typer.Exit(code=5) from e
 
-    return len(written), agent_output_dir
+    t3_elapsed = time.time() - t3_start
+    return len(written), agent_output_dir, t3_elapsed
 
 
 # ── CLI rendering helpers ───────────────────────────────────────────────────
@@ -473,8 +483,7 @@ def hatch_command(
     else:
         console.print("[accent]▸ Phase 3/3[/accent]  Agent Generation")
 
-    t3 = time.time()
-    file_count, agent_output_dir = _run_phase3_generate(
+    file_count, agent_output_dir, elapsed3 = _run_phase3_generate(
         ahs_spec=ahs_spec,
         skill_dir=skill_dir,
         output=output,
@@ -483,7 +492,6 @@ def hatch_command(
         copy_skills=not no_copy_skills,
         _framework=framework,
     )
-    elapsed3 = time.time() - t3
 
     _render_phase3_result(
         file_count=file_count,
