@@ -139,10 +139,90 @@ class AgentHarness:
     def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
         raise NotImplementedError
 
+    # ── Correction hooks (Template Method) ────────────────────────
+
+    def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        """Subclass overrides to extract/preprocess inputs for correction."""
+        return inputs
+
+    def _get_correction_response_model(self) -> Any:
+        """Subclass overrides to return the Pydantic model for structured output."""
+        return None
+
+    def _use_structured_output_for_correction(self) -> bool:
+        """Subclass overrides to return False for raw chat (e.g. AssembleHarness)."""
+        return True
+
+    def _parse_correction_response(
+        self, response: Any, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Subclass overrides to customize response parsing."""
+        if hasattr(response, "model_dump"):
+            return cast("dict[str, Any]", response.model_dump())
+        return cast("dict[str, Any]", response)
+
+    def _get_correction_output_type_name(self) -> str:
+        """Subclass overrides to return a human-readable output type name."""
+        return "output"
+
+    def _get_correction_kwargs(self) -> dict[str, Any]:
+        """Subclass overrides to pass extra kwargs to LLM call (e.g. temperature)."""
+        return {}
+
+    def _build_correction_prompt(
+        self, result: dict[str, Any], failure_reason: str, prepared: dict[str, Any]
+    ) -> str:
+        """Subclass overrides to customize the correction prompt."""
+        output_type = self._get_correction_output_type_name()
+        return (
+            f"Your previous output failed validation: {failure_reason}\n\n"
+            f"Please fix and return corrected {output_type}:\n"
+            f"{self.build_user_message(**prepared)}"
+        )
+
     def correct_on_failure(
         self, result: dict[str, Any], failure_reason: str, **inputs: object
     ) -> dict[str, Any]:
-        raise NotImplementedError
+        """Unified correction loop via Template Method pattern.
+
+        Subclasses provide the variation points via hooks:
+        _prepare_correction_inputs, _get_correction_response_model,
+        _use_structured_output_for_correction, _parse_correction_response,
+        _get_correction_output_type_name, _build_correction_prompt,
+        _get_correction_kwargs.
+        """
+        prepared = self._prepare_correction_inputs(**inputs)
+        correction_prompt = self._build_correction_prompt(result, failure_reason, prepared)
+
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": self.build_system_prompt()},
+            {"role": "user", "content": correction_prompt},
+        ]
+
+        extra_kwargs = self._get_correction_kwargs()
+
+        if self._use_structured_output_for_correction():
+            response_model = self._get_correction_response_model()
+            if response_model is None:
+                raise NotImplementedError(
+                    f"{self.__class__.__name__} must override "
+                    "_get_correction_response_model() or "
+                    "_use_structured_output_for_correction()"
+                )
+            corrected = self.client.chat_structured(
+                messages=messages,
+                response_model=response_model,
+                model=self.model,
+                **extra_kwargs,
+            )
+        else:
+            corrected = self.client.chat(
+                messages=messages,
+                model=self.model,
+                **extra_kwargs,
+            )
+
+        return self._parse_correction_response(corrected, result)
 
     # ── Core loop ──────────────────────────────────────────────────
 
@@ -264,26 +344,18 @@ body (first 50 lines):
             return False, "identity.version is empty"
         return True, ""
 
-    def correct_on_failure(
-        self, result: dict[str, Any], failure_reason: str, **inputs: object
-    ) -> dict[str, Any]:
-        frontmatter = inputs["frontmatter"]
-        dir_name = inputs["dir_name"]
-        body_first_50_lines = inputs["body_first_50_lines"]
-        correction_prompt = (
-            f"Your previous output failed validation: {failure_reason}\n\n"
-            "Please fix and return corrected identity:\n"
-            f"{self.build_user_message(frontmatter=frontmatter, dir_name=dir_name, body_first_50_lines=str(body_first_50_lines)[:500])}"  # noqa: E501
-        )
-        corrected_result = self.client.chat_structured(
-            messages=[
-                {"role": "system", "content": self.build_system_prompt()},
-                {"role": "user", "content": correction_prompt},
-            ],
-            response_model=IdentityOutput,
-            model=self.model,
-        )
-        return cast("dict[str, Any]", corrected_result.model_dump())
+    def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        return {
+            "frontmatter": inputs["frontmatter"],
+            "dir_name": inputs["dir_name"],
+            "body_first_50_lines": str(inputs["body_first_50_lines"])[:500],
+        }
+
+    def _get_correction_response_model(self) -> Any:
+        return IdentityOutput
+
+    def _get_correction_output_type_name(self) -> str:
+        return "identity"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -337,26 +409,18 @@ body:
             return False, f"summary too short ({len(summary)} chars, need >= 20)"
         return True, ""
 
-    def correct_on_failure(
-        self, result: dict[str, Any], failure_reason: str, **inputs: object
-    ) -> dict[str, Any]:
-        description = inputs["description"]
-        body = inputs["body"]
-        frontmatter_name = inputs["frontmatter_name"]
-        correction_prompt = (
-            f"Your previous output failed validation: {failure_reason}\n\n"
-            "Please fix and return corrected intent:\n"
-            f"{self.build_user_message(description=description, body=str(body)[:2000], frontmatter_name=frontmatter_name)}"  # noqa: E501
-        )
-        corrected_result = self.client.chat_structured(
-            messages=[
-                {"role": "system", "content": self.build_system_prompt()},
-                {"role": "user", "content": correction_prompt},
-            ],
-            response_model=IntentOutput,
-            model=self.model,
-        )
-        return cast("dict[str, Any]", corrected_result.model_dump())
+    def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        return {
+            "description": inputs["description"],
+            "body": str(inputs["body"])[:2000],
+            "frontmatter_name": inputs["frontmatter_name"],
+        }
+
+    def _get_correction_response_model(self) -> Any:
+        return IntentOutput
+
+    def _get_correction_output_type_name(self) -> str:
+        return "intent"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -425,26 +489,18 @@ body:
 
         return True, ""
 
-    def correct_on_failure(
-        self, result: dict[str, Any], failure_reason: str, **inputs: object
-    ) -> dict[str, Any]:
-        body = inputs["body"]
-        file_contents = inputs["file_contents"]
-        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
-        correction_prompt = (
-            f"Your previous output failed validation: {failure_reason}\n\n"
-            "Please fix and return corrected interface:\n"
-            f"{self.build_user_message(body=str(body)[:2000], file_contents=file_contents, frontmatter_allowed_tools=frontmatter_allowed_tools)}"  # noqa: E501
-        )
-        corrected_result = self.client.chat_structured(
-            messages=[
-                {"role": "system", "content": self.build_system_prompt()},
-                {"role": "user", "content": correction_prompt},
-            ],
-            response_model=InterfaceOutput,
-            model=self.model,
-        )
-        return cast("dict[str, Any]", corrected_result.model_dump())
+    def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        return {
+            "body": str(inputs["body"])[:2000],
+            "file_contents": inputs["file_contents"],
+            "frontmatter_allowed_tools": inputs["frontmatter_allowed_tools"],
+        }
+
+    def _get_correction_response_model(self) -> Any:
+        return InterfaceOutput
+
+    def _get_correction_output_type_name(self) -> str:
+        return "interface"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -495,27 +551,19 @@ body:
             return False, "instructions.workflow is empty"
         return True, ""
 
-    def correct_on_failure(
-        self, result: dict[str, Any], failure_reason: str, **inputs: object
-    ) -> dict[str, Any]:
-        body = inputs["body"]
-        file_contents = inputs["file_contents"]
-        frontmatter_compatibility = inputs["frontmatter_compatibility"]
-        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
-        correction_prompt = (
-            f"Your previous output failed validation: {failure_reason}\n\n"
-            "Please fix and return corrected base and instructions:\n"
-            f"{self.build_user_message(body=str(body)[:2000], file_contents=file_contents, frontmatter_compatibility=frontmatter_compatibility, frontmatter_allowed_tools=frontmatter_allowed_tools)}"  # noqa: E501
-        )
-        corrected_result = self.client.chat_structured(
-            messages=[
-                {"role": "system", "content": self.build_system_prompt()},
-                {"role": "user", "content": correction_prompt},
-            ],
-            response_model=BaseAndInstructionsOutput,
-            model=self.model,
-        )
-        return cast("dict[str, Any]", corrected_result.model_dump())
+    def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        return {
+            "body": str(inputs["body"])[:2000],
+            "file_contents": inputs["file_contents"],
+            "frontmatter_compatibility": inputs["frontmatter_compatibility"],
+            "frontmatter_allowed_tools": inputs["frontmatter_allowed_tools"],
+        }
+
+    def _get_correction_response_model(self) -> Any:
+        return BaseAndInstructionsOutput
+
+    def _get_correction_output_type_name(self) -> str:
+        return "base and instructions"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -636,39 +684,46 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
             return False, "ahs_spec.interface.provides is empty — fatal"
         return True, ""
 
-    def correct_on_failure(
-        self, result: dict[str, Any], failure_reason: str, **inputs: object
-    ) -> dict[str, Any]:
-        identity = inputs["identity"]
-        intent = inputs["intent"]
-        interface = inputs["interface"]
-        base = inputs["base"]
-        instructions = inputs["instructions"]
-        resources = inputs["resources"]
-        dir_name = inputs["dir_name"]
-        correction_prompt = (
+    def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        return {
+            "identity": inputs["identity"],
+            "intent": inputs["intent"],
+            "interface": inputs["interface"],
+            "base": inputs["base"],
+            "instructions": inputs["instructions"],
+            "resources": inputs["resources"],
+            "dir_name": inputs["dir_name"],
+        }
+
+    def _use_structured_output_for_correction(self) -> bool:
+        return False
+
+    def _get_correction_output_type_name(self) -> str:
+        return "ahs_spec"
+
+    def _build_correction_prompt(
+        self, result: dict[str, Any], failure_reason: str, prepared: dict[str, Any]
+    ) -> str:
+        return (
             f"Your previous output failed validation: {failure_reason}\n\n"
             f"Previous output (first 500 chars):\n{str(result)[:500]}\n\n"
             "Please fix and return the corrected ahs_spec:\n"
-            f"{self.build_user_message(identity=identity, intent=intent, interface=interface, base=base, instructions=instructions, resources=resources, dir_name=dir_name)}"  # noqa: E501
+            f"{self.build_user_message(**prepared)}"
         )
-        response = self.client.chat(
-            messages=[
-                {"role": "system", "content": self.build_system_prompt()},
-                {"role": "user", "content": correction_prompt},
-            ],
-            model=self.model,
-            temperature=0.3,
-            max_tokens=8192,
-        )
-        import json
 
+    def _get_correction_kwargs(self) -> dict[str, Any]:
+        return {"temperature": 0.3, "max_tokens": 8192}
+
+    def _parse_correction_response(
+        self, response: str, result: dict[str, Any]
+    ) -> dict[str, Any]:
         text = response.strip()
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
         try:
+            import json
             return cast("dict[str, Any]", json.loads(text))
         except json.JSONDecodeError as e:
             logger.warning(f"Harness E correction JSON parse failed: {e}")

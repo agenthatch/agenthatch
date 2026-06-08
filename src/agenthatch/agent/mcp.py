@@ -463,7 +463,7 @@ class MCPClient:
 
     def register_with_capbus(self, capbus: Any) -> None:
         """Register all MCP tools as external handlers on CapBus."""
-        from agenthatch_core.tools.bus import _normalize_json_schema  # type: ignore[import-untyped]
+        from agenthatch_core.tools.bus import _normalize_json_schema
 
         for full_name, t in self._tools.items():
             sname = full_name.split("__", 1)[1]

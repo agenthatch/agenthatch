@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from agenthatch_core.bricks.manifest import (  # type: ignore[import-untyped]
@@ -249,8 +249,8 @@ class SkillAgent:
         if self._manifest.sandbox != SandboxTier.NONE and hasattr(
             self.sandbox, "configure"
         ):
-            from agenthatch_core.bricks.sandboxes import (
-                SandboxWhitelist,  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.sandboxes import (  # type: ignore[import-untyped]
+                SandboxWhitelist,
             )
             whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
             self.sandbox._allowed_commands = whitelist.commands
@@ -267,16 +267,16 @@ class SkillAgent:
         # ── v0.7: CredentialVault ──
         self.vault: Any = None
         if self._manifest.credential_vault:
-            from agenthatch_core.bricks.credential_vault import (
-                CredentialVault,  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.credential_vault import (  # type: ignore[import-untyped]
+                CredentialVault,
             )
             self.vault = CredentialVault()
 
         # ── v0.7: FileProcessor ──
         self.file_processor: Any = None
         if self._manifest.file_processor:
-            from agenthatch_core.bricks.file_processor import (
-                FileProcessor,  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.file_processor import (  # type: ignore[import-untyped]
+                FileProcessor,
             )
             self.file_processor = FileProcessor()
 
@@ -401,6 +401,24 @@ class SkillAgent:
             )
         resolved["max_tokens"] = safe_max
         return resolved
+
+    def _ensure_token_counted(self) -> None:
+        """Safety net: record usage from llm.last_usage if the loop didn't."""
+        snap = self.token_counter.snapshot()
+        if snap["total_tokens"] > 0:
+            return
+        usage = getattr(self.llm, "last_usage", None)
+        if usage is None:
+            return
+        self.token_counter.add_usage({
+            "total_tokens": getattr(usage, "total_tokens", 0),
+            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+            "completion_tokens": getattr(usage, "completion_tokens", 0),
+        })
+        logger.debug(
+            "TokenCounter safety-net: recorded %s tokens",
+            getattr(usage, "total_tokens", 0),
+        )
 
     def _assemble(self) -> None:
         """Assemble capabilities from AHSSPEC."""
@@ -556,6 +574,9 @@ class SkillAgent:
         else:
             result = self.loop.run(user_input)
 
+        # v0.7.2: Ensure token was counted even if loop path missed it
+        self._ensure_token_counted()
+
         # v0.7: OutputGuard validation
         if self._manifest.guard_active and self.guard is not None:
             cleaned, violations = self.guard.validate(result)
@@ -565,17 +586,20 @@ class SkillAgent:
             if cleaned:
                 result = cleaned
 
-        return result
+        return cast("str", result)
 
     def chat_stream(self, user_input: str) -> Any:
         """Streaming chat for TUI consumption."""
         if self._manifest.loop_engine == LoopKind.DIRECT:
-            from agenthatch_core.bricks.loops import DirectLoop  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.loops import DirectLoop
             result = yield from DirectLoop(
                 self.llm, self.ctx, token_counter=self.token_counter
             ).stream(user_input)
         else:
             result = yield from self.loop.stream(user_input)
+
+        # v0.7.2: Ensure token was counted even if stream path missed it
+        self._ensure_token_counted()
 
         # v0.7: OutputGuard validation
         if self._manifest.guard_active and self.guard is not None:
