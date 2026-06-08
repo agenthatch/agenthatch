@@ -31,9 +31,12 @@ class TokenCounter:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    call_count: int = 0
+    elapsed_ms: int = 0
 
     def add_usage(self, usage: dict[str, int] | Any) -> None:
         """Merge usage info from LLM response."""
+        self.call_count += 1
         if isinstance(usage, dict):
             self.prompt_tokens += usage.get("prompt_tokens", 0)
             self.completion_tokens += usage.get("completion_tokens", 0)
@@ -63,6 +66,8 @@ class TokenCounter:
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "reasoning_tokens": self.reasoning_tokens,
+            "call_count": self.call_count,
+            "elapsed_ms": self.elapsed_ms,
         }
 
     def reset(self) -> None:
@@ -73,3 +78,5 @@ class TokenCounter:
         self.cache_read_tokens = 0
         self.cache_write_tokens = 0
         self.reasoning_tokens = 0
+        self.call_count = 0
+        self.elapsed_ms = 0

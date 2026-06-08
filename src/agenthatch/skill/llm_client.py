@@ -162,6 +162,48 @@ class LLMClient:
             )
         return self._extract_content(choice.message)
 
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> Generator[str, None, str]:
+        """Streaming chat completion without tools."""
+        stream = self._retry(
+            self._client.chat.completions.create,
+            model=model or self._model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+
+        for event in stream:
+            delta = event.choices[0].delta if event.choices else None
+            if delta is None:
+                if hasattr(event, "usage") and event.usage:
+                    self.last_usage = UsageInfo.from_openai_response(event)
+                continue
+
+            if delta.content:
+                text_parts.append(delta.content)
+                yield delta.content
+
+            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                reasoning_parts.append(delta.reasoning_content)
+                yield delta.reasoning_content
+
+        text = "".join(text_parts)
+        if not text and reasoning_parts:
+            text = "".join(reasoning_parts)
+
+        return text
+
     # ── Structured output (Instructor pattern) ───────────────────────
 
     def chat_structured(
@@ -263,6 +305,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        self.last_usage = UsageInfo.from_openai_response(response)
         result = ToolCallResponse.from_openai(response, llm_client=self)
         # NOTE: Apply content extraction for reasoning/content split
         # https://github.com/agenthatch/agenthatch/issues
@@ -341,6 +384,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
+            stream_options={"include_usage": True},
         )
 
         text_parts: list[str] = []
@@ -350,6 +394,8 @@ class LLMClient:
         for event in stream:
             delta = event.choices[0].delta if event.choices else None
             if delta is None:
+                if hasattr(event, "usage") and event.usage:
+                    self.last_usage = UsageInfo.from_openai_response(event)
                 continue
 
             if delta.content:

@@ -186,14 +186,20 @@ def _normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(schema, dict):
         return {"type": "object", "properties": {}}
 
-    # Already has type field at root level
-    if "type" in schema:
+    # Already a valid object schema at root
+    if schema.get("type") == "object":
         return schema
 
-    # Wrap flat key-type pairs into proper JSON Schema
+    # Has a non-object type at root (number, string, array, etc.) — wrap it
+    if "type" in schema and schema["type"] != "object":
+        return {
+            "type": "object",
+            "properties": {"value": schema},
+            "required": ["value"],
+        }
+
+    # No type field at root — wrap flat properties if they look like params
     if "properties" not in schema:
-        # Check if schema looks like flat params: {"city": {"type": "string"}}
-        # or already has properties
         has_nested = any(
             isinstance(v, dict) and "type" in v
             for v in schema.values()

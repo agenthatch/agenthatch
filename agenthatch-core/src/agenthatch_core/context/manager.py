@@ -97,6 +97,19 @@ class ContextManager:
 
         self._apply_compact_config()
 
+    def _detect_latest_user_language(self) -> str:
+        """Detect the language of the most recent user message in history."""
+        for msg in reversed(self.history):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    cjk_count = sum(1 for c in content if '一' <= c <= '鿿')
+                    total = len(content.strip())
+                    if total > 0 and cjk_count / total > 0.3:
+                        return "Chinese (中文)"
+                break
+        return "English"
+
     def _apply_compact_config(self) -> None:
         if self.compact_config:
             self.COMPACT_RATIO = self.compact_config.get(
@@ -130,6 +143,24 @@ class ContextManager:
             if isinstance(identity, dict)
             else getattr(identity, "display_name", "Agent")
         )
+
+        # v0.7.2: Language directive placed FIRST for highest attention priority.
+        # DeepSeek V4 Pro reasoning models deprioritize late-prompt instructions.
+        detected_lang = self._detect_latest_user_language()
+        if detected_lang and detected_lang != "English":
+            parts.append(
+                f"CRITICAL INSTRUCTION: You MUST respond in {detected_lang}. "
+                f"The user's most recent message was in {detected_lang}. "
+                f"Write all your responses in {detected_lang}. "
+                f"Do NOT switch to English or any other language."
+            )
+        else:
+            parts.append(
+                "CRITICAL INSTRUCTION: Respond in the same language as the user. "
+                "Detect the user's language and match it exactly."
+            )
+
+        parts.append("")
         parts.append(
             f"You are {display_name}, a specialist agent created by agenthatch."
         )
@@ -175,16 +206,7 @@ class ContextManager:
             "politely decline and suggest what you CAN help with."
         )
 
-        # v0.7: Language directive
-        parts.append("")
-        parts.append("## Language")
-        parts.append(
-            "You MUST respond in the same language as the user's input. "
-            "Detect the user's language and match it exactly. "
-            "If the user writes in Chinese, respond in Chinese. "
-            "If the user writes in English, respond in English. "
-            "Never switch languages mid-response unless the user does."
-        )
+        # Language directive is now at the TOP of the system prompt (see above)
 
         workflow = (
             instructions.get("workflow", "")

@@ -15,8 +15,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier  # type: ignore[import-untyped]
-from agenthatch_core.bricks.stubs import _NullCapBus, _NullHooks, _NullSandbox  # type: ignore[import-untyped]
+from agenthatch_core.bricks.manifest import (  # type: ignore[import-untyped]
+    BrickManifest,
+    LoopKind,
+    SandboxTier,
+)
+from agenthatch_core.bricks.stubs import (  # type: ignore[import-untyped]
+    _NullCapBus,
+    _NullHooks,
+    _NullSandbox,
+)
 from pydantic import ValidationError
 
 from agenthatch.agent.compact import CompactSummary
@@ -241,7 +249,9 @@ class SkillAgent:
         if self._manifest.sandbox != SandboxTier.NONE and hasattr(
             self.sandbox, "configure"
         ):
-            from agenthatch_core.bricks.sandboxes import SandboxWhitelist  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.sandboxes import (
+                SandboxWhitelist,  # type: ignore[import-untyped]
+            )
             whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
             self.sandbox._allowed_commands = whitelist.commands
 
@@ -257,13 +267,17 @@ class SkillAgent:
         # ── v0.7: CredentialVault ──
         self.vault: Any = None
         if self._manifest.credential_vault:
-            from agenthatch_core.bricks.credential_vault import CredentialVault  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.credential_vault import (
+                CredentialVault,  # type: ignore[import-untyped]
+            )
             self.vault = CredentialVault()
 
         # ── v0.7: FileProcessor ──
         self.file_processor: Any = None
         if self._manifest.file_processor:
-            from agenthatch_core.bricks.file_processor import FileProcessor  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.file_processor import (
+                FileProcessor,  # type: ignore[import-untyped]
+            )
             self.file_processor = FileProcessor()
 
         # ── v0.7: TokenCounter (unconditional) ──

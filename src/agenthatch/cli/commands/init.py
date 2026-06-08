@@ -10,6 +10,7 @@ from rich.prompt import Confirm, Prompt
 
 from agenthatch import __version__
 from agenthatch.cli import console
+from agenthatch.cli.commands._completion import _install_shell_completion
 from agenthatch.config import CONFIG_DIR, CONFIG_FILE
 from agenthatch.config.validators import validate_base_url, validate_provider_name
 from agenthatch.providers import (
@@ -162,6 +163,9 @@ def _configure_builtin_provider(name: str, force: bool) -> None:
     # v0.3: Silent skillhouse initialization
     _init_skillhouse()
 
+    # v0.7.1: Install shell completion
+    _install_shell_completion()
+
 
 def _configure_custom_provider(
     force: bool, preset_name: str | None = None
@@ -211,6 +215,9 @@ def _configure_custom_provider(
 
     # v0.3: Silent skillhouse initialization
     _init_skillhouse()
+
+    # v0.7.1: Install shell completion
+    _install_shell_completion()
 
 
 def _init_skillhouse() -> None:
@@ -498,6 +505,9 @@ def _init_non_interactive(force: bool) -> None:
 
     # v0.3: Silent skillhouse initialization
     _init_skillhouse()
+
+    # v0.7.1: Install shell completion
+    _install_shell_completion()
 
 
 def _discover_all_skills(

@@ -27,6 +27,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from agenthatch.cli import console
+from agenthatch.cli.commands._completion import _complete_skill_name
 from agenthatch.skill.parser import _is_skill_md, assemble_context
 from agenthatch.skill.spec import AgentConfig
 
@@ -64,6 +65,9 @@ def _run_phase3_generate(
         agent_output_dir = Path.cwd() / f"{agent_id}-agent"
 
     spec_dict = _json.loads(ahs_spec.model_dump_json())
+
+    # Progress: classify archetype (in engine's internal pipeline)
+    console.print("  [dim]Classifying skill archetype...[/dim]", end="\r")
 
     try:
         written = generate_agent(
@@ -212,7 +216,10 @@ def _render_phase3_result(
 def hatch_command(
     skill_path: Annotated[
         str,
-        typer.Argument(help="Path to skill directory, SKILL.md file, or skill name"),
+        typer.Argument(
+            help="Path to skill directory, SKILL.md file, or skill name",
+            autocompletion=_complete_skill_name,
+        ),
     ],
     output: Annotated[
         str | None,

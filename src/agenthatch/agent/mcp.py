@@ -447,13 +447,15 @@ class MCPClient:
 
     def list_tool_definitions(self) -> list[dict[str, Any]]:
         """Return tool definitions in OpenAI function-calling format."""
+        from agenthatch_core.tools.bus import _normalize_json_schema  # type: ignore[import-untyped]
+
         return [
             {
                 "type": "function",
                 "function": {
                     "name": full_name,
                     "description": t.description,
-                    "parameters": t.input_schema,
+                    "parameters": _normalize_json_schema(t.input_schema),
                 },
             }
             for full_name, t in self._tools.items()
@@ -461,6 +463,8 @@ class MCPClient:
 
     def register_with_capbus(self, capbus: Any) -> None:
         """Register all MCP tools as external handlers on CapBus."""
+        from agenthatch_core.tools.bus import _normalize_json_schema  # type: ignore[import-untyped]
+
         for full_name, t in self._tools.items():
             sname = full_name.split("__", 1)[1]
             tool_name = t.name
@@ -470,8 +474,9 @@ class MCPClient:
                     return self.call_tool(sn, tn, kwargs)
                 return handler
 
+            normalized_schema = _normalize_json_schema(t.input_schema)
             capbus.register_external_tool(
-                full_name, t.input_schema, make_handler(sname, tool_name)
+                full_name, normalized_schema, make_handler(sname, tool_name)
             )
 
     def disconnect_all(self) -> None:

@@ -63,6 +63,7 @@ class LLMClient:
         self._features = features or ProviderFeatures()
         self._max_tokens = max_tokens or 4096
         self._context_window = context_window or 128000
+        self.last_usage: Any = None
 
         if self._features.requires_anthropic_adapter:
             raise ProviderCapabilityError(
@@ -192,6 +193,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        self.last_usage = getattr(response, "usage", None)
         choice = response.choices[0]
         if choice.finish_reason == "length":
             logger.warning(
@@ -220,6 +222,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
+            stream_options={"include_usage": True},
         )
 
         text_parts: list[str] = []
@@ -228,6 +231,8 @@ class LLMClient:
         for event in stream:
             delta = event.choices[0].delta if event.choices else None  # type: ignore[union-attr]
             if delta is None:
+                if hasattr(event, "usage") and event.usage:
+                    self.last_usage = event.usage
                 continue
 
             if delta.content:
@@ -280,6 +285,7 @@ class LLMClient:
             temperature=0.0,
             max_tokens=4096,
         )
+        self.last_usage = getattr(response, "usage", None)
         msg = response.choices[0].message
         content = self._extract_content(msg)
         if not content:
@@ -330,6 +336,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        self.last_usage = getattr(response, "usage", None)
         result = ToolCallResponse.from_openai(response, llm_client=self)
         msg = response.choices[0].message
         extracted = self._extract_content(msg)
@@ -385,6 +392,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
+            stream_options={"include_usage": True},
         )
 
         text_parts: list[str] = []
@@ -394,6 +402,8 @@ class LLMClient:
         for event in stream:
             delta = event.choices[0].delta if event.choices else None  # type: ignore[union-attr]
             if delta is None:
+                if hasattr(event, "usage") and event.usage:
+                    self.last_usage = event.usage
                 continue
 
             if delta.content:

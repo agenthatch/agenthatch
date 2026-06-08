@@ -100,6 +100,19 @@ class ContextManager:
         self._capbus: Any = None
         self._rich_prompt: bool = False
 
+    def _detect_latest_user_language(self) -> str:
+        """Detect the language of the most recent user message in history."""
+        for msg in reversed(self.history):
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    cjk_count = sum(1 for c in content if '一' <= c <= '鿿')
+                    total = len(content.strip())
+                    if total > 0 and cjk_count / total > 0.3:
+                        return "Chinese (中文)"
+                break
+        return "English"
+
     def _apply_compact_config(self) -> None:
         if self.compact_config:
             self.COMPACT_RATIO = self.compact_config.get(
@@ -118,6 +131,22 @@ class ContextManager:
 
         provides = [c.capability for c in self.spec.interface.provides]
         triggers = self.spec.intent.triggers
+
+        # v0.7.2: Language directive FIRST for highest attention priority
+        detected_lang = self._detect_latest_user_language()
+        if detected_lang and detected_lang != "English":
+            parts.append(
+                f"CRITICAL INSTRUCTION: You MUST respond in {detected_lang}. "
+                f"The user's most recent message was in {detected_lang}. "
+                f"Write all your responses in {detected_lang}. "
+                f"Do NOT switch to English or any other language."
+            )
+        else:
+            parts.append(
+                "CRITICAL INSTRUCTION: Respond in the same language as the user. "
+                "Detect the user's language and match it exactly."
+            )
+        parts.append("")
 
         parts.append(
             f"You are {self.spec.identity.display_name}, "
@@ -182,15 +211,7 @@ class ContextManager:
             parts.append("\n## Operational Guidance")
             parts.append(body)
 
-        # v0.7: Language directive
-        parts.append("\n## Language")
-        parts.append(
-            "You MUST respond in the same language as the user's input. "
-            "Detect the user's language and match it exactly. "
-            "If the user writes in Chinese, respond in Chinese. "
-            "If the user writes in English, respond in English. "
-            "Never switch languages mid-response unless the user does."
-        )
+        # Language directive is now at the TOP of the system prompt (see above)
 
         # Resource summary
         if self.spec.resources.references:

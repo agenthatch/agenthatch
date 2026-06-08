@@ -28,6 +28,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 
 from agenthatch.cli import console
+from agenthatch.cli.commands._completion import _complete_skill_name
 
 PT_STYLE = PTStyle.from_dict({
     "prompt": "bold green",
@@ -35,7 +36,11 @@ PT_STYLE = PTStyle.from_dict({
 
 
 def run_command(
-    skill_name: str = typer.Argument(..., help="Skill ID or path to run"),  # noqa: B008
+    skill_name: str = typer.Argument(  # noqa: B008
+        ...,
+        help="Skill ID or path to run",
+        autocompletion=_complete_skill_name,
+    ),
     provider: str = typer.Option(None, "--provider", "-p", help="Override provider"),
     api_key: str = typer.Option(None, "--api-key", "-k", help="Override API key"),
     model: str = typer.Option(None, "--model", "-m", help="Override model"),
@@ -295,6 +300,8 @@ def _run_interactive_tui(agent: Any) -> None:
                         parts.append(f"(in: {snap['prompt_tokens']:,}")
                     if snap["completion_tokens"]:
                         parts.append(f"out: {snap['completion_tokens']:,})")
+                    if snap.get("call_count"):
+                        parts.append(f"[{snap['call_count']} calls]")
                     console.print(f"[dim]{' '.join(parts)}[/dim]")
             console.print()
 
@@ -303,19 +310,31 @@ def _run_interactive_tui(agent: Any) -> None:
 
 
 def _stream_response(agent: Any, user_input: str) -> str:
-    """Stream agent response with live tool call display."""
+    """Stream agent response with live tool call display and reasoning feedback."""
     full_text: list[str] = []
+    reasoning_lines: list[str] = []
     tool_status: dict[str, str] = {}
+    frame_title = f"[bold bright_blue]{agent.identity.display_name}[/]"
 
     def render() -> str:
-        lines = [f"[bold bright_blue]{agent.identity.display_name}[/]"]
+        lines = [frame_title]
         for name, status in tool_status.items():
             lines.append(f"  [cyan]{name}[/] {status}")
         if full_text:
             lines.append("".join(full_text)[-300:])
-        return "\n".join(lines) or "[dim]Thinking...[/dim]"
+        elif reasoning_lines:
+            body = "[dim]" + "\n".join(reasoning_lines[-3:]) + "[/]"
+            lines.append(body)
+        if not full_text and not reasoning_lines:
+            lines.append("[dim]Thinking...[/dim]")
+        return "\n".join(lines)
 
-    with Live(Panel(render(), title="Agent"), refresh_per_second=8) as live:
+    def panel_title() -> str:
+        if not full_text and reasoning_lines:
+            return "Agent (thinking...)"
+        return "Agent"
+
+    with Live(Panel(render(), title=panel_title()), refresh_per_second=10) as live:
         gen = agent.chat_stream(user_input)
         final_text = ""
         while True:
@@ -335,8 +354,9 @@ def _stream_response(agent: Any, user_input: str) -> str:
                         f"[dim]→ {preview}[/]"
                     )
             elif isinstance(event, str):
+                # event could be reasoning_content or content delta — both are strings
                 full_text.append(event)
-            live.update(Panel(render(), title="Agent"))
+            live.update(Panel(render(), title=panel_title()))
         live.update(Panel("[dim]✓ Done[/dim]", title="Agent"))
     return final_text or "".join(full_text) or "(no response)"
 
