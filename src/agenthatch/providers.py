@@ -386,15 +386,31 @@ def _read_env_var(name: str) -> str | None:
 
 
 def _read_config_key(provider: str, config: dict[str, Any]) -> str | None:
-    """Read api_key from config file for a given provider."""
+    """Read api_key from config file for a given provider.
+
+    Supports both TOML inline table format:
+        [providers]
+        deepseek = {api_key = "...", timeout = 180}
+    and TOML section format:
+        [providers.deepseek]
+        api_key = "..."
+        timeout = 180
+    """
+    def _extract_key(entry: Any) -> str | None:
+        if isinstance(entry, dict):
+            key = entry.get("api_key")
+            if isinstance(key, str) and key.strip():
+                return key.strip()
+        return None
+
     if provider.startswith("custom."):
         custom_key = provider.removeprefix("custom.")
-        key = config.get("providers", {}).get("custom", {}).get(custom_key, {}).get("api_key")
+        key = _extract_key(
+            config.get("providers", {}).get("custom", {}).get(custom_key, {})
+        )
     else:
-        key = config.get("providers", {}).get(provider, {}).get("api_key")
-    if isinstance(key, str) and key.strip():
-        return key.strip()
-    return None
+        key = _extract_key(config.get("providers", {}).get(provider, {}))
+    return key
 
 
 def _load_config_safe() -> dict[str, Any]:

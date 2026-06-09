@@ -829,11 +829,30 @@ class Orchestrator:
 
         api_key = resolve_api_key(provider_name, config=config, prompt=True)
 
+        # Read timeout from provider config (default 180s to handle large models)
+        provider_cfg = config.get("providers", {}).get(provider_name, {})
+        if isinstance(provider_cfg, dict):
+            timeout = provider_cfg.get("timeout", 180)
+        else:
+            timeout = 180
+
         self._large_client = LLMClient(
-            provider=provider_name, model=self._large_model, api_key=api_key
+            provider=provider_name,
+            model=self._large_model,
+            api_key=api_key,
+            base_url=provider_info.base_url,
+            features=provider_info.features,  # type: ignore[arg-type]
+            context_window=provider_info.context_window,
+            timeout=timeout,
         )
         self._small_client = LLMClient(
-            provider=provider_name, model=self._small_model, api_key=api_key
+            provider=provider_name,
+            model=self._small_model,
+            api_key=api_key,
+            base_url=provider_info.base_url,
+            features=provider_info.features,  # type: ignore[arg-type]
+            context_window=provider_info.context_window,
+            timeout=timeout,
         )
 
         self._provider_name = provider_name

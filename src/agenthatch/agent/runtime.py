@@ -294,6 +294,9 @@ class SkillAgent:
             provider=runtime_config["provider"],
             model=runtime_config["model"],
             api_key=runtime_config.get("api_key") or None,
+            base_url=runtime_config.get("base_url") or "",
+            features=runtime_config.get("features"),
+            context_window=runtime_config.get("context_window"),
         )
 
         self.loop = ConversationLoop(
@@ -353,9 +356,13 @@ class SkillAgent:
             ),
         }
 
+        provider_info = get_provider(resolved["provider"])
+        resolved["base_url"] = provider_info.base_url
+        resolved["context_window"] = provider_info.context_window
+
         agent_features = rt.features if rt is not None else {}
         provider_features = getattr(
-            get_provider(resolved["provider"]), "features", ProviderFeatures()
+            provider_info, "features", ProviderFeatures()
         )
         def _getf(key: str, default: bool) -> bool:
             val = agent_features.get(key, default)

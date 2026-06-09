@@ -95,6 +95,7 @@ class ContextManager:
         self._capbus: Any = None
         self._rich_prompt: bool = False
         self._memory: Any = None  # v0.7.6: MemoryBrick reference
+        self._workflow_note: str = ""  # v0.7.6: current step note from CompiledWorkflow
 
         self._apply_compact_config()
 
@@ -274,6 +275,12 @@ class ContextManager:
                         parts.append(line)
             else:
                 parts.append(workflow)
+
+        # v0.7.6: Runtime workflow step note from CompiledWorkflow._pre_turn_workflow()
+        # This overrides the static workflow text with the CURRENT step
+        if self._workflow_note:
+            parts.append(f"\n## Current Step\n{self._workflow_note}")
+            self._workflow_note = ""  # one-shot: consumed, then cleared
 
         rules = (
             instructions.get("rules", [])

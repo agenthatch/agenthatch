@@ -21,7 +21,6 @@ class WorkflowStep:
     step: int
     description: str
     script: str | None = None
-    allowed_tools: list[str] | None = None
 
 class CompiledWorkflow:
     """Compiled linear workflow from agenthatch.yaml instructions.
@@ -110,7 +109,6 @@ class {{ agent_class }}(AHCoreAgent):
                 step={{ step.step }},
                 description={{ step.description | python_repr }},
                 script={{ step.script | python_repr }},
-                allowed_tools={{ step.allowed_tools | python_repr }},
             ),
 {% endfor %}
         ])
@@ -146,10 +144,6 @@ class {{ agent_class }}(AHCoreAgent):
                 f"Workflow step {step.step} completed: {result.stdout[:500]}",
             )
             return f"Executed workflow step {step.step}:\n{result.stdout}"
-
-        # If step restricts tools → configure CapBus restriction
-        if step.allowed_tools is not None:
-            self._capbus_restricted = set(step.allowed_tools)
 
         return None  # Proceed to normal LLM turn
 
