@@ -1,6 +1,6 @@
-"""MCP (Model Context Protocol) client for SkillAgent external tool integration.
+"""MCP (Model Context Protocol) client for agenthatch-core.
 
-v0.5.7: Multi-transport support (stdio, streamable_http, sse).
+Multi-transport support (stdio, streamable_http, sse).
 Transport abstraction layer with auto-detection and graceful degradation.
 """
 
@@ -15,6 +15,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
+
+from agenthatch_core.mcp.config import MCPServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,30 +51,6 @@ class Transport(ABC):
     def is_connected(self) -> bool:
         """Return True if transport is currently connected."""
         ...
-
-
-# ── MCPServerConfig ──────────────────────────────────────────────────────
-
-
-@dataclass
-class MCPServerConfig:
-    """MCP server configuration — transport-agnostic unified schema.
-
-    Transports:
-      - stdio: {command, args, env}
-      - streamable_http: {url, headers, auth_token}
-      - sse: {url, headers, auth_token}
-    """
-    transport: str = "stdio"
-    timeout: float = 30.0
-    # stdio fields
-    command: str = ""
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    # HTTP/SSE fields
-    url: str = ""
-    headers: dict[str, str] = field(default_factory=dict)
-    auth_token: str = ""
 
 
 # ── StdioTransport ───────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ def skills_command(
 
     if not sh_path.exists():
         console.print("[yellow]No skillhouse.json found. Run 'agenthatch hatch' first.[/yellow]")
-        raise typer.Exit(code=0)
+        raise typer.Exit(code=1)
 
     idx = SkillhouseIndex(str(sh_path))
     entries = idx.list_all()

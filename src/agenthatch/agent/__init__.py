@@ -10,11 +10,9 @@ FLAT_CATALOG cleanup, Capability/Tool distinction, SkillBrick resource loading,
 rich prompt mode.
 """
 
-from agenthatch.agent.compact import CompactSummary
-from agenthatch.agent.hooks import HookPoint, HooksManager
-from agenthatch.agent.mcp import (
+from agenthatch_core.hooks import HookPoint, HooksManager
+from agenthatch_core.mcp.client import (
     MCPClient,
-    MCPServerConfig,
     MCPToolDef,
     SSETransport,
     StdioTransport,
@@ -22,6 +20,9 @@ from agenthatch.agent.mcp import (
     Transport,
     _resolve_transport,
 )
+from agenthatch_core.mcp.config import MCPServerConfig
+
+from agenthatch.agent.compact import CompactSummary
 from agenthatch.agent.offload import Checkpoint, CheckpointManager, SessionState, StateManager
 from agenthatch.agent.runtime import SkillAgent
 from agenthatch.cap.bus import APITemplateExecutor

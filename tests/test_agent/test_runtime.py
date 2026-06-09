@@ -172,6 +172,13 @@ def _make_patches(stack):
             return_value=_make_mock_provider_info(),
         )
     )
+    # v0.7.1: mock resolve_api_key (4-level resolution) to avoid TTY prompt in tests
+    stack.enter_context(
+        patch(
+            "agenthatch.agent.runtime.resolve_api_key",
+            return_value="test-api-key",
+        )
+    )
     return patches
 
 
@@ -207,7 +214,7 @@ class TestSkillAgentConfigResolution:
             )
             mock_llm.assert_called_once()
             call_kwargs = mock_llm.call_args.kwargs
-            assert call_kwargs["provider_name"] == "cli-provider"
+            assert call_kwargs["provider"] == "cli-provider"
             assert call_kwargs["model"] == "cli-model"
 
     def test_yaml_config_fallback(self, spec_with_agent_config):
@@ -217,7 +224,7 @@ class TestSkillAgentConfigResolution:
             mock_llm, _, _, _, _, _ = _make_patches(stack)
             SkillAgent(spec_with_agent_config, skill_dir=Path("/tmp"))
             call_kwargs = mock_llm.call_args.kwargs
-            assert call_kwargs["provider_name"] == "custom-provider"
+            assert call_kwargs["provider"] == "custom-provider"
             assert call_kwargs["model"] == "custom-model"
 
     def test_no_config_creates_agent(self, minimal_spec):

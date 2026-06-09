@@ -16,8 +16,8 @@ except PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
 from agenthatch_core.agent import AHCoreAgent
-from agenthatch_core.llm.client import LLMClient
-from agenthatch_core.llm.types import StreamDelta, ToolCallResponse
+from agenthatch_core.llm.client import LLMClient, ToolCallResponse
+from agenthatch_core.llm.types import StreamDelta
 from agenthatch_core.tools.bus import CapBus, CapabilityRegistration, ToolDefinition
 from agenthatch_core.sandbox.executor import Sandbox, SandboxConfig
 from agenthatch_core.loop.agent_loop import ConversationLoop, RichToolCallEvent

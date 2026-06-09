@@ -15,29 +15,35 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
-from agenthatch_core.bricks.manifest import (  # type: ignore[import-untyped]
+from agenthatch_core.bricks.manifest import (
     BrickManifest,
     LoopKind,
     SandboxTier,
 )
-from agenthatch_core.bricks.stubs import (  # type: ignore[import-untyped]
+from agenthatch_core.bricks.stubs import (
     _NullCapBus,
     _NullHooks,
     _NullSandbox,
 )
+from agenthatch_core.context.manager import ContextManager
+from agenthatch_core.hooks import HooksManager
+from agenthatch_core.llm.client import LLMClient
+from agenthatch_core.loop.agent_loop import ConversationLoop
+from agenthatch_core.mcp.client import MCPClient
+from agenthatch_core.mcp.config import MCPServerConfig
 from pydantic import ValidationError
 
 from agenthatch.agent.compact import CompactSummary
-from agenthatch.agent.context import ContextManager
-from agenthatch.agent.hooks import HooksManager
-from agenthatch.agent.loop import ConversationLoop
-from agenthatch.agent.mcp import MCPClient, MCPServerConfig
 from agenthatch.agent.offload import CheckpointManager, StateManager
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.cap.bus import APITemplateExecutor, CapBus
 from agenthatch.house.resolver import is_builtin
-from agenthatch.providers import ProviderFeatures, get_default_provider, get_provider
-from agenthatch.skill.llm_client import LLMClient
+from agenthatch.providers import (
+    ProviderFeatures,
+    get_default_provider,
+    get_provider,
+    resolve_api_key,
+)
 from agenthatch.skill.spec import AHSSpec
 
 logger = logging.getLogger(__name__)
@@ -147,11 +153,11 @@ class SkillAgent:
     @staticmethod
     def _build_manifest(spec: AHSSpec) -> BrickManifest:
         """Build a BrickManifest from skill classification."""
-        from agenthatch_core.bricks.archetypes import (  # type: ignore[import-untyped]
+        from agenthatch_core.bricks.archetypes import (
             SkillArchetype,
             classify_skill,
         )
-        from agenthatch_core.bricks.guards import OutputGuard  # type: ignore[import-untyped]
+        from agenthatch_core.bricks.guards import OutputGuard
 
         # Dump spec to dict for classify_skill
         spec_dict = spec.model_dump() if hasattr(spec, "model_dump") else {}
@@ -249,7 +255,7 @@ class SkillAgent:
         if self._manifest.sandbox != SandboxTier.NONE and hasattr(
             self.sandbox, "configure"
         ):
-            from agenthatch_core.bricks.sandboxes import (  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.sandboxes import (
                 SandboxWhitelist,
             )
             whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
@@ -267,7 +273,7 @@ class SkillAgent:
         # ── v0.7: CredentialVault ──
         self.vault: Any = None
         if self._manifest.credential_vault:
-            from agenthatch_core.bricks.credential_vault import (  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.credential_vault import (
                 CredentialVault,
             )
             self.vault = CredentialVault()
@@ -275,18 +281,19 @@ class SkillAgent:
         # ── v0.7: FileProcessor ──
         self.file_processor: Any = None
         if self._manifest.file_processor:
-            from agenthatch_core.bricks.file_processor import (  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.file_processor import (
                 FileProcessor,
             )
             self.file_processor = FileProcessor()
 
         # ── v0.7: TokenCounter (unconditional) ──
-        from agenthatch_core.loop.token_counter import TokenCounter  # type: ignore[import-untyped]
+        from agenthatch_core.loop.token_counter import TokenCounter
         self.token_counter = TokenCounter()
 
         self.llm = LLMClient(
-            provider_name=runtime_config["provider"],
+            provider=runtime_config["provider"],
             model=runtime_config["model"],
+            api_key=runtime_config.get("api_key") or None,
         )
 
         self.loop = ConversationLoop(
@@ -322,14 +329,22 @@ class SkillAgent:
         agent_cfg = self.spec.agent
         rt = agent_cfg.runtime if agent_cfg is not None else None
 
+        resolved_provider = provider or (
+            rt.provider if rt is not None else None
+        ) or get_default_provider()
+
+        # 4-level API key resolution: explicit arg > env > config > prompt
+        if api_key:
+            resolved_api_key = api_key
+        else:
+            resolved_api_key = resolve_api_key(resolved_provider, prompt=True)
+
         resolved: dict[str, Any] = {
-            "provider": provider or (
-                rt.provider if rt is not None else None
-            ) or get_default_provider(),
+            "provider": resolved_provider,
             "model": model or (
                 rt.model if rt is not None else None
             ) or "",
-            "api_key": api_key or "",
+            "api_key": resolved_api_key or "",
             "temperature": (
                 rt.temperature if rt is not None else 0.7
             ),
@@ -567,7 +582,7 @@ class SkillAgent:
     def chat(self, user_input: str) -> str:
         """Single-turn synchronous chat."""
         if self._manifest.loop_engine == LoopKind.DIRECT:
-            from agenthatch_core.bricks.loops import DirectLoop  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.loops import DirectLoop
             result = DirectLoop(
                 self.llm, self.ctx, token_counter=self.token_counter
             ).run(user_input)

@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from agenthatch.skill.llm_client import (
-    LLMClient,
-    ToolCallResponse,
-)
+from agenthatch_core.llm.client import LLMClient, ToolCallResponse
 
 # ---------------------------------------------------------------------------
 # Helpers: mock OpenAI streaming chunks
@@ -61,17 +58,12 @@ class _MockStreamEvent:
 
 def _build_mock_llm_client(monkeypatch, features=None):
     """Build a minimal LLMClient with mocked OpenAI dependency."""
-    monkeypatch.setattr(
-        "agenthatch.skill.llm_client.resolve_api_key",
-        lambda name, config=None, prompt=True: "sk-mock",
-    )
-
     import openai
 
     mock_client = MagicMock()
     monkeypatch.setattr(openai, "OpenAI", lambda **kw: mock_client)
 
-    client = LLMClient(provider_name="deepseek")
+    client = LLMClient(provider="deepseek", model="test-model", api_key="sk-mock")
 
     if features:
         client._features = features
@@ -244,17 +236,12 @@ class TestToolCallResponseReasoningFallback:
 
     def test_text_fallback_to_reasoning_content(self, monkeypatch):
         """When content is empty, from_openai should fall back to reasoning_content."""
-        monkeypatch.setattr(
-            "agenthatch.skill.llm_client.resolve_api_key",
-            lambda name, config=None, prompt=True: "sk-mock",
-        )
-
         import openai
 
         mock_openai_client = MagicMock()
         monkeypatch.setattr(openai, "OpenAI", lambda **kw: mock_openai_client)
 
-        client = LLMClient(provider_name="deepseek")
+        client = LLMClient(provider="deepseek", model="test-model", api_key="sk-mock")
 
         # Build mock response with empty content but reasoning_content present
         mock_msg = MagicMock()
@@ -274,17 +261,12 @@ class TestToolCallResponseReasoningFallback:
 
     def test_text_fallback_content_present(self, monkeypatch):
         """When content is present, it should be used, not reasoning_content."""
-        monkeypatch.setattr(
-            "agenthatch.skill.llm_client.resolve_api_key",
-            lambda name, config=None, prompt=True: "sk-mock",
-        )
-
         import openai
 
         mock_openai_client = MagicMock()
         monkeypatch.setattr(openai, "OpenAI", lambda **kw: mock_openai_client)
 
-        client = LLMClient(provider_name="deepseek")
+        client = LLMClient(provider="deepseek", model="test-model", api_key="sk-mock")
 
         mock_msg = MagicMock()
         mock_msg.content = "Direct answer."
@@ -319,17 +301,12 @@ class TestToolCallResponseReasoningFallback:
 
     def test_text_fallback_both_empty(self, monkeypatch):
         """When both content and reasoning_content are empty, text should be None."""
-        monkeypatch.setattr(
-            "agenthatch.skill.llm_client.resolve_api_key",
-            lambda name, config=None, prompt=True: "sk-mock",
-        )
-
         import openai
 
         mock_openai_client = MagicMock()
         monkeypatch.setattr(openai, "OpenAI", lambda **kw: mock_openai_client)
 
-        client = LLMClient(provider_name="deepseek")
+        client = LLMClient(provider="deepseek", model="test-model", api_key="sk-mock")
 
         mock_msg = MagicMock()
         mock_msg.content = ""
@@ -347,17 +324,12 @@ class TestToolCallResponseReasoningFallback:
 
     def test_text_fallback_reasoning_disabled_provider(self, monkeypatch):
         """When supports_reasoning_content is False, reasoning_content is ignored."""
-        monkeypatch.setattr(
-            "agenthatch.skill.llm_client.resolve_api_key",
-            lambda name, config=None, prompt=True: "sk-mock",
-        )
-
         import openai
 
         mock_openai_client = MagicMock()
         monkeypatch.setattr(openai, "OpenAI", lambda **kw: mock_openai_client)
 
-        client = LLMClient(provider_name="openai")  # openai doesn't support reasoning_content
+        client = LLMClient(provider="openai", model="test-model", api_key="sk-mock")  # openai doesn't support reasoning_content
 
         mock_msg = MagicMock()
         mock_msg.content = ""
@@ -371,5 +343,5 @@ class TestToolCallResponseReasoningFallback:
 
         result = ToolCallResponse.from_openai(mock_response, llm_client=client)
 
-        # openai has supports_reasoning_content=False, so reasoning_content is ignored
-        assert result.text is None
+        # reasoning_content is always used as fallback regardless of feature flag
+        assert result.text == "Hidden reasoning..."

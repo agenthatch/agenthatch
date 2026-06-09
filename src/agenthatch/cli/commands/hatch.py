@@ -56,7 +56,9 @@ def _run_phase3_generate(
     """
     import json as _json
 
-    from agenthatch.generate.engine import generate_agent
+    from agenthatch_core.bricks.archetypes import classify_skill
+
+    from agenthatch.generate.engine import GenerateEngine
 
     agent_id = ahs_spec.identity.id
     if output:
@@ -65,13 +67,23 @@ def _run_phase3_generate(
         agent_output_dir = Path.cwd() / f"{agent_id}-agent"
 
     spec_dict = _json.loads(ahs_spec.model_dump_json())
-    t3_start = time.time()
 
-    # Progress: classify archetype (in engine's internal pipeline)
-    console.print("  [dim]Classifying skill archetype...[/dim]")
-
+    # Classify skill archetype first for user feedback
     try:
-        written = generate_agent(
+        result = classify_skill(spec_dict)
+        archetype = result.archetype.value
+        confidence = result.confidence
+    except Exception:
+        archetype = "unknown"
+        confidence = 0.0
+
+    console.print(f"  [dim]→ {archetype} (confidence: {confidence:.0%})[/dim]")
+    console.print("  [dim]Generating agent files...[/dim]")
+
+    t3_start = time.time()
+    try:
+        engine = GenerateEngine()
+        written = engine.generate(
             ahspec=spec_dict,
             output_dir=agent_output_dir,
             dry_run=dry_run,
@@ -79,14 +91,6 @@ def _run_phase3_generate(
             copy_skills=copy_skills,
             skill_dir=skill_dir,
         )
-
-        # Show archetype info if embedded in generated manifest
-        _manifest = spec_dict.get("_manifest", {})
-        archetype = _manifest.get("archetype", "unknown")
-        confidence = _manifest.get("archetype_confidence", 0.0)
-        if archetype and archetype != "unknown":
-            console.print(f"  [dim]→ {archetype} (confidence: {confidence:.0%})[/dim]")
-        console.print("  [dim]Rendering templates...[/dim]")
     except FileExistsError as e:
         console.print(f"[yellow]{e}[/yellow]")
         console.print("Use --force to overwrite.")
@@ -122,8 +126,8 @@ def _render_confidence(ahs_spec: Any) -> None:
         "A": "extract_identity",
         "B": "infer_intent",
         "C": "infer_interface",
-        "D": "detect_base",
-        "E": "assemble_validate",
+        "D": "detect_base_and_instructions",
+        "E": "assemble_and_validate",
     }
 
     BAR_WIDTH = 22
@@ -412,7 +416,7 @@ def hatch_command(
         _render_harness_traces(harness_outputs)
 
     # ── 7.5. Phase 2.5: Skill Classification (v0.7) ─────────────────
-    from agenthatch_core.bricks.archetypes import classify_skill  # type: ignore[import-untyped]
+    from agenthatch_core.bricks.archetypes import classify_skill
 
     classification = classify_skill(
         ahs_spec.model_dump() if hasattr(ahs_spec, "model_dump") else ahs_spec
@@ -554,7 +558,7 @@ def _register_skillhouse(
             f"Hatch succeeded but skillhouse index update failed: {e}. "
             f"The agenthatch.yaml is valid and can be used."
         )
-        console.print(f"[yellow]⚠ Skill indexed failed (non-fatal): {e}[/yellow]")
+        console.print(f"[yellow]⚠ Skill indexing failed (non-fatal): {e}[/yellow]")
 
 
 def _update_skillhouse_agent_output(

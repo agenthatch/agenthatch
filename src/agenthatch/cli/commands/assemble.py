@@ -48,7 +48,7 @@ def assemble_command(
     if dry_run:
         _print_assembly_plan(skill_specs, idx)
     else:
-        console.print("[dim]Assembly execution not yet implemented (v1.5.0).[/dim]")
+        console.print("[dim]Assembly execution not yet implemented (experimental).[/dim]")
         console.print("[dim]Use --dry-run to preview the plan.[/dim]")
 
 

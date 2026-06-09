@@ -14,10 +14,11 @@ import time
 from collections.abc import Callable, Generator
 from typing import Any, cast
 
+from agenthatch_core.context.manager import ContextManager
 from agenthatch_core.exceptions import CapabilityNotFoundError
-from agenthatch_core.hooks import HookPoint
-from agenthatch_core.llm.client import LLMClient
-from agenthatch_core.llm.types import ToolCallResponse
+from agenthatch_core.hooks import HookPoint, HooksManager
+from agenthatch_core.llm.client import LLMClient, ToolCallResponse
+from agenthatch_core.loop.token_counter import TokenCounter
 from agenthatch_core.sandbox.executor import Sandbox
 from agenthatch_core.tools.bus import CapBus
 
@@ -81,9 +82,9 @@ class ConversationLoop:
         llm: LLMClient,
         capbus: CapBus,
         sandbox: Sandbox,
-        ctx: Any,
-        hooks: Any = None,
-        token_counter: Any = None,
+        ctx: ContextManager,
+        hooks: HooksManager | None = None,
+        token_counter: TokenCounter | None = None,
     ):
         self.llm = llm
         self.capbus = capbus
@@ -120,6 +121,13 @@ class ConversationLoop:
             "completion_tokens": getattr(usage, "completion_tokens", 0),
             "total_tokens": getattr(usage, "total_tokens", 0),
             "reasoning_tokens": getattr(usage, "reasoning_tokens", 0),
+            "completion_tokens_details": getattr(usage, "completion_tokens_details", None) or {},
+            "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0),
+            "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0),
+            "cached_tokens": (
+                getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0)
+                or 0
+            ),
         })
 
     def run(self, user_input: str) -> str:
@@ -132,13 +140,18 @@ class ConversationLoop:
                 "user_input": user_input,
                 "turn_count": self.ctx._turn_count,
             }
-            self._hooks.execute(HookPoint.PRE_TURN, turn_ctx)
+            turn_ctx = self._hooks.execute(HookPoint.PRE_TURN, turn_ctx)
 
         self.ctx.auto_compact_check(self.llm.context_window)
 
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
-        tools_for_api = [{"type": t.type, "function": t.function} for t in tools]
+        tools_for_api = [
+            {"type": t.type, "function": t.function}
+            if hasattr(t, "type") else
+            {"type": t["type"], "function": t["function"]}
+            for t in tools
+        ]
 
         if not self._cb_allow():
             return "Service temporarily unavailable. Please wait and try again."
@@ -170,7 +183,7 @@ class ConversationLoop:
                         self.ctx.add_to_history("user", user_input)
                         self.ctx.add_to_history("assistant", summary)
                         if self._hooks:
-                            self._hooks.execute(HookPoint.POST_TURN, {
+                            _ = self._hooks.execute(HookPoint.POST_TURN, {
                                 "turn_count": self.ctx._turn_count,
                                 "final_text": summary,
                             })
@@ -237,7 +250,7 @@ class ConversationLoop:
 
             # PRE_TOOL_CALL hook
             if self._hooks and response.tool_calls:
-                self._hooks.execute(HookPoint.PRE_TOOL_CALL, {
+                _ = self._hooks.execute(HookPoint.PRE_TOOL_CALL, {
                     "tool_calls": [
                         {"name": tc.name, "arguments": tc.arguments}
                         for tc in response.tool_calls
@@ -269,7 +282,7 @@ class ConversationLoop:
 
                 # POST_TOOL_CALL hook
                 if self._hooks:
-                    self._hooks.execute(HookPoint.POST_TOOL_CALL, {
+                    _ = self._hooks.execute(HookPoint.POST_TOOL_CALL, {
                         "tool_name": tc.name,
                         "arguments": tc.arguments,
                         "result": result_str,
@@ -325,7 +338,7 @@ class ConversationLoop:
 
         # POST_TURN hook
         if self._hooks:
-            self._hooks.execute(HookPoint.POST_TURN, {
+            _ = self._hooks.execute(HookPoint.POST_TURN, {
                 "turn_count": self.ctx._turn_count,
                 "final_text": final_text,
             })
@@ -444,7 +457,8 @@ class ConversationLoop:
 
         # Parallel path: submit all, collect with as_completed, sort back
         results_by_index: dict[int, dict[str, Any]] = {}
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        executor = concurrent.futures.ThreadPoolExecutor()
+        try:
             futures: dict[concurrent.futures.Future[str], int] = {}
             for i, tc in enumerate(tool_calls):
                 logger.info("  Dispatching (parallel): %s(%s)...", tc.name,
@@ -464,6 +478,8 @@ class ConversationLoop:
                     result = f"Error: {e}"
                 results_by_index[i] = {"tc": tc, "result": result, "elapsed": 0.0}
                 logger.info("  %s -> %d chars (parallel)", tc.name, len(result))
+        finally:
+            executor.shutdown(wait=False)
 
         return [results_by_index[i] for i in range(len(tool_calls))]
 
@@ -472,7 +488,7 @@ class ConversationLoop:
         if self._checkpoint_mgr is None:
             return
         try:
-            from agenthatch.agent.offload import Checkpoint
+            from agenthatch_core.offload.checkpoint import Checkpoint
 
             spec = self.ctx._raw_spec
             session_id = (
@@ -508,16 +524,22 @@ class ConversationLoop:
 
         # PRE_TURN hook
         if self._hooks:
-            self._hooks.execute(HookPoint.PRE_TURN, {
+            hook_ctx = self._hooks.execute(HookPoint.PRE_TURN, {
                 "user_input": user_input,
                 "turn_count": self.ctx._turn_count,
             })
+            user_input = hook_ctx.get("user_input", user_input)
 
         self.ctx.auto_compact_check(self.llm.context_window)
 
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
-        tools_for_api = [{"type": t.type, "function": t.function} for t in tools]
+        tools_for_api = [
+            {"type": t.type, "function": t.function}
+            if hasattr(t, "type") else
+            {"type": t["type"], "function": t["function"]}
+            for t in tools
+        ]
 
         full_response_text: str = ""
 
@@ -528,8 +550,8 @@ class ConversationLoop:
         # ── v0.6: Autonomous task completion ──
         task_completed = False
         has_executed_tools = False
+        accumulated_text = ""
         for _ in range(self.MAX_TOOL_ROUNDS):
-            accumulated_text = ""
             has_yielded_tool_header = False
 
             try:
@@ -590,7 +612,7 @@ class ConversationLoop:
                         self.ctx.add_to_history("user", user_input)
                         self.ctx.add_to_history("assistant", summary)
                         if self._hooks:
-                            self._hooks.execute(HookPoint.POST_TURN, {
+                            _ = self._hooks.execute(HookPoint.POST_TURN, {
                                 "turn_count": self.ctx._turn_count,
                                 "final_text": summary,
                             })
@@ -642,7 +664,7 @@ class ConversationLoop:
 
             # PRE_TOOL_CALL hook (streaming)
             if self._hooks and response.tool_calls:
-                self._hooks.execute(HookPoint.PRE_TOOL_CALL, {
+                _ = self._hooks.execute(HookPoint.PRE_TOOL_CALL, {
                     "tool_calls": [
                         {"name": tc.name, "arguments": tc.arguments}
                         for tc in response.tool_calls
@@ -683,7 +705,7 @@ class ConversationLoop:
 
                 # POST_TOOL_CALL hook (streaming)
                 if self._hooks:
-                    self._hooks.execute(HookPoint.POST_TOOL_CALL, {
+                    _ = self._hooks.execute(HookPoint.POST_TOOL_CALL, {
                         "tool_name": tc.name,
                         "arguments": tc.arguments,
                         "result": result_str,
@@ -719,7 +741,7 @@ class ConversationLoop:
 
         # POST_TURN hook (streaming)
         if self._hooks:
-            self._hooks.execute(HookPoint.POST_TURN, {
+            _ = self._hooks.execute(HookPoint.POST_TURN, {
                 "turn_count": self.ctx._turn_count,
                 "final_text": final_text,
             })

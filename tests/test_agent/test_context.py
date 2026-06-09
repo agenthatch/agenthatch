@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from agenthatch_core.context.manager import ContextManager
 
-from agenthatch.agent.context import ContextManager
 from agenthatch.skill.spec import (
     AHSSpec,
     BaseSpec,

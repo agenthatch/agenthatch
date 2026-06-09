@@ -20,7 +20,7 @@ from dataclasses import dataclass, field as dc_field
 from typing import Any
 
 from agenthatch_core.exceptions import ApiKeyError, ProviderCapabilityError
-from agenthatch_core.llm.types import StreamDelta, ToolCall, ToolCallResponse
+from agenthatch_core.llm.types import StreamDelta, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,38 @@ class ProviderFeatures:
     supports_reasoning_content: bool = False
     requires_anthropic_adapter: bool = False
     available_models: list[str] = dc_field(default_factory=list)
+
+
+@dataclass
+class ToolCallResponse:
+    """Response from chat_with_tools."""
+    text: str | None
+    tool_calls: list[ToolCall] = dc_field(default_factory=list)
+    finish_reason: str | None = None
+
+    @classmethod
+    def from_openai(cls, response: Any, llm_client: Any | None = None) -> ToolCallResponse:
+        """Construct ToolCallResponse from OpenAI ChatCompletion."""
+        msg = response.choices[0].message
+
+        if llm_client and hasattr(llm_client, '_extract_content'):
+            text = llm_client._extract_content(msg) or None
+        else:
+            text = msg.content or None
+
+        tool_calls: list[ToolCall] = []
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append(ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=args,
+                ))
+        return cls(text=text, tool_calls=tool_calls, finish_reason=None)
 
 
 class LLMClient:
@@ -272,9 +304,11 @@ class LLMClient:
                 response_model=response_model,
                 max_retries=max_retries,
             )
-        except Exception:
-            # InstructorRetryException or any other instructor error
-            # Fallback to raw JSON parsing below
+        except Exception as e:
+            logger.warning(
+                "chat_structured() Instructor call failed, falling back to raw JSON parsing: %s",
+                e,
+            )
             pass
 
         # Fallback for reasoning models
@@ -428,8 +462,9 @@ class LLMClient:
 
                     name_changed = False
                     if tc_delta.function and tc_delta.function.name:
-                        acc["name"] += tc_delta.function.name
-                        name_changed = True
+                        if not acc["name"]:
+                            acc["name"] = tc_delta.function.name
+                            name_changed = True
 
                     if tc_delta.function and tc_delta.function.arguments:
                         acc["arguments"] += tc_delta.function.arguments
@@ -549,32 +584,3 @@ class LLMClient:
             return reasoning
 
         return ""
-
-
-# Extend ToolCallResponse with from_openai factory
-def _tool_call_response_from_openai(response: Any, llm_client: Any | None = None) -> ToolCallResponse:
-    """Construct ToolCallResponse from OpenAI ChatCompletion."""
-    msg = response.choices[0].message
-
-    if llm_client and hasattr(llm_client, '_extract_content'):
-        text = llm_client._extract_content(msg) or None
-    else:
-        text = msg.content or None
-
-    tool_calls: list[ToolCall] = []
-    if msg.tool_calls:
-        for tc in msg.tool_calls:
-            try:
-                args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                args = {}
-            tool_calls.append(ToolCall(
-                id=tc.id,
-                name=tc.function.name,
-                arguments=args,
-            ))
-    return ToolCallResponse(text=text, tool_calls=tool_calls)
-
-
-# Monkey-patch ToolCallResponse.from_openai
-ToolCallResponse.from_openai = staticmethod(_tool_call_response_from_openai)  # type: ignore[assignment]

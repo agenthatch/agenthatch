@@ -464,7 +464,7 @@ def _build_cap_to_script(
             if not script:
                 continue
             desc = step.get("description", "").lower()
-            for cap_name in cap_names:
+            for cap_name in sorted(cap_names):
                 if cap_name in cap_to_script:
                     continue
                 if cap_name.replace("_", " ") in desc or cap_name in desc:
@@ -520,22 +520,10 @@ def _build_cap_to_script(
 def _lookup_builtin(name: str) -> Any | None:
     """Look up a builtin tool by name.  Returns instance or None.
 
-    Checks agenthatch-core registry first (extensibility point), then
-    falls back to the canonical agenthatch.agent.builtins registry which
-    contains the actual implementations (http_client, bash_runtime, etc).
-    """
+    Checks agenthatch-core registry (extensibility point)."""
     try:
         from agenthatch_core.tools.builtins import BUILTIN_REGISTRY
         cls = BUILTIN_REGISTRY.get(name)
-        if cls is not None:
-            return cls()
-    except ImportError:
-        pass
-
-    # Fall back to agenthatch builtins (canonical registry)
-    try:
-        from agenthatch.agent.builtins import BUILTIN_REGISTRY as AH_BUILTINS
-        cls = AH_BUILTINS.get(name)
         if cls is not None:
             return cls()
     except ImportError:

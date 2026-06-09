@@ -1,8 +1,7 @@
 """MCP (Model Context Protocol) tool loader (agenthatch-core).
 
 Connects to MCP servers and registers their tools on the CapBus.
-Delegates to the full agenthatch.agent.mcp implementation when available;
-degrades gracefully when running standalone (agenthatch-core only).
+Uses the agenthatch-core MCP client implementation.
 """
 
 from __future__ import annotations
@@ -31,7 +30,8 @@ def load_mcp_tools(capbus: Any, mcp_cfg: dict) -> None:
     server_config = mcp_cfg.get("config", {})
 
     try:
-        from agenthatch.agent.mcp import MCPClient, MCPServerConfig
+        from agenthatch_core.mcp.client import MCPClient
+        from agenthatch_core.mcp.config import MCPServerConfig
     except ImportError:
         logger.warning(
             "MCP client not available in standalone mode. "

@@ -97,6 +97,11 @@ class ContextManager:
 
         self._apply_compact_config()
 
+    @property
+    def spec(self) -> Any:
+        """Backward-compatible alias for _raw_spec."""
+        return self._raw_spec
+
     def _detect_latest_user_language(self) -> str:
         """Detect the language of the most recent user message in history."""
         for msg in reversed(self.history):
@@ -164,8 +169,11 @@ class ContextManager:
         parts.append(
             f"You are {display_name}, a specialist agent created by agenthatch."
         )
-        if isinstance(identity, dict) and identity.get("author"):
-            parts.append(f"Author: {identity['author']}")
+        if isinstance(identity, dict):
+            if identity.get("author"):
+                parts.append(f"Author: {identity['author']}")
+        elif hasattr(identity, "author") and identity.author:
+            parts.append(f"Author: {identity.author}")
 
         parts.append("")
         parts.append("## Your Core Identity")
@@ -206,6 +214,18 @@ class ContextManager:
             "politely decline and suggest what you CAN help with."
         )
 
+        # External tool summary (ported from agent/context.py:241-255)
+        if self._capbus is not None:
+            external_tools = []
+            for name, cap in self._capbus.capabilities.items():
+                if hasattr(cap, 'type') and cap.type == "external":
+                    desc = cap.schema.get("description", name) if hasattr(cap, 'schema') else name
+                    external_tools.append(f"- {name}: {desc}")
+            if external_tools:
+                parts.append("")
+                parts.append("## Available External Tools")
+                parts.extend(external_tools)
+
         # Language directive is now at the TOP of the system prompt (see above)
 
         workflow = (
@@ -228,6 +248,14 @@ class ContextManager:
                             line += (
                                 f"\n   -> Use tool: run_skill_script("
                                 f'script_name="{step["script"]}", ...)'
+                            )
+                        parts.append(line)
+                    elif hasattr(step, "step") and hasattr(step, "description"):
+                        line = f"{step.step}. {step.description}"
+                        if hasattr(step, "script") and step.script:
+                            line += (
+                                f"\n   -> Use tool: run_skill_script("
+                                f'script_name="{step.script}", ...)'
                             )
                         parts.append(line)
             else:
@@ -578,7 +606,13 @@ class ContextManager:
             if msg.get("role") == "tool":
                 tid = msg.get("tool_call_id", "")
                 if tid in tool_call_ids:
-                    safe_boundary = i
+                    # Move boundary to include the parent assistant+tool_calls
+                    for j in range(i - 1, -1, -1):
+                        parent = self.history[j]
+                        if parent.get("role") == "assistant" and parent.get("tool_calls"):
+                            if any(tc.get("id") == tid for tc in parent["tool_calls"]):
+                                safe_boundary = j
+                                break
                     break
 
         self.history = self.history[safe_boundary:]
@@ -657,6 +691,12 @@ class ContextManager:
                         return CompactSummary(**data)
                     except Exception:
                         continue
+            if json_candidates:
+                logger.warning(
+                    "_generate_summary(): all %d JSON candidates failed, "
+                    "using raw text fallback (quality degraded)",
+                    len(json_candidates),
+                )
             # Minimal fallback: use the raw text as session_intent
             return CompactSummary(
                 session_intent=raw[:500],
@@ -668,6 +708,14 @@ class ContextManager:
                 session_intent="compaction failed",
                 current_state="error",
             )
+
+    def compress(self, rich: bool = False) -> str:
+        """DEPRECATED: Stub for backward compatibility.
+
+        Context compression is now handled by agent_loop.py.
+        Returns a notice that compression is managed by the conversation loop.
+        """
+        return "Context compression is not yet available; managed by ConversationLoop."
 
     def set_batch_scope(self, total: int) -> None:
         """Set batch scope for progress tracking."""

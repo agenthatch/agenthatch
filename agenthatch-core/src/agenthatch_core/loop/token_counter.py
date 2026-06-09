@@ -8,6 +8,7 @@ Provides ThinkingDelta event for streaming reasoning content.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -31,6 +32,7 @@ class TokenCounter:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    cached_tokens: int = 0
     call_count: int = 0
     elapsed_ms: int = 0
 
@@ -47,6 +49,7 @@ class TokenCounter:
                 "reasoning_tokens",
                 usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0),
             )
+            self.cached_tokens += usage.get("cached_tokens", 0)
         elif hasattr(usage, "prompt_tokens"):
             self.prompt_tokens += usage.prompt_tokens or 0
             self.completion_tokens += usage.completion_tokens or 0
@@ -56,6 +59,9 @@ class TokenCounter:
             details = getattr(usage, "completion_tokens_details", None)
             if details:
                 self.reasoning_tokens += getattr(details, "reasoning_tokens", 0) or 0
+            prompt_details = getattr(usage, "prompt_tokens_details", None)
+            if prompt_details:
+                self.cached_tokens += getattr(prompt_details, "cached_tokens", 0) or 0
 
     def snapshot(self) -> dict[str, int]:
         """Return current counters as a dict."""
@@ -66,6 +72,7 @@ class TokenCounter:
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "reasoning_tokens": self.reasoning_tokens,
+            "cached_tokens": self.cached_tokens,
             "call_count": self.call_count,
             "elapsed_ms": self.elapsed_ms,
         }
@@ -78,5 +85,6 @@ class TokenCounter:
         self.cache_read_tokens = 0
         self.cache_write_tokens = 0
         self.reasoning_tokens = 0
+        self.cached_tokens = 0
         self.call_count = 0
         self.elapsed_ms = 0

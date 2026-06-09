@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -240,7 +241,9 @@ def _init_skillhouse() -> None:
     try:
         from agenthatch.config import Config
         config = Config.load()
-    except Exception:
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("Failed to load existing config: %s", e)
         config = {}
 
     skillhouse_cfg = config.get("skillhouse", {}) if "skillhouse" in config else {}

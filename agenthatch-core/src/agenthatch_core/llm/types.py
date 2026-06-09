@@ -25,11 +25,3 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
-
-
-@dataclass
-class ToolCallResponse:
-    """Response from chat_with_tools."""
-    text: str | None
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    finish_reason: str | None = None

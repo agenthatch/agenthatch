@@ -9,17 +9,18 @@ Old config-driven SkillAgent.from_ahspec() path has been removed.
 from __future__ import annotations
 
 import sys
+import time
 import tomllib
 from importlib import util as _importlib_util
 from pathlib import Path
 from typing import Any, cast
 
 import typer
-from agenthatch_core.config import (  # type: ignore[import-untyped]
+from agenthatch_core.config import (
     inherit_api_key,
     resolve_runtime_config,
 )
-from agenthatch_core.loop.agent_loop import RichToolCallEvent  # type: ignore[import-untyped]
+from agenthatch_core.loop.agent_loop import RichToolCallEvent
 from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
@@ -296,10 +297,13 @@ def _run_interactive_tui(agent: Any) -> None:
                 snap = agent.token_counter.snapshot()
                 if snap["total_tokens"] > 0:
                     parts = [f"Tokens: {snap['total_tokens']:,}"]
+                    detail_parts = []
                     if snap["prompt_tokens"]:
-                        parts.append(f"(in: {snap['prompt_tokens']:,}")
+                        detail_parts.append(f"in: {snap['prompt_tokens']:,}")
                     if snap["completion_tokens"]:
-                        parts.append(f"out: {snap['completion_tokens']:,})")
+                        detail_parts.append(f"out: {snap['completion_tokens']:,}")
+                    if detail_parts:
+                        parts.append(f"({', '.join(detail_parts)})")
                     if snap.get("call_count"):
                         parts.append(f"[{snap['call_count']} calls]")
                     console.print(f"[dim]{' '.join(parts)}[/dim]")
@@ -315,6 +319,19 @@ def _stream_response(agent: Any, user_input: str) -> str:
     reasoning_lines: list[str] = []
     tool_status: dict[str, str] = {}
     frame_title = f"[bold bright_blue]{agent.identity.display_name}[/]"
+    start_time = time.monotonic()
+
+    def statusbar() -> str:
+        """Build the status bar line with live token/time info."""
+        parts: list[str] = []
+        if hasattr(agent, "token_counter"):
+            snap = agent.token_counter.snapshot()
+            if snap.get("total_tokens", 0) > 0:
+                parts.append(f"[dim]Tokens:[/] {snap['total_tokens']:,}")
+                parts.append(f"[dim]Calls:[/] {snap.get('call_count', 0)}")
+        elapsed = time.monotonic() - start_time
+        parts.append(f"[dim]⏱[/] {elapsed:.1f}s")
+        return " │ ".join(parts)
 
     def render() -> str:
         lines = [frame_title]
@@ -327,14 +344,11 @@ def _stream_response(agent: Any, user_input: str) -> str:
             lines.append(body)
         if not full_text and not reasoning_lines:
             lines.append("[dim]Thinking...[/dim]")
+        lines.append("")  # spacer
+        lines.append(statusbar())
         return "\n".join(lines)
 
-    def panel_title() -> str:
-        if not full_text and reasoning_lines:
-            return "Agent (thinking...)"
-        return "Agent"
-
-    with Live(Panel(render(), title=panel_title()), refresh_per_second=10) as live:
+    with Live(Panel(render(), title="Agent"), refresh_per_second=10) as live:
         gen = agent.chat_stream(user_input)
         final_text = ""
         while True:
@@ -356,7 +370,7 @@ def _stream_response(agent: Any, user_input: str) -> str:
             elif isinstance(event, str):
                 # event could be reasoning_content or content delta — both are strings
                 full_text.append(event)
-            live.update(Panel(render(), title=panel_title()))
+            live.update(Panel(render(), title="Agent"))
         live.update(Panel("[dim]✓ Done[/dim]", title="Agent"))
     return final_text or "".join(full_text) or "(no response)"
 
@@ -445,7 +459,7 @@ def _handle_config_command(agent: Any) -> str | None:
     runtime_path.write_text(tomli_w.dumps(cfg))
 
     # Instant apply: rebuild LLMClient
-    from agenthatch_core.llm.client import LLMClient  # type: ignore[import-untyped]
+    from agenthatch_core.llm.client import LLMClient
     agent.llm = LLMClient(
         provider=llm.get("provider", "deepseek"),
         model=llm.get("model", "deepseek-v4-pro"),

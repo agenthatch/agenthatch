@@ -229,11 +229,11 @@ class GenerateEngine:
         Returns None if classification fails (backward-compatible fallback).
         """
         try:
-            from agenthatch_core.bricks.archetypes import (  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.archetypes import (
                 SkillArchetype,
                 classify_skill,
             )
-            from agenthatch_core.bricks.manifest import (  # type: ignore[import-untyped]
+            from agenthatch_core.bricks.manifest import (
                 LoopKind,
                 SandboxTier,
             )

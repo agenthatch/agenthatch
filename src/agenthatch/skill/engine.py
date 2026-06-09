@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from agenthatch_core.llm.client import LLMClient
 from pydantic import ValidationError
 
-from agenthatch.skill.llm_client import LLMClient
 from agenthatch.skill.prompts import (
     ASSEMBLE_FEW_SHOT,
     ASSEMBLE_HARNESS_PERSONA,
@@ -827,8 +827,8 @@ class Orchestrator:
         self._large_model = large_model or default_model
         self._small_model = small_model or default_model
 
-        self._large_client = LLMClient(provider_name=provider_name, model=self._large_model)
-        self._small_client = LLMClient(provider_name=provider_name, model=self._small_model)
+        self._large_client = LLMClient(provider=provider_name, model=self._large_model)
+        self._small_client = LLMClient(provider=provider_name, model=self._small_model)
 
         self._provider_name = provider_name
 

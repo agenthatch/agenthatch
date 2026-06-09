@@ -97,7 +97,7 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
     Uses a named logger + RichHandler instead of logging.basicConfig,
     so only agenthatch's own logs are affected, not dependencies.
 
-    verbose=0: WARNING (default)
+    verbose=0: ERROR (default)
     verbose=1: INFO
     verbose>=2: DEBUG
     quiet=True: ERROR only (overrides verbose)

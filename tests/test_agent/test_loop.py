@@ -5,12 +5,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from agenthatch_core.context.manager import ContextManager
+from agenthatch_core.llm.client import LLMClient, ToolCallResponse
+from agenthatch_core.llm.types import StreamDelta, ToolCall
+from agenthatch_core.loop.agent_loop import ConversationLoop, RichToolCallEvent
 
-from agenthatch.agent.context import ContextManager
-from agenthatch.agent.loop import ConversationLoop, RichToolCallEvent
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.cap.bus import CapBus
-from agenthatch.skill.llm_client import LLMClient, StreamDelta, ToolCall, ToolCallResponse
 from agenthatch.skill.spec import (
     AHSSpec,
     BaseSpec,
