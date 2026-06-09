@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -73,12 +74,47 @@ class Checkpoint:
 
 
 class CheckpointManager:
-    """Saves and restores conversation state."""
+    """Saves and restores conversation state.
+
+    v0.7.6: Per-skill process lock via fcntl.flock() prevents checkpoint
+    corruption when the same skill is run twice from the same directory.
+    Different skills from the same directory run concurrently without blocking.
+    """
 
     def __init__(self, session_dir: Path):
         self._dir = session_dir
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path = self._dir / "checkpoint.json"
+        self._lock_path = self._dir / ".lock"
+        self._lock_fd: int | None = None
+        self._acquire_lock()
+
+    def _acquire_lock(self) -> None:
+        """Acquire per-skill lock on startup.
+
+        Uses fcntl.flock() which is kernel-managed — auto-released on
+        process exit (even on crash). Non-blocking: raises RuntimeError
+        immediately if the same skill is already running in this directory.
+        """
+        fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise RuntimeError(
+                f"Skill '{self._dir.name}' is already running in this directory. "
+                f"Wait for the other session to exit or use a different working directory."
+            ) from None
+        self._lock_fd = fd
+
+    def __del__(self) -> None:
+        """Best-effort lock release on clean exit."""
+        if self._lock_fd is not None:
+            try:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                os.close(self._lock_fd)
+            except OSError:
+                pass
 
     def save(self, checkpoint: Checkpoint) -> None:
         checkpoint.saved_at = datetime.now().isoformat()

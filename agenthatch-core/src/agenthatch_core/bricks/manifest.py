@@ -50,3 +50,6 @@ class BrickManifest:
 
     # v0.7: guard_active — skip OutputGuard.validate() for prompt-only skills
     guard_active: bool = False
+
+    # v0.7.6: memory — enable persistent MemoryBrick (default-on, opt-out)
+    memory: bool = True

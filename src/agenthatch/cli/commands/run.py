@@ -13,7 +13,7 @@ import time
 import tomllib
 from importlib import util as _importlib_util
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import typer
 from agenthatch_core.config import (
@@ -74,8 +74,11 @@ def run_command(
     from agenthatch_core.config import inherit_api_key
     runtime_config = inherit_api_key(runtime_config)
 
-    # 5. In-process launch
-    _launch(agent_dir, skill_name, runtime_config)
+    # 5. Resolve API key source for startup indicator
+    key_source = _resolve_key_source(api_key, runtime_config, agent_dir)
+
+    # 6. In-process launch
+    _launch(agent_dir, skill_name, runtime_config, key_source)
 
 
 # ── Agent Discovery ─────────────────────────────────────────────────────────
@@ -172,12 +175,62 @@ def _load_runtime_toml(agent_dir: Path) -> dict[str, Any]:
         return {}
     raw = tomllib.loads(toml_path.read_text())
     resolved = resolve_runtime_config(raw)
-    return cast("dict[str, Any]", inherit_api_key(resolved))
+    return inherit_api_key(resolved)
+
+
+def _resolve_key_source(
+    cli_key: str | None,
+    runtime_config: dict[str, Any],
+    agent_dir: Path,
+) -> str:
+    """Determine which source provided the active API key.
+
+    Returns a human-readable string like "CLI flag", "runtime.toml", etc.
+    """
+    import os
+
+    llm = runtime_config.get("llm", {})
+    active_key = llm.get("api_key", "")
+
+    if not active_key:
+        return "none (no key configured)"
+
+    # CLI flag has highest priority
+    if cli_key:
+        return "CLI flag (--api-key)"
+
+    # Check if runtime.toml has an api_key entry
+    toml_path = agent_dir / "runtime.toml"
+    if toml_path.exists():
+        toml_cfg = tomllib.loads(toml_path.read_text())
+        toml_key = toml_cfg.get("llm", {}).get("api_key", "")
+        if toml_key and toml_key == active_key:
+            return "runtime.toml (per-agent override)"
+
+    # Check global config
+    global_config = Path.home() / ".agenthatch" / "config.toml"
+    if global_config.exists():
+        gcfg = tomllib.loads(global_config.read_text())
+        provider = gcfg.get("providers", {}).get("default", "")
+        provider_cfg = gcfg.get("providers", {}).get(provider, {})
+        global_key = provider_cfg.get("api_key", "")
+        if global_key and global_key == active_key:
+            return "agenthatch global config"
+
+    # Check environment variables
+    env_vars = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    for var in env_vars:
+        if os.environ.get(var) == active_key:
+            return f"environment variable ({var})"
+
+    return "runtime.toml"
 
 
 # ── In-Process Launch ───────────────────────────────────────────────────────
 
-def _launch(agent_dir: Path, skill_name: str, runtime_config: dict[str, Any]) -> None:
+def _launch(
+    agent_dir: Path, skill_name: str, runtime_config: dict[str, Any], key_source: str = ""
+) -> None:
     """Launch the Agent in-process with Rich Live TUI.
 
     Uses sys.path injection + importlib to import the Agent class,
@@ -235,7 +288,7 @@ def _launch(agent_dir: Path, skill_name: str, runtime_config: dict[str, Any]) ->
 
         # Instantiate and run
         agent = AgentClass(runtime_config=runtime_config)
-        _run_interactive_tui(agent)
+        _run_interactive_tui(agent, key_source)
 
     finally:
         if path_injected:
@@ -244,13 +297,13 @@ def _launch(agent_dir: Path, skill_name: str, runtime_config: dict[str, Any]) ->
 
 # ── Interactive TUI ─────────────────────────────────────────────────────────
 
-def _run_interactive_tui(agent: Any) -> None:
+def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     """Rich Live TUI for interactive Agent conversation.
 
     This is the premium TUI experience preserved from v0.5:
     - Streaming text rendering via Rich Live
     - Tool call status display (running/done/elapsed)
-    - /commands support (/help, /compact, /clear, /quit)
+    - /commands support (/help, /compact, /clear, /quit, /key-source)
     """
     console.print(
         Panel(
@@ -259,6 +312,8 @@ def _run_interactive_tui(agent: Any) -> None:
             title="Agent", border_style="bright_blue"
         )
     )
+    if key_source:
+        console.print(f"[dim]API key: {key_source}[/dim]")
     console.print("[dim]Type /help for commands, /quit or Ctrl+D to exit[/dim]")
     console.print()
 
@@ -392,6 +447,8 @@ def _handle_command(user_input: str, agent: Any) -> str | None:
         return _render_status(agent)
     elif cmd == "/config":
         return _handle_config_command(agent)
+    elif cmd == "/key-source":
+        return _handle_key_source_command(agent)
     elif cmd == "/compact":
         try:
             agent.ctx.compact(
@@ -465,7 +522,18 @@ def _handle_config_command(agent: Any) -> str | None:
         model=llm.get("model", "deepseek-v4-pro"),
         api_key=llm.get("api_key"),
     )
-    return "[bold green]Configuration updated and applied[/bold green]"
+
+    # Show key source
+    if choice == "3":
+        key_src = "runtime.toml (per-agent override)"
+    elif llm.get("api_key"):
+        key_src = "runtime.toml (per-agent override)"
+    else:
+        key_src = "agenthatch global config"
+    return (
+        f"[bold green]✓ Configuration updated and applied[/bold green]\n"
+        f"  Source: {key_src}"
+    )
 
 
 def _find_agent_dir_for_config(agent: Any) -> Path | None:
@@ -483,18 +551,87 @@ def _find_agent_dir_for_config(agent: Any) -> Path | None:
     return None
 
 
+def _handle_key_source_command(agent: Any) -> str:
+    """Display the API key resolution chain with active source marked."""
+    import os
+
+    lines = ["[bold]API Key Resolution:[/bold]", ""]
+
+    # CLI flag (session-only, checked during launch)
+    lines.append("  - --api-key CLI flag (session-only)")
+
+    # runtime.toml
+    agent_dir = _find_agent_dir_for_config(agent)
+    runtime_has_key = False
+    if agent_dir:
+        toml_path = agent_dir / "runtime.toml"
+        if toml_path.exists():
+            toml_cfg = tomllib.loads(toml_path.read_text())
+            runtime_key = toml_cfg.get("llm", {}).get("api_key", "")
+            if runtime_key:
+                runtime_has_key = True
+
+    if runtime_has_key:
+        lines.append("  [bold green]✓ runtime.toml api_key[/]  ← active")
+    else:
+        lines.append("  - runtime.toml api_key (not set)")
+
+    # Global config
+    global_config = Path.home() / ".agenthatch" / "config.toml"
+    global_has_key = False
+    if global_config.exists():
+        try:
+            gcfg = tomllib.loads(global_config.read_text())
+            provider = gcfg.get("providers", {}).get("default", "")
+            provider_cfg = gcfg.get("providers", {}).get(provider, {})
+            if provider_cfg.get("api_key"):
+                global_has_key = True
+        except Exception:
+            pass
+
+    if global_has_key and not runtime_has_key:
+        lines.append("  [bold green]✓ ~/.agenthatch/config.toml[/]  ← active")
+    elif global_has_key:
+        lines.append("  - ~/.agenthatch/config.toml (shadowed by runtime.toml)")
+    else:
+        lines.append("  - ~/.agenthatch/config.toml (not configured)")
+
+    # Environment variables
+    env_vars = {
+        "DEEPSEEK_API_KEY": "deepseek",
+        "OPENAI_API_KEY": "openai",
+        "ANTHROPIC_API_KEY": "anthropic",
+    }
+    env_active = False
+    for var in env_vars:
+        if os.environ.get(var):
+            env_active = True
+            break
+
+    if env_active:
+        lines.append("  - Environment variable (configured)")
+    else:
+        lines.append("  - Environment variable (not set)")
+
+    lines.append("")
+    lines.append("[dim]Resolution order: CLI flag → runtime.toml → global config → env var[/dim]")
+
+    return "\n".join(lines)
+
+
 def _render_help(agent: Any) -> str:
     lines = [
         f"[bold bright_blue]{agent.identity.display_name}[/]"
         f" — {agent._raw_spec.get('intent', {}).get('summary', 'No summary')}",
         "",
         "[bold]Available commands:[/bold]",
-        "  [bold cyan]/help[/]      Show this help",
-        "  [bold cyan]/clear[/]     Clear conversation history",
-        "  [bold cyan]/status[/]    Show provider/model info",
-        "  [bold cyan]/config[/]    Configure API key, provider, or model",
-        "  [bold cyan]/compact[/]   Trigger context compaction",
-        "  [bold cyan]/quit[/]      Exit (or Ctrl+D)",
+        "  [bold cyan]/help[/]       Show this help",
+        "  [bold cyan]/clear[/]      Clear conversation history",
+        "  [bold cyan]/status[/]     Show provider/model info",
+        "  [bold cyan]/config[/]     Configure API key, provider, or model",
+        "  [bold cyan]/key-source[/] Show API key resolution chain",
+        "  [bold cyan]/compact[/]    Trigger context compaction",
+        "  [bold cyan]/quit[/]       Exit (or Ctrl+D)",
     ]
     return "\n".join(lines)
 

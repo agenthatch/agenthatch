@@ -121,6 +121,7 @@ class Capability(BaseModel):
     capability: str    # snake_case, globally unique
     type: CAPABILITY_TYPES
     input_schema: dict[str, Any] = {}
+    output_schema: dict[str, Any] = {}   # v0.7.6: JSON Schema for tool output validation
 
 
 class MCPServerRef(BaseModel):

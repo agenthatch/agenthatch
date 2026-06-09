@@ -71,6 +71,10 @@ class AHCoreAgent:
         # OutputGuard (v0.7) — compiled regex validators from ANCHOR_RULES
         self.guard: Any = self._manifest.guard
 
+        # v0.7.6: Wire guard to CapBus for pre-tool validation
+        if self._manifest.guard_active and self.guard is not None:
+            self.capbus._guard = self.guard
+
         # CredentialVault + APITemplateExecutor (v0.7)
         self.vault: Any = None
         if self._manifest.credential_vault:
@@ -87,11 +91,28 @@ class AHCoreAgent:
         from agenthatch_core.loop.token_counter import TokenCounter
         self.token_counter = TokenCounter()
 
+        # MemoryBrick (v0.7.6) — persistent memory, default-on
+        self._memory: Any = None
+        if self._manifest.memory:
+            try:
+                from agenthatch_core.bricks.memory import MemoryBrick
+                self._memory = MemoryBrick(identity.id)
+                # Inject recall tool into CapBus
+                from agenthatch_core.bricks.memory.tools import recall_tool
+                recall = recall_tool(self._memory)
+                self.capbus.inject_builtin("recall", recall)
+            except ImportError:
+                logger.warning("MemoryBrick not available; memory disabled for this session.")
+
         # Build raw spec from yaml or fallback constants
         self._raw_spec = self._build_raw_spec(identity, spec_path)
 
         # Context manager (needs spec before runtime config)
         self.ctx = ContextManager(spec=self._raw_spec)
+
+        # v0.7.6: Wire memory brick into context manager for system prompt injection
+        if self._memory is not None:
+            self.ctx._memory = self._memory
 
         # Apply runtime config (creates LLM client)
         if runtime_config:
@@ -230,6 +251,10 @@ class AHCoreAgent:
                 },
                 source="spec",
             )
+            # v0.7.6: Register output_schema for tool output validation
+            output_schema = cap.get("output_schema")
+            if output_schema:
+                self.capbus._output_schemas[cap_name] = output_schema
 
         # 2. requires → builtin injection or mark unavailable
         for req in requires:

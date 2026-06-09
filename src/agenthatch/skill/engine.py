@@ -818,7 +818,7 @@ class Orchestrator:
             large_model: Override for large model tier (empty = use default).
             small_model: Override for small model tier (empty = use default).
         """
-        from agenthatch.providers import get_provider
+        from agenthatch.providers import get_provider, resolve_api_key
 
         provider_name = config.get("providers", {}).get("default", "openai")
         provider_info = get_provider(provider_name)
@@ -827,8 +827,14 @@ class Orchestrator:
         self._large_model = large_model or default_model
         self._small_model = small_model or default_model
 
-        self._large_client = LLMClient(provider=provider_name, model=self._large_model)
-        self._small_client = LLMClient(provider=provider_name, model=self._small_model)
+        api_key = resolve_api_key(provider_name, config=config, prompt=True)
+
+        self._large_client = LLMClient(
+            provider=provider_name, model=self._large_model, api_key=api_key
+        )
+        self._small_client = LLMClient(
+            provider=provider_name, model=self._small_model, api_key=api_key
+        )
 
         self._provider_name = provider_name
 

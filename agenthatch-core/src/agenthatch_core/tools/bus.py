@@ -39,6 +39,8 @@ class CapBus:
     unavailable: set[str] = field(default_factory=set)
     _external_handlers: dict[str, Callable[..., str]] = field(default_factory=dict)
     _external_schemas: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _guard: Any = None  # v0.7.6: CompiledGuard for pre-tool validation
+    _output_schemas: dict[str, dict[str, Any]] = field(default_factory=dict)  # v0.7.6
 
     def register(
         self,
@@ -75,6 +77,15 @@ class CapBus:
         if tool_name == "task_complete":
             return "Task completed."
 
+        # v0.7.6: Pre-tool validation via CompiledGuard
+        if self._guard is not None:
+            allowed, msg = self._guard.check_pre_tool_call(tool_name, arguments)
+            if not allowed:
+                logger.warning("Pre-tool validation blocked: %s -> %s", tool_name, msg)
+                return f"Error: {msg}"
+
+        result: str | None = None
+
         # 1. Check capabilities
         cap = self.capabilities.get(tool_name)
         if cap is None:
@@ -82,32 +93,38 @@ class CapBus:
 
         if cap is not None and cap.executor is not None:
             try:
-                return str(cap.executor(arguments))
+                result = str(cap.executor(arguments))
             except Exception as e:
                 logger.warning("Tool '%s' execution failed: %s", tool_name, e)
                 return f"Error executing tool '{tool_name}': {e}"
 
         # 2. Check builtins
-        if tool_name in self.builtins:
+        if result is None and tool_name in self.builtins:
             builtin = self.builtins[tool_name]
             if hasattr(builtin, "execute"):
                 try:
-                    return str(builtin.execute(**arguments))
+                    result = str(builtin.execute(**arguments))
                 except Exception as e:
                     return f"Error executing builtin '{tool_name}': {e}"
 
         # 3. Check external handlers
-        if tool_name in self._external_handlers:
+        if result is None and tool_name in self._external_handlers:
             try:
-                return str(self._external_handlers[tool_name](**arguments))
+                result = str(self._external_handlers[tool_name](**arguments))
             except Exception as e:
                 return f"Error executing external tool '{tool_name}': {e}"
 
         # 4. Check unavailable
-        if tool_name in self.unavailable:
+        if result is None and tool_name in self.unavailable:
             return f"Tool '{tool_name}' is not available in this agent."
 
-        raise CapabilityNotFoundError(f"Tool '{tool_name}' not found on CapBus")
+        if result is None:
+            raise CapabilityNotFoundError(f"Tool '{tool_name}' not found on CapBus")
+
+        # v0.7.6: Validate tool output against output_schema
+        result = self._validate_output(tool_name, result)
+
+        return result
 
     def list_tool_definitions(self) -> list[ToolDefinition]:
         """List all tool definitions for LLM function calling."""
@@ -175,6 +192,45 @@ class CapBus:
     def mark_unavailable(self, name: str) -> None:
         """Mark a tool as unavailable."""
         self.unavailable.add(name)
+
+    def _validate_output(self, tool_name: str, result: str) -> str:
+        """v0.7.6: Validate tool output against output_schema if configured.
+
+        Checks that the result is valid JSON and field types match the
+        declared schema. Catches formatting errors before they confuse the LLM.
+        """
+        import json
+
+        output_schema = self._output_schemas.get(tool_name)
+        if output_schema is None:
+            return result
+
+        try:
+            data = json.loads(result)
+        except json.JSONDecodeError as e:
+            logger.warning("Tool %s output JSON decode failed: %s", tool_name, e)
+            return f"Error: Tool '{tool_name}' output was not valid JSON: {e}"
+
+        if isinstance(data, dict) and "properties" in output_schema:
+            _JSON_TYPE_MAP = {
+                "str": "string", "int": "integer", "float": "number",
+                "bool": "boolean", "list": "array", "dict": "object",
+            }
+            for key, spec in output_schema["properties"].items():
+                expected = spec.get("type", "string")
+                if key in data:
+                    actual = _JSON_TYPE_MAP.get(type(data[key]).__name__, "string")
+                    if actual != expected:
+                        logger.warning(
+                            "Tool %s output schema validation failed: field '%s' expected %s, got %s",
+                            tool_name, key, expected, actual,
+                        )
+                        return (
+                            f"Error: Tool '{tool_name}' output field '{key}' "
+                            f"expected {expected}, got {actual}"
+                        )
+
+        return json.dumps(data, indent=2)
 
 
 def _normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:

@@ -12,8 +12,5 @@ dependencies = [
     "rich>=13.0",
 ]
 
-[project.scripts]
-{{ agent_name }} = "{{ package_name }}.cli:app"
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/{{ package_name }}"]

@@ -1,9 +1,11 @@
-"""OutputGuard — compiled regex validators from ANCHOR_RULES.
+"""CompiledGuard — compiled regex validators from ANCHOR_RULES.
 
 Level 0 — converts declarative safety rules into executable code.
 Not prompt-based: these are real regex validators that run against
-LLM output before returning to the user.
+LLM output before returning to the user and against tool call arguments
+before execution.
 
+v0.7.6: Unified guard — output validation + pre-tool-call validation.
 guard_active boolean on BrickManifest controls whether validate() is
 called at all — prompt-only skills with no sensitive data skip it.
 """
@@ -20,6 +22,8 @@ class GuardRule:
     pattern: str
     description: str
     action: str = "redact"  # "redact" | "block" | "warn"
+    scope: str = "output"   # "output" | "pre_tool" | "both"
+    blocked_tools: list[str] = field(default_factory=list)
     replacement: str = "***"
     _compiled: re.Pattern[str] | None = field(default=None, repr=False)
 
@@ -77,20 +81,27 @@ _BUILTIN_SECURITY_PATTERNS: list[GuardRule] = _compile_builtin_patterns()
 
 
 @dataclass
-class OutputGuard:
-    """Compiled output validator from ANCHOR_RULES.
+class CompiledGuard:
+    """Unified guard: output validation + pre-tool-call validation.
+
+    Compiled from declarative rules in agenthatch.yaml instructions.rules.
+    Replaces OutputGuard (v0.7.5) with added pre-tool validation.
 
     Usage:
-        guard = OutputGuard.from_rules([
+        guard = CompiledGuard.from_rules([
             {"pattern": r"\\b\\d{16}\\b", "description": "Credit card number",
              "action": "redact", "replacement": "***CC***"},
+            {"pattern": "delete|remove", "description": "Never delete",
+             "scope": "pre_tool", "blocked_tools": ["delete_document"]},
         ])
-        cleaned, violations = guard.validate(output_text)
+        cleaned, violations = guard.validate_output(output_text)
+        allowed, msg = guard.check_pre_tool_call(tool_name, arguments)
     """
 
-    rules: list[GuardRule] = field(default_factory=list)
+    output_rules: list[GuardRule] = field(default_factory=list)
+    pre_rules: list[GuardRule] = field(default_factory=list)
 
-    def validate(self, text: str) -> tuple[str, list[str]]:
+    def validate_output(self, text: str) -> tuple[str, list[str]]:
         """Validate and clean output text.
 
         Returns:
@@ -99,7 +110,7 @@ class OutputGuard:
         violations: list[str] = []
         cleaned = text
 
-        for rule in self.rules:
+        for rule in self.output_rules:
             if rule.action == "block" and rule.matches(cleaned):
                 violations.append(f"BLOCKED: {rule.description}")
                 return "", violations
@@ -114,29 +125,79 @@ class OutputGuard:
 
         return cleaned, violations
 
+    # Backward compatibility alias
+    def validate(self, text: str) -> tuple[str, list[str]]:
+        """Backward-compatible alias for validate_output()."""
+        return self.validate_output(text)
+
+    def check_pre_tool_call(self, tool_name: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+        """Check before tool execution. Returns (allowed, rejection_message)."""
+        # 1. Check if this tool is blocked by any pre_tool rule
+        for rule in self.pre_rules:
+            if tool_name in rule.blocked_tools:
+                return False, f"Blocked: {rule.description}"
+
+        # 2. Search arguments for forbidden patterns
+        for rule in self.pre_rules:
+            if rule._compiled is None:
+                continue
+            if self._search_recursive(arguments, rule._compiled):
+                return False, f"Blocked: {rule.description}"
+
+        return True, ""
+
+    @staticmethod
+    def _search_recursive(obj: Any, pattern: re.Pattern) -> bool:
+        """Recursively search for pattern in nested dicts/lists/strings."""
+        if isinstance(obj, str):
+            return bool(pattern.search(obj))
+        if isinstance(obj, dict):
+            return any(CompiledGuard._search_recursive(v, pattern) for v in obj.values())
+        if isinstance(obj, list):
+            return any(CompiledGuard._search_recursive(item, pattern) for item in obj)
+        return False
+
     @classmethod
-    def from_rules(cls, rules: list[dict[str, str] | str]) -> OutputGuard:
-        """Create OutputGuard from declarative rule dicts or simple strings.
+    def from_rules(cls, rules: list[dict[str, Any] | str]) -> CompiledGuard:
+        """Create CompiledGuard from declarative rule dicts or simple strings.
 
         Each rule can be:
-        - A dict with 'pattern' (regex), 'description', optional 'action'/'replacement'
+        - A dict with 'pattern', 'description', optional 'action'/'scope'/'blocked_tools'
         - A plain string (treated as text guideline — logged but not matched)
 
-        String-only rules are skipped during validation (they're guidelines,
-        not regex patterns). Only dict rules with valid patterns are compiled.
-
+        String-only rules are skipped during compilation.
         Built-in security patterns (API key leaks, tokens, credentials) are
-        always included regardless of skill rules.
+        always included in output_rules.
         """
-        compiled = list(_BUILTIN_SECURITY_PATTERNS)  # always include
+        output_rules: list[GuardRule] = list(_BUILTIN_SECURITY_PATTERNS)
+        pre_rules: list[GuardRule] = []
+
         for r in rules:
             if isinstance(r, str):
                 continue
             if isinstance(r, dict) and "pattern" in r:
-                compiled.append(GuardRule(
+                scope = r.get("scope", "output")
+                compiled = GuardRule(
                     pattern=r["pattern"],
                     description=r.get("description", r["pattern"]),
                     action=r.get("action", "redact"),
+                    scope=scope,
+                    blocked_tools=r.get("blocked_tools", []),
                     replacement=r.get("replacement", "***"),
-                ))
-        return cls(rules=compiled)
+                )
+                if scope in ("output", "both"):
+                    output_rules.append(compiled)
+                if scope in ("pre_tool", "both"):
+                    pre_rules.append(compiled)
+                # If scope is "both", intentionally append to both lists
+
+        return cls(output_rules=output_rules, pre_rules=pre_rules)
+
+    @property
+    def rules(self) -> list[GuardRule]:
+        """Backward-compatible access: returns output_rules."""
+        return self.output_rules
+
+
+# Backward-compatible alias for one release
+OutputGuard = CompiledGuard

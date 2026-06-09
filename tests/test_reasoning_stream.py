@@ -329,7 +329,8 @@ class TestToolCallResponseReasoningFallback:
         mock_openai_client = MagicMock()
         monkeypatch.setattr(openai, "OpenAI", lambda **kw: mock_openai_client)
 
-        client = LLMClient(provider="openai", model="test-model", api_key="sk-mock")  # openai doesn't support reasoning_content
+        # openai doesn't support reasoning_content
+        client = LLMClient(provider="openai", model="test-model", api_key="sk-mock")
 
         mock_msg = MagicMock()
         mock_msg.content = ""

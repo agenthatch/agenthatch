@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 TEMPLATE_MAP: dict[str, str] = {
     "pyproject.toml.j2": "pyproject.toml",
     "agent.py.j2": "src/{package_name}/agent.py",
-    "cli.py.j2": "src/{package_name}/cli.py",
     "tools.py.j2": "src/{package_name}/tools.py",
     "runtime.toml.j2": "runtime.toml",
     "README.md.j2": "README.md",
@@ -96,7 +95,9 @@ class GenerateEngine:
 
         # Workflow: can be a list of step dicts or a string
         workflow = instructions.get("workflow", "")
+        workflow_steps: list[dict[str, Any]] = []
         if isinstance(workflow, list):
+            workflow_steps = workflow
             workflow = self._format_workflow(workflow)
 
         output_tpl = instructions.get("output_template", "")
@@ -127,6 +128,7 @@ class GenerateEngine:
             "package_name": package_name,
             "description": description,
             "workflow": workflow,
+            "workflow_steps": workflow_steps,  # v0.7.6: structured for CompiledWorkflow
             "output_tpl": output_tpl,
             "rules": rules,
             "base_runtime": base_runtime,
@@ -292,6 +294,7 @@ class GenerateEngine:
             "guard_active": guard_active,
             "credential_vault": credential_vault,
             "file_processor": file_processor,
+            "memory": True,  # v0.7.6: default-on, opt-out via memory: false
             "archetype": archetype.value,
             "archetype_confidence": result.confidence,
         }

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import warnings
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
 from agenthatch_core.bricks.manifest import (
@@ -198,7 +198,7 @@ class SkillAgent:
 
         rules = list(spec.instructions.rules) if hasattr(spec.instructions, "rules") else []
         guard_active = bool(rules) and archetype != SkillArchetype.PROMPT_ONLY
-        guard = OutputGuard.from_rules(rules) if guard_active else None
+        guard = OutputGuard.from_rules(rules) if guard_active else None  # type: ignore[arg-type]
 
         return BrickManifest(
             loop_engine=loop_engine,
@@ -259,7 +259,7 @@ class SkillAgent:
                 SandboxWhitelist,
             )
             whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
-            self.sandbox._allowed_commands = whitelist.commands
+            self.sandbox._allowed_commands = whitelist.commands  # type: ignore[union-attr]
 
         # ── v0.5: Wire hooks + state management ──
         self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
@@ -298,10 +298,10 @@ class SkillAgent:
 
         self.loop = ConversationLoop(
             llm=self.llm,
-            capbus=self.capbus,
-            sandbox=self.sandbox,
+            capbus=self.capbus,  # type: ignore[arg-type]
+            sandbox=self.sandbox,  # type: ignore[arg-type]
             ctx=self.ctx,
-            hooks=self.hooks,
+            hooks=self.hooks,  # type: ignore[arg-type]
             token_counter=self.token_counter,
         )
 
@@ -311,7 +311,7 @@ class SkillAgent:
 
         prior = self.state.load_summary()
         if prior:
-            self.ctx.summary = prior
+            self.ctx.summary = prior  # type: ignore[assignment]
             logger.info(
                 "Restored prior session summary: %d turns from %s",
                 prior.conversation_turns, prior.compressed_at
@@ -337,7 +337,7 @@ class SkillAgent:
         if api_key:
             resolved_api_key = api_key
         else:
-            resolved_api_key = resolve_api_key(resolved_provider, prompt=True)
+            resolved_api_key = resolve_api_key(resolved_provider, prompt=True)  # type: ignore[assignment]
 
         resolved: dict[str, Any] = {
             "provider": resolved_provider,
@@ -557,7 +557,7 @@ class SkillAgent:
                     unknown = set(summary_dict.keys()) - known_fields
                     for k in unknown:
                         summary_dict.pop(k, None)
-                    self.ctx.summary = CompactSummary(**summary_dict)
+                    self.ctx.summary = CompactSummary(**summary_dict)  # type: ignore[assignment]
                 self.ctx._consecutive_compact_failures = cp.compact_failures
                 self.ctx._turn_count = cp.turn_count
                 self.loop._cb_state = cp.cb_state
@@ -601,7 +601,7 @@ class SkillAgent:
             if cleaned:
                 result = cleaned
 
-        return cast("str", result)
+        return result
 
     def chat_stream(self, user_input: str) -> Any:
         """Streaming chat for TUI consumption."""

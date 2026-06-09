@@ -94,6 +94,7 @@ class ContextManager:
         self._batch_current: int = 0
         self._capbus: Any = None
         self._rich_prompt: bool = False
+        self._memory: Any = None  # v0.7.6: MemoryBrick reference
 
         self._apply_compact_config()
 
@@ -225,6 +226,19 @@ class ContextManager:
                 parts.append("")
                 parts.append("## Available External Tools")
                 parts.extend(external_tools)
+
+        # v0.7.6: Inject persistent memory into system prompt
+        if self._memory is not None:
+            memory_section = self._memory.inject_into_context(max_tokens=1000)
+            if memory_section:
+                parts.append("")
+                parts.append("## Agent Memory (from previous sessions)")
+                parts.append(memory_section)
+                parts.append("")
+                parts.append(
+                    "Use the `recall` tool to search your memory for "
+                    "specific information from past sessions."
+                )
 
         # Language directive is now at the TOP of the system prompt (see above)
 
