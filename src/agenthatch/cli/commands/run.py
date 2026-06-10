@@ -434,7 +434,37 @@ def _stream_response(agent: Any, user_input: str) -> str:
                 full_text.append(event)
             live.update(Panel(render(), title="Agent"))
         live.update(Panel("[dim]✓ Done[/dim]", title="Agent"))
+        # v0.7.10: Build done-state footer with accumulated observability
+        done_footer = _build_done_footer(agent, start_time)
+        if done_footer:
+            console.print(done_footer)
     return final_text or "".join(full_text) or "(no response)"
+
+
+def _build_done_footer(agent: Any, start_time: float) -> str | None:
+    """v0.7.10: Build observability footer for done state.
+
+    Shows accumulated tokens (in/out/total) and elapsed time,
+    preventing the "vanishing tokens" bug where info disappeared
+    when status changed from running to done.
+    """
+    parts: list[str] = []
+    elapsed = time.monotonic() - start_time
+    parts.append(f"[dim]⏱ {elapsed:.2f}s[/dim]")
+
+    if hasattr(agent, "token_counter"):
+        snap = agent.token_counter.snapshot()
+        total = snap.get("total_tokens", 0)
+        if total > 0:
+            prompt_tok = snap.get("prompt_tokens", 0)
+            completion_tok = snap.get("completion_tokens", 0)
+            call_count = snap.get("call_count", 0)
+            tok_detail = f"in: {prompt_tok:,} / out: {completion_tok:,}"
+            parts.append(f"[dim]Tokens: {total:,} ({tok_detail}) [{call_count} calls][/dim]")
+
+    if len(parts) <= 1:
+        return None
+    return " │ ".join(parts)
 
 
 # ── /commands ───────────────────────────────────────────────────────────────

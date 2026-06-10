@@ -211,7 +211,7 @@ def _render_phase3_result(
         )
     else:
         console.print(
-            f"[ok]✓[/ok]  {file_count} files generated in {elapsed:.1f} seconds"
+            f"[ok]✓[/ok]  {file_count} files generated in {elapsed:.2f} seconds"
         )
         if trace and written_files:
             for f in sorted(written_files):
@@ -445,7 +445,21 @@ def hatch_command(
     else:
         ahs_spec.agent.status = "not_generated"
 
-    # ── 11. Write agenthatch.yaml ───────────────────────────────────────
+    # ── 11. Phase 3 header (v0.7.10: print before work to eliminate gap) ─
+    if no_generate:
+        console.print(
+            "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](skipped)[/dim]"
+        )
+        return
+
+    if dry_run:
+        console.print(
+            "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](dry-run)[/dim]"
+        )
+    else:
+        console.print("[accent]▸ Phase 3/3[/accent]  Agent Generation")
+
+    # ── 12. Write agenthatch.yaml ───────────────────────────────────────
     if not dry_run:
         yaml_output_path = _resolve_yaml_path(skill_dir, output)
         if yaml_output_path.exists() and not force:
@@ -469,20 +483,7 @@ def hatch_command(
         # ── Register in skillhouse.json ─────────────────────────────────
         _register_skillhouse(ahs_spec, yaml_output_path, config)
 
-    # ── 12. Phase 3: Agent Generation ───────────────────────────────────
-    if no_generate:
-        console.print(
-            "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](skipped)[/dim]"
-        )
-        return
-
-    if dry_run:
-        console.print(
-            "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](dry-run)[/dim]"
-        )
-    else:
-        console.print("[accent]▸ Phase 3/3[/accent]  Agent Generation")
-
+    # ── 13. Phase 3: Run generation (header already printed above) ──────
     file_count, agent_output_dir, elapsed3 = _run_phase3_generate(
         ahs_spec=ahs_spec,
         skill_dir=skill_dir,

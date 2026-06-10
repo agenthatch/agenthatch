@@ -45,10 +45,7 @@ class TokenCounter:
             self.total_tokens += usage.get("total_tokens", 0)
             self.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
             self.cache_write_tokens += usage.get("cache_creation_input_tokens", 0)
-            self.reasoning_tokens += usage.get(
-                "reasoning_tokens",
-                usage.get("completion_tokens_details", {}).get("reasoning_tokens", 0),
-            )
+            self.reasoning_tokens += _safe_get_reasoning_tokens(usage)
             self.cached_tokens += usage.get("cached_tokens", 0)
         elif hasattr(usage, "prompt_tokens"):
             self.prompt_tokens += usage.prompt_tokens or 0
@@ -88,3 +85,24 @@ class TokenCounter:
         self.cached_tokens = 0
         self.call_count = 0
         self.elapsed_ms = 0
+
+
+def _safe_get_reasoning_tokens(usage: dict[str, Any]) -> int:
+    """Extract reasoning_tokens from usage dict, handling CompletionTokensDetails object.
+
+    v0.7.10: OpenAI returns CompletionTokensDetails as a Pydantic model,
+    not a plain dict. This helper handles both cases.
+    """
+    # Direct reasoning_tokens field (some providers)
+    direct = usage.get("reasoning_tokens", 0)
+    if isinstance(direct, int) and direct > 0:
+        return direct
+
+    # Nested under completion_tokens_details (OpenAI)
+    details = usage.get("completion_tokens_details")
+    if details is None:
+        return 0
+    if isinstance(details, dict):
+        return details.get("reasoning_tokens", 0)
+    # Object attribute access for Pydantic/OpenAI models
+    return getattr(details, "reasoning_tokens", 0) or 0

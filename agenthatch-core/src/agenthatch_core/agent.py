@@ -231,30 +231,57 @@ class AHCoreAgent:
             provides, resources, instructions, scripts_dir,
         )
 
-        # 1. provides → Sandbox script executors
+        # 1. provides → Sandbox script executors (only if sandbox is usable)
+        # v0.7.10: Skip script executor registration for MCP-only agents
+        # (SandboxTier.NONE) to prevent "script directory not found" errors.
+        sandbox_usable = (
+            self._manifest.sandbox != SandboxTier.NONE
+            and not isinstance(self.sandbox, _NullSandbox)
+        )
+
         for cap in provides:
             cap_name = cap.get("capability", cap.get("name", ""))
             if not cap_name:
                 continue
             schema = cap.get("input_schema", cap.get("schema", {}))
-            executor = _provide_script_executor(
-                cap_name, self.sandbox, self._agent_root,
-                script_name=cap_to_script.get(cap_name),
-            )
-            self.capbus.register(
-                name=cap_name,
-                executor=executor,
-                schema={
-                    "name": cap_name,
-                    "description": cap.get("description", cap_name),
-                    "parameters": schema.get("parameters", schema),
-                },
-                source="spec",
-            )
-            # v0.7.6: Register output_schema for tool output validation
-            output_schema = cap.get("output_schema")
-            if output_schema:
-                self.capbus._output_schemas[cap_name] = output_schema
+
+            if sandbox_usable:
+                executor = _provide_script_executor(
+                    cap_name, self.sandbox, self._agent_root,
+                    script_name=cap_to_script.get(cap_name),
+                )
+                self.capbus.register(
+                    name=cap_name,
+                    executor=executor,
+                    schema={
+                        "name": cap_name,
+                        "description": cap.get("description", cap_name),
+                        "parameters": schema.get("parameters", schema),
+                    },
+                    source="spec",
+                )
+                # v0.7.6: Register output_schema for tool output validation
+                output_schema = cap.get("output_schema")
+                if output_schema:
+                    self.capbus._output_schemas[cap_name] = output_schema
+            else:
+                # v0.7.10: For MCP-only agents, register as description-only.
+                # The actual tool is provided via MCP tools registered below.
+                # The unprefixed alias will be added after MCP registration.
+                self.capbus.register(
+                    name=cap_name,
+                    schema={
+                        "name": cap_name,
+                        "description": cap.get("description", cap_name),
+                        "parameters": schema.get("parameters", schema),
+                    },
+                    source="spec",
+                    cap_type="mcp_proxy",
+                )
+                # v0.7.6: Register output_schema for tool output validation
+                output_schema = cap.get("output_schema")
+                if output_schema:
+                    self.capbus._output_schemas[cap_name] = output_schema
 
         # 2. requires → builtin injection or mark unavailable
         for req in requires:
@@ -271,6 +298,29 @@ class AHCoreAgent:
         # 3. MCP servers → connect and register tools
         for mcp_cfg in mcp_servers:
             _register_mcp_tools(self.capbus, mcp_cfg)
+
+        # v0.7.10: For MCP-only agents, wire unprefixed aliases so the LLM
+        # can call tools by the names it learned from interface.provides.
+        if not sandbox_usable and mcp_servers:
+            for cap in provides:
+                cap_name = cap.get("capability", cap.get("name", ""))
+                if not cap_name:
+                    continue
+                # Only alias if the unprefixed name isn't already registered
+                if cap_name not in self.capbus.capabilities:
+                    continue
+                cap_entry = self.capbus.capabilities[cap_name]
+                if cap_entry.executor is not None:
+                    continue  # Already has a real executor
+                # Search MCP-prefixed names for a match
+                for mcp_cfg in mcp_servers:
+                    mcp_name = mcp_cfg.get("name", "")
+                    prefixed = f"mcp__{mcp_name}__{cap_name}"
+                    if prefixed in self.capbus.capabilities:
+                        mcp_cap = self.capbus.capabilities[prefixed]
+                        if mcp_cap.executor is not None:
+                            cap_entry.executor = mcp_cap.executor
+                            break
 
         # 4. API templates → api__<name> tools
         for tmpl in api_templates:
@@ -351,6 +401,25 @@ class AHCoreAgent:
                 result = cleaned
 
         return result
+
+    def chat_streaming(self, user_input: str) -> Generator[str, None, str]:
+        """v0.7.10: Stream response token-by-token without tool events.
+
+        Yields only text tokens (no RichToolCallEvent objects).
+        Use this when you want pure incremental text output,
+        e.g. for typewriter-effect rendering in a TUI.
+        """
+        gen = self.chat_stream(user_input)
+        final_text = ""
+        while True:
+            try:
+                event = next(gen)
+            except StopIteration as e:
+                final_text = e.value
+                break
+            if isinstance(event, str):
+                yield event
+        return final_text
 
     def chat_stream(
         self, user_input: str
