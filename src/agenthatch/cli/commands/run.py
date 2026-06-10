@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import sys
 import time
-import tomllib
+
+try:
+    import tomllib  # Python 3.11+ stdlib (H5 fix: guarded import)
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
 from importlib import util as _importlib_util
 from pathlib import Path
 from typing import Any

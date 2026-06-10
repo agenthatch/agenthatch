@@ -34,7 +34,7 @@ class DirectLoop:
         """Execute a single turn: build messages, call LLM, return result."""
         messages = self._ctx.build_messages(user_input)
         result = self._llm.chat(messages)
-        self._ctx.add_assistant_message(result)
+        self._ctx.add_to_history("assistant", result)
         self._record_usage()
         return result
 
@@ -48,7 +48,7 @@ class DirectLoop:
             yield chunk
 
         full_text = "".join(text_parts)
-        self._ctx.add_assistant_message(full_text)
+        self._ctx.add_to_history("assistant", full_text)
         self._record_usage()
         return full_text
 

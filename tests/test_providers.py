@@ -129,7 +129,7 @@ class TestVerifyApiKey:
         assert ok is False
         assert "401" in detail
 
-    def test_timeout_returns_uncertain(self, monkeypatch):
+    def test_timeout_returns_failure(self, monkeypatch):
         import httpx
 
         def _mock_timeout(*args, **kwargs):
@@ -137,8 +137,30 @@ class TestVerifyApiKey:
 
         monkeypatch.setattr("agenthatch.providers.httpx.get", _mock_timeout)
         ok, detail = verify_api_key("openai", "sk-test", "https://api.openai.com/v1")
-        assert ok is True  # uncertain, not failure
+        assert ok is False  # M1 fix: timeout → failure, not "uncertain"
         assert "timed out" in detail
+
+
+class TestDeepSeekBaseURL:
+    """C1 fix: deepseek base_url must include /v1 for OpenAI client compat."""
+
+    def test_base_url_has_v1_suffix(self):
+        from agenthatch.providers import BUILTIN_PROVIDERS
+        deepseek = BUILTIN_PROVIDERS["deepseek"]
+        assert deepseek.base_url == "https://api.deepseek.com/v1", (
+            "C1 regression: deepseek base_url must include /v1 suffix "
+            "for OpenAI client compatibility"
+        )
+
+    def test_openai_base_url_has_v1_suffix(self):
+        from agenthatch.providers import BUILTIN_PROVIDERS
+        openai_p = BUILTIN_PROVIDERS["openai"]
+        assert openai_p.base_url == "https://api.openai.com/v1"
+
+    def test_ollama_base_url_has_v1_suffix(self):
+        from agenthatch.providers import BUILTIN_PROVIDERS
+        ollama = BUILTIN_PROVIDERS["ollama"]
+        assert ollama.base_url == "http://localhost:11434/v1"
 
 
 class TestListProviders:

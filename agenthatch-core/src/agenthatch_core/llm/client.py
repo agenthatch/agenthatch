@@ -104,6 +104,15 @@ class LLMClient:
 
         import openai
 
+        if not base_url and provider != "openai":
+            logger.warning(
+                "No base_url configured for provider '%s'; "
+                "falling back to OpenAI endpoint. This is almost "
+                "certainly wrong — set base_url in your config or "
+                "pass it explicitly to LLMClient.",
+                provider,
+            )
+
         self._client = openai.OpenAI(
             api_key=api_key,
             base_url=base_url or "https://api.openai.com/v1",
@@ -183,9 +192,26 @@ class LLMClient:
         retryable_statuses: set[int] | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Call fn with exponential backoff on transient HTTP errors."""
+        """Call fn with exponential backoff on transient errors.
+
+        Retries on HTTP errors (429, 500, 502, 503, 504) AND on
+        timeout/connection errors (httpx.ReadTimeout, ConnectError,
+        openai.APITimeoutError, etc.) which have no status_code.
+        """
         if retryable_statuses is None:
             retryable_statuses = {429, 500, 502, 503, 504}
+
+        # Exception types that indicate transient network issues
+        _TIMEOUT_TYPES: tuple[type[Exception], ...] = ()
+        try:
+            import httpx
+            _TIMEOUT_TYPES = (
+                httpx.ReadTimeout, httpx.ConnectTimeout,
+                httpx.WriteTimeout, httpx.PoolTimeout,
+                httpx.RemoteProtocolError,
+            )
+        except ImportError:
+            pass
 
         for attempt in range(max_retries + 1):
             try:
@@ -196,7 +222,16 @@ class LLMClient:
                     or getattr(getattr(e, "response", None), "status_code", None)
                     or getattr(e, "code", None)
                 )
-                if status not in retryable_statuses:
+
+                # C4 fix: also retry on timeout/connection errors
+                # which have no HTTP status code
+                is_retryable = (
+                    status in retryable_statuses
+                    or isinstance(e, _TIMEOUT_TYPES)
+                    or "timeout" in str(type(e).__name__).lower()
+                )
+
+                if not is_retryable:
                     raise
                 if attempt == max_retries:
                     raise

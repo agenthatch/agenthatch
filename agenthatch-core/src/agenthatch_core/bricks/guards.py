@@ -33,8 +33,10 @@ class GuardRule:
         except re.error:
             self._compiled = None
 
-    def matches(self, text: str) -> bool:
+    def matches(self, text: str | None) -> bool:
         """Check if the pattern matches."""
+        if text is None:
+            return False
         return bool(self._compiled and self._compiled.search(text))
 
     def apply(self, text: str) -> tuple[str, bool]:
@@ -101,14 +103,14 @@ class CompiledGuard:
     output_rules: list[GuardRule] = field(default_factory=list)
     pre_rules: list[GuardRule] = field(default_factory=list)
 
-    def validate_output(self, text: str) -> tuple[str, list[str]]:
+    def validate_output(self, text: str | None) -> tuple[str, list[str]]:
         """Validate and clean output text.
 
         Returns:
             (cleaned_text, list_of_violation_descriptions)
         """
         violations: list[str] = []
-        cleaned = text
+        cleaned = text or ""
 
         for rule in self.output_rules:
             if rule.action == "block" and rule.matches(cleaned):
@@ -126,7 +128,7 @@ class CompiledGuard:
         return cleaned, violations
 
     # Backward compatibility alias
-    def validate(self, text: str) -> tuple[str, list[str]]:
+    def validate(self, text: str | None) -> tuple[str, list[str]]:
         """Backward-compatible alias for validate_output()."""
         return self.validate_output(text)
 

@@ -199,6 +199,51 @@ class TestAddToHistory:
         assert len(ctx.history) == 5
 
 
+class TestWorkflowNoteC5:
+    """C5 fix: _workflow_note must survive estimate_input_tokens()."""
+
+    def test_note_not_consumed_by_token_estimation(self, minimal_spec):
+        """estimate_input_tokens must not consume the one-shot workflow note."""
+        ctx = ContextManager(minimal_spec)
+        ctx._workflow_note = "## Current Step\nStep 3: Validate output"
+
+        # Token estimation should NOT consume the note
+        _tokens = ctx.estimate_input_tokens()
+
+        assert ctx._workflow_note != "", (
+            "C5 regression: estimate_input_tokens() consumed the one-shot "
+            "_workflow_note. The note must survive for the real build_system_prompt()."
+        )
+
+    def test_note_consumed_by_build_system_prompt(self, minimal_spec):
+        """build_system_prompt() should consume (clear) the one-shot note."""
+        ctx = ContextManager(minimal_spec)
+        ctx._workflow_note = "## Current Step\nStep 3: Validate output"
+
+        prompt = ctx.build_system_prompt()
+
+        assert ctx._workflow_note == "", (
+            "build_system_prompt() must clear _workflow_note after consumption"
+        )
+        assert "## Current Step" in prompt, (
+            "build_system_prompt() must inject the workflow note into the prompt"
+        )
+
+    def test_note_consumed_only_once(self, minimal_spec):
+        """Second call to build_system_prompt() should have no note."""
+        ctx = ContextManager(minimal_spec)
+        ctx._workflow_note = "## Current Step\nStep 3: Validate output"
+
+        first = ctx.build_system_prompt()
+        assert "## Current Step" in first
+        assert ctx._workflow_note == ""
+
+        second = ctx.build_system_prompt()
+        assert "## Current Step" not in second, (
+            "Second build_system_prompt() should not contain the consumed note"
+        )
+
+
 class TestHistoryWindow:
     """Test max_history_turns truncation."""
 

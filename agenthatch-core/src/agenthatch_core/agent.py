@@ -421,6 +421,11 @@ class AHCoreAgent:
             )
         if isinstance(ahspec, dict):
             agent._raw_spec.update(ahspec)
+            # H4 fix: rebuild runtime tools AFTER spec is populated.
+            # _build_runtime_tools() in __init__ runs against the empty
+            # fallback spec; we must re-run it with the real spec so
+            # provides, requires, and MCP servers are registered.
+            agent._build_runtime_tools()
         return agent
 
 

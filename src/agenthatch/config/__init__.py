@@ -45,7 +45,7 @@ default_model = "claude-sonnet-4-20250514"
 # API key: set via environment variable DEEPSEEK_API_KEY
 [providers.deepseek]
 api_key = ""
-base_url = "https://api.deepseek.com"
+base_url = "https://api.deepseek.com/v1"
 default_model = "deepseek-chat"
 
 # Ollama (local — no API key needed)

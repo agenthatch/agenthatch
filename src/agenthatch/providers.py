@@ -109,7 +109,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         name="deepseek",
         kind="builtin",
         env_key="DEEPSEEK_API_KEY",
-        base_url="https://api.deepseek.com",
+        base_url="https://api.deepseek.com/v1",
         default_model="deepseek-chat",
         context_window=128000,
         features=ProviderFeatures(
@@ -475,9 +475,9 @@ def verify_api_key(
             return False, f"Authentication failed ({r.status_code}) — check API key"
         return False, f"Unexpected response ({r.status_code})"
     except httpx.TimeoutException:
-        return True, f"Connection to {provider} timed out — key format accepted"
+        return False, f"Connection to {provider} timed out — check network/base_url"
     except httpx.ConnectError:
-        return True, f"Cannot reach {provider} — key not verified"
+        return False, f"Cannot reach {provider} — check base_url and network"
     except Exception as e:
         return True, f"Verification skipped: {e}"
 

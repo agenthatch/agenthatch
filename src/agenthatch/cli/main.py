@@ -82,6 +82,9 @@ def _global_callback(
     ),
 ) -> None:
     """agenthatch: AI Agent incubator. Turn any SKILL.md into a runnable AI Agent."""
+    # M9 fix: wire --config / AGENTHATCH_CONFIG env var
+    if config_path:
+        os.environ["AGENTHATCH_CONFIG"] = str(config_path.resolve())
     _configure_logging(verbose, quiet)
 
 

@@ -18,6 +18,8 @@ class _NullCapBus:
     capabilities: dict[str, Any] = {}
     builtins: dict[str, Any] = {}
     unavailable: set[str] = set()
+    _guard: Any = None
+    _output_schemas: dict[str, Any] = {}
 
     def register(self, *args: Any, **kwargs: Any) -> None:
         pass

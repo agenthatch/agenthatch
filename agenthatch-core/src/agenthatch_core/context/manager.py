@@ -135,8 +135,15 @@ class ContextManager:
             return self._raw_spec.get(attr_name, default)
         return getattr(self._raw_spec, attr_name, default)
 
-    def build_system_prompt(self, rich: bool = False) -> str:
-        """Build system prompt from spec with domain persona injection."""
+    def build_system_prompt(self, rich: bool = False, _consume_note: bool = True) -> str:
+        """Build system prompt from spec with domain persona injection.
+
+        Args:
+            rich: Whether to include rich markup (TUI mode).
+            _consume_note: Internal flag to control one-shot _workflow_note
+                consumption. Set False for token estimation to avoid
+                consuming the note before the real prompt is built (C5 fix).
+        """
         parts: list[str] = []
 
         identity = self._get_spec_attr("identity", {})
@@ -280,7 +287,8 @@ class ContextManager:
         # This overrides the static workflow text with the CURRENT step
         if self._workflow_note:
             parts.append(f"\n## Current Step\n{self._workflow_note}")
-            self._workflow_note = ""  # one-shot: consumed, then cleared
+            if _consume_note:
+                self._workflow_note = ""  # one-shot: consumed, then cleared
 
         rules = (
             instructions.get("rules", [])
@@ -504,7 +512,9 @@ class ContextManager:
 
     def estimate_input_tokens(self) -> int:
         """Estimate total input tokens for current context."""
-        system_len = len(self.build_system_prompt())
+        # Pass _consume_note=False to avoid consuming the one-shot
+        # _workflow_note during token estimation (C5 fix).
+        system_len = len(self.build_system_prompt(_consume_note=False))
         history_len = sum(
             len(str(msg.get("content", "") or ""))
             + len(str(msg.get("tool_calls", "")))
@@ -564,8 +574,11 @@ class ContextManager:
         """Execute compaction. Returns True on success."""
         try:
             summary = self._generate_summary()
-        except (json.JSONDecodeError, KeyError, RuntimeError, ValueError) as e:
-            logger.warning("Compact summary invalid (%s), falling back to truncation", e)
+        except Exception as e:
+            # C5/H8 fix: catch all exceptions from LLM calls
+            # (network errors, timeouts, etc.), not just JSON/Key/Value errors
+            logger.warning("Compact failed (%s: %s), falling back to truncation",
+                           type(e).__name__, e)
             self._consecutive_compact_failures += 1
             return self._fallback_truncation()
 

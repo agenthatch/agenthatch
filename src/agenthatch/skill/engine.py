@@ -316,7 +316,7 @@ class ExtractIdentityHarness(AgentHarness):
         return f"""Extract identity from the following skill:
 
 dir_name: {dir_name}
-frontmatter: {frontmatter}
+frontmatter: {frontmatter if frontmatter is not None else "(none)"}
 body (first 50 lines):
 {body_first_50_lines}
 {files_str}"""
@@ -765,10 +765,13 @@ class InferMCPServersHarness(AgentHarness):
 
             data = _json.loads(response)
             llm_servers = data.get("mcp_servers", [])
-        except Exception:
+        except Exception as e:
+            # M13 fix: log the error instead of silently swallowing it
+            logger.warning("Harness F LLM call failed (%s: %s), falling back to regex",
+                           type(e).__name__, e)
             # Fallback to regex-based extraction
             llm_servers = []
-            mcp_pattern = re.compile(r'mcp__(\w+)__')
+            mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
             server_names = set(mcp_pattern.findall(body))
             for sname in sorted(server_names):
                 llm_servers.append({
@@ -824,17 +827,19 @@ class Orchestrator:
         provider_info = get_provider(provider_name)
         default_model = provider_info.default_model
 
-        self._large_model = large_model or default_model
-        self._small_model = small_model or default_model
+        # Read timeout from provider config (default 180s to handle large models)
+        provider_cfg = config.get("providers", {}).get(provider_name, {})
+        if not isinstance(provider_cfg, dict):
+            provider_cfg = {}
+
+        # H2 fix: try to read per-tier models from provider config,
+        # falling back to the default_model for both tiers.
+        self._large_model = large_model or provider_cfg.get("large_model", default_model)
+        self._small_model = small_model or provider_cfg.get("small_model", default_model)
 
         api_key = resolve_api_key(provider_name, config=config, prompt=True)
 
-        # Read timeout from provider config (default 180s to handle large models)
-        provider_cfg = config.get("providers", {}).get(provider_name, {})
-        if isinstance(provider_cfg, dict):
-            timeout = provider_cfg.get("timeout", 180)
-        else:
-            timeout = 180
+        timeout = provider_cfg.get("timeout", 180)
 
         self._large_client = LLMClient(
             provider=provider_name,
@@ -845,15 +850,22 @@ class Orchestrator:
             context_window=provider_info.context_window,
             timeout=timeout,
         )
-        self._small_client = LLMClient(
-            provider=provider_name,
-            model=self._small_model,
-            api_key=api_key,
-            base_url=provider_info.base_url,
-            features=provider_info.features,  # type: ignore[arg-type]
-            context_window=provider_info.context_window,
-            timeout=timeout,
-        )
+
+        # H2 fix: if large and small models are identical, reuse large_client
+        # to avoid creating a redundant second OpenAI connection.
+        if self._large_model == self._small_model:
+            self._small_client = self._large_client
+            logger.debug("large_model == small_model (%s), reusing single LLM", self._large_model)
+        else:
+            self._small_client = LLMClient(
+                provider=provider_name,
+                model=self._small_model,
+                api_key=api_key,
+                base_url=provider_info.base_url,
+                features=provider_info.features,  # type: ignore[arg-type]
+                context_window=provider_info.context_window,
+                timeout=timeout,
+            )
 
         self._provider_name = provider_name
 
@@ -891,21 +903,21 @@ class Orchestrator:
 
         if tier_map.get("B") != "skip":
             logger.info("Running harness B: infer_intent")
+            frontmatter = context.frontmatter or {}
             outputs["B"] = harnesses["B"].run(
-                description=context.frontmatter.get("description") if context.frontmatter else None,
+                description=frontmatter.get("description"),
                 body=context.body,
-                frontmatter_name=context.frontmatter.get("name") if context.frontmatter else None,
+                frontmatter_name=frontmatter.get("name"),
                 file_contents=file_contents,
             )
 
         if tier_map.get("C") != "skip":
             logger.info("Running harness C: infer_interface")
+            frontmatter = context.frontmatter or {}
             outputs["C"] = harnesses["C"].run(
                 body=context.body,
                 file_contents=file_contents,
-                frontmatter_allowed_tools=(
-                    context.frontmatter.get("allowed_tools") if context.frontmatter else None
-                ),
+                frontmatter_allowed_tools=frontmatter.get("allowed_tools"),
             )
 
         # Step 3: Check self-validation
@@ -918,15 +930,12 @@ class Orchestrator:
         # Step 4: Sequential dispatch (D depends on C for runtime context)
         if tier_map.get("D") != "skip":
             logger.info("Running harness D: detect_base_and_instructions")
+            frontmatter = context.frontmatter or {}
             outputs["D"] = harnesses["D"].run(
                 body=context.body,
                 file_contents=file_contents,
-                frontmatter_compatibility=(
-                    context.frontmatter.get("compatibility") if context.frontmatter else None
-                ),
-                frontmatter_allowed_tools=(
-                    context.frontmatter.get("allowed_tools") if context.frontmatter else None
-                ),
+                frontmatter_compatibility=frontmatter.get("compatibility"),
+                frontmatter_allowed_tools=frontmatter.get("allowed_tools"),
             )
 
         # Step 5: Assemble (E)
@@ -1061,13 +1070,12 @@ class Orchestrator:
         e_client, e_model = _resolve("E")
         f_client, f_model = _resolve("F")
 
-        # Extend timeout for reasoning models
+        # Extend timeout for reasoning models via the public features property
         d_timeout = 60
-        if d_client and hasattr(d_client, '_features'):
-            if d_client._features.supports_reasoning_content:
+        if d_client and hasattr(d_client, 'features'):
+            if d_client.features.supports_reasoning_content:
                 d_timeout = 120
-        logger.debug("Harness D timeout: %ds", d_timeout)
-
+        logger.debug("Harness D timeout: %ds (note: fixed timeout in client)", d_timeout)
         return {
             "A": ExtractIdentityHarness(name="extract_identity", client=a_client, model=a_model),
             "B": InferIntentHarness(name="infer_intent", client=b_client, model=b_model),

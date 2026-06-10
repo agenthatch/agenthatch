@@ -582,7 +582,7 @@ def _update_skillhouse_agent_output(
     try:
         idx = SkillhouseIndex(str(skillhouse_full_path))
         idx.update_agent_output(agent_id, str(agent_output_dir))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
 
 
@@ -810,7 +810,7 @@ def _auto_register_to_index(skill_dir: Path, config: dict[str, Any]) -> None:
             skill_id=skill_dir.name,
             skill_dir=str(skill_dir),
         )
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
 
 
@@ -866,9 +866,13 @@ def _resolve_search_roots(config: dict[str, Any]) -> list[Path]:
     if isinstance(skills_cfg, dict):
         raw = skills_cfg.get("search_dirs", "")
         if raw:
-            for p in raw.split(","):
-                p = p.strip()
-                if p:
+            # M8 fix: handle both TOML array (list) and comma-separated string
+            if isinstance(raw, list):
+                entries = raw
+            else:
+                entries = [s.strip() for s in str(raw).split(",") if s.strip()]
+            for p in entries:
+                if isinstance(p, str):
                     roots.append(Path(p).expanduser().resolve())
 
     # Source 2: Known AI tool skill directories under home

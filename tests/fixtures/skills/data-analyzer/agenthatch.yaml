@@ -1,0 +1,8 @@
+agent:
+  import_binding: true  # v0.8.0: enable Phase 1.5 import binding
+  sandbox: strict
+  loop: full
+
+hatch:
+  small_model: deepseek-chat
+  large_model: deepseek-chat

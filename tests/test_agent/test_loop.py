@@ -238,3 +238,47 @@ class TestRichToolCallEvent:
         assert event.tool_args is None
         assert event.elapsed is None
         assert event.result_preview is None
+
+
+class TestDirectLoopC2:
+    """C2 fix: DirectLoop must use add_to_history, not add_assistant_message."""
+
+    def test_run_calls_add_to_history(self):
+        """DirectLoop.run() must call ctx.add_to_history('assistant', ...)."""
+        from unittest.mock import MagicMock
+
+        from agenthatch_core.bricks.loops import DirectLoop
+
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = "test response"
+        mock_ctx = MagicMock()
+
+        loop = DirectLoop(mock_llm, mock_ctx)
+        _ = loop.run("hello")
+
+        # C2 fix: must use add_to_history, not add_assistant_message
+        mock_ctx.add_to_history.assert_called_with("assistant", "test response")
+        # Old broken call must NOT be made
+        assert not hasattr(mock_ctx.add_assistant_message, 'called') or \
+            not mock_ctx.add_assistant_message.called, (
+            "C2 regression: DirectLoop still calls add_assistant_message "
+            "which does not exist on ContextManager"
+        )
+
+    def test_stream_calls_add_to_history(self):
+        """DirectLoop.stream() must call ctx.add_to_history('assistant', ...)."""
+        from unittest.mock import MagicMock
+
+        from agenthatch_core.bricks.loops import DirectLoop
+
+        mock_llm = MagicMock()
+
+        mock_llm.chat_stream.return_value = iter(["Hello", " world"])
+        mock_ctx = MagicMock()
+
+        loop = DirectLoop(mock_llm, mock_ctx)
+        chunks = list(loop.stream("hello"))
+        result_text = "".join(chunks)
+
+        assert result_text == "Hello world"
+        mock_ctx.add_to_history.assert_called_with("assistant", "Hello world")
