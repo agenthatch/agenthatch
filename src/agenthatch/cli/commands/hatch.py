@@ -54,8 +54,6 @@ def _run_phase3_generate(
     Returns:
         (file_count, agent_output_dir, elapsed_seconds)
     """
-    import json as _json
-
     from agenthatch_core.bricks.archetypes import classify_skill
 
     from agenthatch.generate.engine import GenerateEngine
@@ -66,7 +64,9 @@ def _run_phase3_generate(
     else:
         agent_output_dir = Path.cwd() / f"{agent_id}-agent"
 
-    spec_dict = _json.loads(ahs_spec.model_dump_json())
+    t3_start = time.time()  # v0.7.9: moved before serialization for accurate timing
+
+    spec_dict = ahs_spec.model_dump()  # v0.7.9: direct dict, avoids json round-trip
 
     # Classify skill archetype first for user feedback
     try:
@@ -79,8 +79,6 @@ def _run_phase3_generate(
 
     console.print(f"  [dim]→ {archetype} (confidence: {confidence:.0%})[/dim]")
     console.print("  [dim]Generating agent files...[/dim]")
-
-    t3_start = time.time()
     try:
         engine = GenerateEngine()
         written = engine.generate(
@@ -434,7 +432,7 @@ def hatch_command(
             console.print_json(ahs_spec.model_dump_json())
         else:
             yaml_str = yaml.dump(
-                json.loads(ahs_spec.model_dump_json()),
+                ahs_spec.model_dump(),  # v0.7.9: direct dict, avoids json round-trip
                 allow_unicode=True,
                 default_flow_style=False,
                 sort_keys=False,
@@ -458,10 +456,8 @@ def hatch_command(
         else:
             yaml_output_path.parent.mkdir(parents=True, exist_ok=True)
             yaml_str = yaml.dump(
-                json.loads(
-                    ahs_spec.model_dump_json(
-                        exclude={"harness_traces", "confidence_report"}
-                    )
+                ahs_spec.model_dump(  # v0.7.9: direct dict, avoids json round-trip
+                    exclude={"harness_traces", "confidence_report"}
                 ),
                 allow_unicode=True,
                 default_flow_style=False,

@@ -87,7 +87,7 @@ class TestHatchExitCode2:
         )
 
         result = runner.invoke(app, ["hatch", str(skill_dir)])
-        assert result.exit_code == 2
+        assert result.exit_code == 5
         assert "already exists" in result.output
 
 

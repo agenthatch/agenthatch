@@ -56,8 +56,16 @@ class GenerateEngine:
             """Escape for safe triple-quoted string literal."""
             return value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
 
-        def python_repr(value: str) -> str:
-            """Generate Python-compatible string literal via json.dumps."""
+        def python_repr(value: Any) -> str:
+            """Generate Python-compatible literal via json.dumps.
+
+            Handles None (→ None), bools (→ True/False), strings, numbers,
+            and other JSON-serializable types.
+            """
+            if value is None:
+                return "None"
+            if isinstance(value, bool):
+                return "True" if value else "False"
             return json.dumps(value, ensure_ascii=False)
 
         env.filters["python_escape"] = python_escape

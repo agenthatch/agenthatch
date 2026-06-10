@@ -101,7 +101,7 @@ class {{ agent_class }}(AHCoreAgent):
             brick_manifest=manifest,
         )
 
-        # v0.7.6: CompiledWorkflow from instructions.workflow
+        # v0.7.9: CompiledWorkflow from instructions.workflow
 {% if workflow_steps %}
         self._workflow = CompiledWorkflow([
 {% for step in workflow_steps %}
@@ -112,55 +112,73 @@ class {{ agent_class }}(AHCoreAgent):
             ),
 {% endfor %}
         ])
+
+        # v0.7.9: Run all workflow scripts ONCE during initialization
+        self._run_warmup_scripts()
 {% else %}
         self._workflow = None
 {% endif %}
 
-    # ── v0.7.6: Pre-turn workflow execution ──────────────────────────────
+    # ── v0.7.9: Warmup scripts run ONCE at init ──────────────────────────
+
+    def _run_warmup_scripts(self):
+        """Execute all workflow scripts once during initialization.
+
+        Script results are recorded in system history for LLM context.
+        Step descriptions remain in _workflow for conversational guidance.
+        """
+        if not self._workflow:
+            return
+
+        cwd = str(Path(__file__).parent.parent.parent / "skills" / "scripts")
+        warmup_results = []
+
+        for step in self._workflow.steps:
+            if step.script is None:
+                continue
+            try:
+                result = self.sandbox.run(step.script, cwd=cwd)
+                warmup_results.append(
+                    f"Step {step.step} ({step.description}): {result.stdout[:300]}"
+                )
+            except Exception as e:
+                warmup_results.append(
+                    f"Step {step.step} ({step.description}) FAILED: {e}"
+                )
+
+        if warmup_results:
+            self.ctx.add_to_history(
+                "system",
+                "Warmup scripts completed:\n" + "\n".join(warmup_results),
+            )
+
+    # ── v0.7.9: Pre-turn workflow — LLM always runs ─────────────────────
 
     def _pre_turn_workflow(self, user_input: str) -> str | None:
-        """Run workflow step before the LLM turn.
+        """Inject current workflow step as context. LLM always runs.
 
-        Returns script result if a deterministic script was executed,
-        None otherwise (proceed to normal LLM turn).
+        v0.7.9: Scripts are no longer executed per-turn.
+        All script execution happens once during warmup.
         """
         if self._workflow is None or self._workflow.is_complete():
             return None
 
         step = self._workflow.next_step()
-        # Inject step context into the next turn's system prompt
         self.ctx._workflow_note = (
             f"Current workflow step: {step.step} — {step.description}"
         )
 
-        # If step has a script → execute deterministically, skip LLM
-        if step.script is not None:
-            result = self.sandbox.run(
-                step.script,
-                cwd=str(Path(__file__).parent.parent.parent / "skills" / "scripts"),
-            )
-            self.ctx.add_to_history(
-                "system",
-                f"Workflow step {step.step} completed: {result.stdout[:500]}",
-            )
-            return f"Executed workflow step {step.step}:\n{result.stdout}"
-
-        return None  # Proceed to normal LLM turn
+        # v0.7.9: ALWAYS proceed to LLM — never skip conversation
+        return None
 
     # ── chat / stream overrides for workflow integration ────────────────
 
     def chat(self, user_input: str) -> str:
         """Single-turn chat with workflow support."""
-        script_result = self._pre_turn_workflow(user_input)
-        if script_result is not None:
-            return script_result
+        self._pre_turn_workflow(user_input)
         return super().chat(user_input)
 
     def chat_stream(self, user_input: str):
         """Streaming chat with workflow support."""
-        script_result = self._pre_turn_workflow(user_input)
-        if script_result is not None:
-            yield script_result
-            return script_result
-        result = yield from super().chat_stream(user_input)
-        return result
+        self._pre_turn_workflow(user_input)
+        yield from super().chat_stream(user_input)
