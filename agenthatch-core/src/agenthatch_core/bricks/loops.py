@@ -25,10 +25,14 @@ class DirectLoop:
         llm: Any,
         ctx: Any,
         token_counter: Any = None,
+        memory_brick: Any = None,  # v0.7.12
+        hooks: Any = None,          # v0.7.12
     ):
         self._llm = llm
         self._ctx = ctx
         self._token_counter = token_counter
+        self._memory_brick = memory_brick
+        self._hooks = hooks
 
     def run(self, user_input: str) -> str:
         """Execute a single turn: build messages, call LLM, return result."""

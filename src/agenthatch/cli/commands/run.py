@@ -31,6 +31,7 @@ from agenthatch_core.loop.agent_loop import RichToolCallEvent
 from agenthatch_core.loop.token_counter import ThinkingDelta
 from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.styles import Style as PTStyle
+from rich.console import Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -355,21 +356,8 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
                 continue
 
             console.print(Markdown(response_text))
-            # v0.7: Show token usage if available
-            if hasattr(agent, "token_counter"):
-                snap = agent.token_counter.snapshot()
-                if snap["total_tokens"] > 0:
-                    parts = [f"Tokens: {snap['total_tokens']:,}"]
-                    detail_parts = []
-                    if snap["prompt_tokens"]:
-                        detail_parts.append(f"in: {snap['prompt_tokens']:,}")
-                    if snap["completion_tokens"]:
-                        detail_parts.append(f"out: {snap['completion_tokens']:,}")
-                    if detail_parts:
-                        parts.append(f"({', '.join(detail_parts)})")
-                    if snap.get("call_count"):
-                        parts.append(f"[{snap['call_count']} calls]")
-                    console.print(f"[dim]{' '.join(parts)}[/dim]")
+            # v0.7.12: Observability rendered in Done panel + Session footer.
+            # No separate console.print needed.
             console.print()
 
     except (KeyboardInterrupt, SystemExit, EOFError):
@@ -377,15 +365,18 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
 
 
 def _stream_response(agent: Any, user_input: str) -> str:
-    """Stream agent response with live tool call display and reasoning feedback."""
+    """v0.7.12 Unified streaming renderer.
+
+    Two-panel Live layout (Agent + Thinking) with persistent
+    Session footer that survives the Live widget exit.
+    """
     full_text: list[str] = []
     reasoning_lines: list[str] = []
     tool_status: dict[str, str] = {}
-    frame_title = f"[bold bright_blue]{agent.identity.display_name}[/]"
     start_time = time.monotonic()
+    show_thinking = getattr(agent, "_show_reasoning", True)
 
     def statusbar() -> str:
-        """Build the status bar line with live token/time info."""
         parts: list[str] = []
         if hasattr(agent, "token_counter"):
             snap = agent.token_counter.snapshot()
@@ -396,27 +387,29 @@ def _stream_response(agent: Any, user_input: str) -> str:
         parts.append(f"[dim]⏱[/] {elapsed:.1f}s")
         return " │ ".join(parts)
 
-    def render() -> str:
-        lines = [frame_title]
+    def render_agent_panel() -> str:
+        lines = [f"[bold bright_blue]{agent.identity.display_name}[/]"]
         for name, status in tool_status.items():
             lines.append(f"  [cyan]{name}[/] {status}")
         if full_text:
             lines.append("".join(full_text)[-300:])
-        elif reasoning_lines:
-            body = "[dim]" + "\n".join(reasoning_lines[-3:]) + "[/]"
-            lines.append(body)
         if not full_text and not reasoning_lines:
             lines.append("[dim]Thinking...[/dim]")
-        # v0.7.11: Show reasoning in status bar when toggle is ON
-        if getattr(agent, "_show_reasoning", False) and reasoning_lines:
-            last_reasoning = reasoning_lines[-2:]
-            for r in last_reasoning:
-                lines.append(f"[dim italic]{r[:80]}[/dim italic]")
-        lines.append("")  # spacer
+        lines.append("")
         lines.append(statusbar())
         return "\n".join(lines)
 
-    with Live(Panel(render(), title="Agent"), refresh_per_second=10) as live:
+    def render_thinking_panel() -> Panel | None:
+        if not show_thinking or not reasoning_lines:
+            return None
+        visible = reasoning_lines[-10:]
+        body = "\n".join(
+            f"[dim italic]{line.strip()}[/dim italic]" for line in visible
+        )
+        return Panel(body, title="Thinking", border_style="dim magenta", padding=(0, 1))
+
+    # ── Phase 1: Live streaming (Agent + Thinking panels) ──
+    with Live(Panel(render_agent_panel(), title="Agent"), refresh_per_second=10) as live:
         gen = agent.chat_stream(user_input)
         final_text = ""
         while True:
@@ -429,30 +422,37 @@ def _stream_response(agent: Any, user_input: str) -> str:
                 if event.phase == "start":
                     tool_status[event.tool_name] = "[bold yellow]running...[/]"
                 elif event.phase == "done":
-                    elapsed = f"{event.elapsed:.1f}s" if event.elapsed else ""
+                    es = f"{event.elapsed:.1f}s" if event.elapsed else ""
                     preview = (event.result_preview or "")[:80]
                     tool_status[event.tool_name] = (
-                        f"[bold green]done[/] ({elapsed}) "
-                        f"[dim]→ {preview}[/]"
+                        f"[bold green]done[/] ({es}) [dim]→ {preview}[/]"
                     )
             elif isinstance(event, ThinkingDelta):
-                # v0.7.11: Reasoning content — show in status bar, NOT in response body
                 reasoning_lines.append(event.content)
             elif isinstance(event, str):
                 full_text.append(event)
-            live.update(Panel(render(), title="Agent"))
-        live.update(Panel("[dim]✓ Done[/dim]", title="Agent"))
-        # v0.7.11: Render observability INTO Done panel (not as separate footer)
+
+            agent_render = Panel(render_agent_panel(), title="Agent")
+            thinking_render = render_thinking_panel()
+            live.update(
+                Group(agent_render, thinking_render) if thinking_render else agent_render
+            )
+
         done_body = _build_done_panel_content(agent, start_time)
         live.update(Panel(done_body, title="Agent", border_style="green"))
+
+    # ── Phase 2: Persistent observability footer ──
+    footer = _build_observability_footer(agent, start_time)
+    if footer:
+        console.print(footer)
+
     return final_text or "".join(full_text) or "(no response)"
 
 
 def _build_done_panel_content(agent: Any, start_time: float) -> str:
-    """v0.7.11: Build Done panel body WITH observability.
+    """v0.7.12: Build Done panel body WITH observability.
 
-    Renders "✓ Done" plus token/time metrics directly inside the panel,
-    ensuring observability data is always visible where users expect it.
+    Always shows timing. Token details shown when available (> 0).
     """
     elapsed = time.monotonic() - start_time
     lines = ["[bold green]✓ Done[/bold green]"]
@@ -468,8 +468,40 @@ def _build_done_panel_content(agent: Any, start_time: float) -> str:
                 f"[dim]Tokens: {total:,} (in: {prompt_tok:,}, out: {completion_tok:,})"
                 f" [{call_count} calls]  ⏱ {elapsed:.1f}s[/dim]"
             )
+        else:
+            lines.append(f"[dim]⏱ {elapsed:.1f}s[/dim]")
 
     return "\n".join(lines)
+
+
+def _build_observability_footer(agent: Any, start_time: float) -> Panel | str:
+    """v0.7.12: Build persistent Session footer that survives Live widget exit."""
+    elapsed = time.monotonic() - start_time
+    parts: list[str] = []
+
+    if hasattr(agent, "token_counter"):
+        snap = agent.token_counter.snapshot()
+        total = snap.get("total_tokens", 0)
+        if total > 0:
+            prompt_tok = snap.get("prompt_tokens", 0)
+            completion_tok = snap.get("completion_tokens", 0)
+            call_count = snap.get("call_count", 0)
+            parts.append(
+                f"Tokens: {total:,} (in: {prompt_tok:,}, out: {completion_tok:,})"
+            )
+            if call_count:
+                parts.append(f"Calls: {call_count}")
+        parts.append(f"⏱ {elapsed:.1f}s")
+
+    if not parts:
+        return ""
+
+    return Panel(
+        " │ ".join(f"[dim]{p}[/dim]" for p in parts),
+        title="Session",
+        border_style="dim green",
+        padding=(0, 1),
+    )
 
 
 # ── /commands ───────────────────────────────────────────────────────────────
@@ -501,10 +533,16 @@ def _handle_command(user_input: str, agent: Any) -> str | None:
             return f"[warn]Compact failed: {e}[/warn]"
     elif cmd == "/thinking":
         # v0.7.11: Toggle reasoning/thinking visibility for debugging
-        current = getattr(agent, "_show_reasoning", False)
+        current = getattr(agent, "_show_reasoning", True)
         agent._show_reasoning = not current
         state = "ON" if agent._show_reasoning else "OFF"
         return f"[ok]Reasoning display: {state}[/ok]"
+    elif cmd.startswith("/attach "):
+        # v0.7.12: Attach a file to the conversation via FileProcessor
+        filepath = user_input[8:].strip()
+        if hasattr(agent, "attach_file"):
+            return agent.attach_file(filepath)  # type: ignore[no-any-return]
+        return "[warn]File attachment not supported by this agent.[/warn]"
     elif cmd in ("/quit", "/exit"):
         raise SystemExit(0)
     else:
@@ -678,8 +716,9 @@ def _render_help(agent: Any) -> str:
         "  [bold cyan]/status[/]     Show provider/model info",
         "  [bold cyan]/config[/]     Configure API key, provider, or model",
         "  [bold cyan]/key-source[/] Show API key resolution chain",
-        "  [bold cyan]/compact[/]    Trigger context compaction",
+        "[bold cyan]/compact[/]    Trigger context compaction",
         "  [bold cyan]/thinking[/]   Toggle reasoning display for debugging",
+        "  [bold cyan]/attach[/] <path>  Attach a file to the conversation",
         "  [bold cyan]/quit[/]       Exit (or Ctrl+D)",
     ]
     return "\n".join(lines)

@@ -110,6 +110,28 @@ class AHCoreAgent:
         # Context manager (needs spec before runtime config)
         self.ctx = ContextManager(spec=self._raw_spec)
 
+        # v0.7.12: Wire hooks into ContextManager for compaction events
+        self.ctx._hooks = self.hooks
+
+        # v0.7.12: Create CheckpointManager for conversation persistence
+        self._checkpoint_mgr: Any = None
+        try:
+            from agenthatch_core.offload.checkpoint import CheckpointManager
+            self._checkpoint_mgr = CheckpointManager(
+                Path(".agenthatch") / "checkpoints" / identity.id
+            )
+        except ImportError:
+            logger.debug("CheckpointManager not available.")
+
+        # v0.7.12: Wire StateManager into ContextManager for history offload
+        try:
+            from agenthatch_core.offload.state_manager import StateManager
+            self.ctx._state_manager = StateManager(
+                Path(".agenthatch") / "history" / identity.id
+            )
+        except ImportError:
+            logger.debug("StateManager not available.")
+
         # v0.7.6: Wire memory brick into context manager for system prompt injection
         if self._memory is not None:
             self.ctx._memory = self._memory
@@ -383,6 +405,25 @@ class AHCoreAgent:
 
     # ── conversation API ──────────────────────────────────────────────
 
+    def attach_file(self, filepath: str) -> str:
+        """v0.7.12: Process a file and inject its content into context.
+
+        Used by the /attach command in the TUI.
+        """
+        if self.file_processor is None:
+            return "[warn]File processor not available.[/warn]"
+        try:
+            result = self.file_processor.process(Path(filepath).expanduser())
+        except Exception as e:
+            return f"[error]Failed to process file: {e}[/error]"
+        if result.error:
+            return f"[warn]{result.error}[/warn]"
+        self.ctx.add_to_history(
+            "system",
+            f"[Attached: {result.path.name}]\n{result.chunks[0].content}"
+        )
+        return f"[ok]Attached {result.path.name} ({result.total_chars:,} chars)[/ok]"
+
     def chat(self, user_input: str) -> str:
         """Single-turn synchronous chat."""
         if self.llm is None:
@@ -393,12 +434,30 @@ class AHCoreAgent:
         # v0.7: Loop dispatch from BrickManifest
         if self._manifest.loop_engine == LoopKind.DIRECT:
             from agenthatch_core.bricks.loops import DirectLoop
-            result = DirectLoop(self.llm, self.ctx).run(user_input)
+            result = DirectLoop(
+                self.llm, self.ctx,
+                token_counter=self.token_counter,
+                memory_brick=self._memory,
+                hooks=self.hooks,
+            ).run(user_input)
+        elif self._manifest.loop_engine == LoopKind.PLAN_GUIDED:
+            # v0.7.12: PLAN_GUIDED reserved for v0.8 PlanLayer.
+            # Falls through to standard ConversationLoop for now.
+            loop = ConversationLoop(
+                self.llm, self.capbus, self.sandbox, self.ctx,
+                hooks=self.hooks,
+                token_counter=self.token_counter,
+                memory_brick=self._memory,
+                checkpoint_mgr=self._checkpoint_mgr,
+            )
+            result = loop.run(user_input)
         else:
             loop = ConversationLoop(
                 self.llm, self.capbus, self.sandbox, self.ctx,
                 hooks=self.hooks,
                 token_counter=self.token_counter,
+                memory_brick=self._memory,  # v0.7.12: wire memory brick
+                checkpoint_mgr=self._checkpoint_mgr,  # v0.7.12: wire checkpointing
             )
             result = loop.run(user_input)
 
@@ -444,12 +503,30 @@ class AHCoreAgent:
         # v0.7: Loop dispatch from BrickManifest
         if self._manifest.loop_engine == LoopKind.DIRECT:
             from agenthatch_core.bricks.loops import DirectLoop
-            result = yield from DirectLoop(self.llm, self.ctx).stream(user_input)
+            result = yield from DirectLoop(
+                self.llm, self.ctx,
+                token_counter=self.token_counter,
+                memory_brick=self._memory,
+                hooks=self.hooks,
+            ).stream(user_input)
+        elif self._manifest.loop_engine == LoopKind.PLAN_GUIDED:
+            # v0.7.12: PLAN_GUIDED reserved for v0.8 PlanLayer.
+            # Falls through to standard ConversationLoop for now.
+            loop = ConversationLoop(
+                self.llm, self.capbus, self.sandbox, self.ctx,
+                hooks=self.hooks,
+                token_counter=self.token_counter,
+                memory_brick=self._memory,
+                checkpoint_mgr=self._checkpoint_mgr,
+            )
+            result = yield from loop.stream(user_input)
         else:
             loop = ConversationLoop(
                 self.llm, self.capbus, self.sandbox, self.ctx,
                 hooks=self.hooks,
                 token_counter=self.token_counter,
+                memory_brick=self._memory,  # v0.7.12: wire memory brick
+                checkpoint_mgr=self._checkpoint_mgr,  # v0.7.12: wire checkpointing
             )
             result = yield from loop.stream(user_input)
 

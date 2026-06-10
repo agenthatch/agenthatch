@@ -86,6 +86,7 @@ class ConversationLoop:
         hooks: HooksManager | None = None,
         token_counter: TokenCounter | None = None,
         memory_brick: Any = None,  # v0.7.11: MemoryBrick for persistent memory
+        checkpoint_mgr: Any = None,  # v0.7.12: CheckpointManager for conversation persistence
     ):
         self.llm = llm
         self.capbus = capbus
@@ -94,6 +95,7 @@ class ConversationLoop:
         self._hooks = hooks
         self._token_counter = token_counter
         self._memory_brick = memory_brick  # v0.7.11
+        self._checkpoint_mgr = checkpoint_mgr  # v0.7.12: FROM PARAMETER
 
         self._max_retries: int = 3
         self._retry_base_delay: float = 1.0
@@ -106,8 +108,6 @@ class ConversationLoop:
         self._cb_state: str = "closed"
         self._cb_opened_at: float = 0.0
 
-        self._checkpoint_mgr: Any = None
-
     def _record_usage(self, response: Any) -> None:
         """Record token usage from LLM response into token counter."""
         if self._token_counter is None:
@@ -117,6 +117,24 @@ class ConversationLoop:
         if usage is None:
             usage = getattr(self.llm, "last_usage", None)
         if usage is None:
+            # v0.7.12: CJK-aware token estimation fallback
+            # DeepSeek streaming doesn't return usage in chunk events.
+            # Estimate tokens from response text content.
+            text = getattr(response, "text", "") or ""
+            if text:
+                cjk_count = sum(
+                    1 for c in text
+                    if '\u4e00' <= c <= '\u9fff'
+                    or '\u3000' <= c <= '\u303f'
+                )
+                other_count = len(text) - cjk_count
+                estimated = max(1, cjk_count + other_count // 4)
+                self._token_counter.add_usage({
+                    "prompt_tokens": 0,
+                    "completion_tokens": estimated,
+                    "total_tokens": estimated,
+                    "reasoning_tokens": 0,
+                })
             return
         self._token_counter.add_usage({
             "prompt_tokens": getattr(usage, "prompt_tokens", 0),
@@ -466,16 +484,17 @@ class ConversationLoop:
                 results.append({"tc": tc, "result": str(result), "elapsed": elapsed})
             return results
 
-        # Parallel path: submit all, collect with as_completed, sort back
+        # v0.7.12: Parallel path with per-call timeout safety.
+        # Uses _route_with_timeout() which creates its own executor per call,
+        # matching the sequential path's safety guarantees.
         results_by_index: dict[int, dict[str, Any]] = {}
-        executor = concurrent.futures.ThreadPoolExecutor()
-        try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(tool_calls)) as executor:
             futures: dict[concurrent.futures.Future[str], int] = {}
             for i, tc in enumerate(tool_calls):
                 logger.info("  Dispatching (parallel): %s(%s)...", tc.name,
                             ", ".join(f"{k}={v}" for k, v in tc.arguments.items() if k != "url"))
                 future = executor.submit(
-                    self.capbus.route, tc.name, tc.arguments
+                    _route_with_timeout, self.capbus, tc.name, tc.arguments
                 )
                 futures[future] = i
 
@@ -483,14 +502,12 @@ class ConversationLoop:
                 i = futures[future]
                 tc = tool_calls[i]
                 try:
-                    result = str(future.result(timeout=120))
-                except (CapabilityNotFoundError, Exception) as e:
+                    result = future.result(timeout=120)
+                except Exception as e:
                     logger.warning("Parallel tool '%s' failed: %s", tc.name, e)
                     result = f"Error: {e}"
-                results_by_index[i] = {"tc": tc, "result": result, "elapsed": 0.0}
-                logger.info("  %s -> %d chars (parallel)", tc.name, len(result))
-        finally:
-            executor.shutdown(wait=False)
+                results_by_index[i] = {"tc": tc, "result": str(result), "elapsed": 0.0}
+                logger.info("  %s -> %d chars (parallel)", tc.name, len(str(result)))
 
         return [results_by_index[i] for i in range(len(tool_calls))]
 
