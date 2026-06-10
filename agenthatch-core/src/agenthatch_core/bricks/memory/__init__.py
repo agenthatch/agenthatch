@@ -59,8 +59,9 @@ class MemoryBrick:
     def inject_into_context(self, max_tokens: int = 1000) -> str:
         """Build memory section for system prompt injection.
 
-        Returns core memory + preferences as a formatted string suitable
-        for appending to the system prompt. Called by ContextManager.
+        v0.7.13: Returns core memory + preferences + recent session history.
+        This bridges the gap between session JSONL (written by record_turn)
+        and core MEMORY.md (read by ContextManager for new sessions).
         """
         parts: list[str] = []
 
@@ -72,14 +73,31 @@ class MemoryBrick:
         if prefs:
             parts.append(f"\n## User Preferences\n{prefs}")
 
+        # v0.7.13: Include recent session entries so cross-session
+        # memory works without requiring the agent to call the recall tool.
+        recent = self.store.get_recent_session_entries(limit=20)
+        if recent:
+            parts.append("\n## Recent Conversation (last session)")
+            for entry in recent[-8:]:
+                role = entry.get("role", "?")
+                content = (entry.get("content") or "")[:300]
+                if content.strip():
+                    parts.append(f"[{role}] {content}")
+
         return "\n".join(parts)
 
     def record_turn(self, role: str, content: str, tool_calls: list[dict[str, Any]] | None = None) -> None:
         """Record a conversation turn to the session log.
 
         Called after each user/assistant message in ConversationLoop.
+        v0.7.13: Also auto-saves a one-line summary to core memory so
+        that cross-session memory works without manual compaction.
         """
         self.store.append_session_entry(role, content, tool_calls)
+        # v0.7.13: Auto-save brief summary to core memory for cross-session recall
+        if content and len(content) > 20:
+            summary = content[:200].replace("\n", " ")
+            self.store.append_core_memory(f"[{role}] {summary}")
 
     def save_compact_summary(self, summary: str) -> None:
         """Save a compact summary as a memory entry.

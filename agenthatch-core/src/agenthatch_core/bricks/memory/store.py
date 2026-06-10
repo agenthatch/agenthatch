@@ -114,6 +114,30 @@ class MemoryStore:
                 continue
         return entries
 
+    def get_recent_session_entries(self, limit: int = 30) -> list[dict[str, Any]]:
+        """v0.7.13: Get the most recent session entries across all files.
+
+        Reads session files in reverse chronological order (newest first)
+        and collects entries until limit is reached. Returns in
+        chronological order for context injection.
+        """
+        entries: list[dict[str, Any]] = []
+        for session_file in sorted(
+            self._sessions_dir.glob("*.jsonl"), reverse=True
+        ):
+            try:
+                lines = session_file.read_text(encoding="utf-8").strip().split("\n")
+                for line in reversed(lines):
+                    if line.strip():
+                        entries.append(json.loads(line))
+                        if len(entries) >= limit:
+                            break
+            except (json.JSONDecodeError, OSError):
+                continue
+            if len(entries) >= limit:
+                break
+        return list(reversed(entries))  # chronological order
+
     # ── knowledge facts ────────────────────────────────────────────────
 
     def save_knowledge_fact(self, fact: str) -> None:

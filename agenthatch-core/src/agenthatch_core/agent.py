@@ -472,25 +472,6 @@ class AHCoreAgent:
 
         return result
 
-    def chat_streaming(self, user_input: str) -> Generator[str, None, str]:
-        """v0.7.10: Stream response token-by-token without tool events.
-
-        Yields only text tokens (no RichToolCallEvent objects).
-        Use this when you want pure incremental text output,
-        e.g. for typewriter-effect rendering in a TUI.
-        """
-        gen = self.chat_stream(user_input)
-        final_text = ""
-        while True:
-            try:
-                event = next(gen)
-            except StopIteration as e:
-                final_text = e.value
-                break
-            if isinstance(event, str):
-                yield event
-        return final_text
-
     def chat_stream(
         self, user_input: str
     ) -> Generator[RichToolCallEvent | str, None, str]:

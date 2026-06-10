@@ -31,7 +31,6 @@ from agenthatch_core.loop.agent_loop import RichToolCallEvent
 from agenthatch_core.loop.token_counter import ThinkingDelta
 from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.styles import Style as PTStyle
-from rich.console import Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -365,10 +364,16 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
 
 
 def _stream_response(agent: Any, user_input: str) -> str:
-    """v0.7.12 Unified streaming renderer.
+    """v0.7.13 Unified streaming renderer.
 
-    Two-panel Live layout (Agent + Thinking) with persistent
-    Session footer that survives the Live widget exit.
+    Single-panel Live layout with inline thinking.  Persistent
+    Session footer shows status summary after Live exits.
+
+    v0.7.13 changes:
+      - Removed Group two-panel layout (caused rendering corruption in terminals).
+      - Thinking rendered inline as dim italic (last 5 lines) inside single Panel.
+      - Done panel shows observability (tokens, time).
+      - Session footer shows "Thinking complete" status instead of duplicate data.
     """
     full_text: list[str] = []
     reasoning_lines: list[str] = []
@@ -376,40 +381,27 @@ def _stream_response(agent: Any, user_input: str) -> str:
     start_time = time.monotonic()
     show_thinking = getattr(agent, "_show_reasoning", True)
 
-    def statusbar() -> str:
-        parts: list[str] = []
-        if hasattr(agent, "token_counter"):
-            snap = agent.token_counter.snapshot()
-            if snap.get("total_tokens", 0) > 0:
-                parts.append(f"[dim]Tokens:[/] {snap['total_tokens']:,}")
-                parts.append(f"[dim]Calls:[/] {snap.get('call_count', 0)}")
-        elapsed = time.monotonic() - start_time
-        parts.append(f"[dim]⏱[/] {elapsed:.1f}s")
-        return " │ ".join(parts)
-
-    def render_agent_panel() -> str:
+    def render_panel() -> str:
         lines = [f"[bold bright_blue]{agent.identity.display_name}[/]"]
         for name, status in tool_status.items():
             lines.append(f"  [cyan]{name}[/] {status}")
         if full_text:
-            lines.append("".join(full_text)[-300:])
-        if not full_text and not reasoning_lines:
+            lines.append("".join(full_text)[-500:])
+        if not full_text and not tool_status:
             lines.append("[dim]Thinking...[/dim]")
-        lines.append("")
-        lines.append(statusbar())
+        # v0.7.13: inline thinking display (last 5 lines, dim italic)
+        if show_thinking and reasoning_lines and not full_text:
+            visible = reasoning_lines[-5:]
+            for line in visible:
+                stripped = line.strip()[:120]
+                if stripped:
+                    lines.append(f"[dim italic]  {stripped}[/dim italic]")
+        elapsed = time.monotonic() - start_time
+        lines.append(f"[dim]⏱ {elapsed:.1f}s[/dim]")
         return "\n".join(lines)
 
-    def render_thinking_panel() -> Panel | None:
-        if not show_thinking or not reasoning_lines:
-            return None
-        visible = reasoning_lines[-10:]
-        body = "\n".join(
-            f"[dim italic]{line.strip()}[/dim italic]" for line in visible
-        )
-        return Panel(body, title="Thinking", border_style="dim magenta", padding=(0, 1))
-
-    # ── Phase 1: Live streaming (Agent + Thinking panels) ──
-    with Live(Panel(render_agent_panel(), title="Agent"), refresh_per_second=10) as live:
+    # ── Phase 1: Live streaming (single panel) ──
+    with Live(Panel(render_panel(), title="Agent"), refresh_per_second=8) as live:
         gen = agent.chat_stream(user_input)
         final_text = ""
         while True:
@@ -432,17 +424,14 @@ def _stream_response(agent: Any, user_input: str) -> str:
             elif isinstance(event, str):
                 full_text.append(event)
 
-            agent_render = Panel(render_agent_panel(), title="Agent")
-            thinking_render = render_thinking_panel()
-            live.update(
-                Group(agent_render, thinking_render) if thinking_render else agent_render
-            )
+            live.update(Panel(render_panel(), title="Agent"))
 
         done_body = _build_done_panel_content(agent, start_time)
         live.update(Panel(done_body, title="Agent", border_style="green"))
 
-    # ── Phase 2: Persistent observability footer ──
-    footer = _build_observability_footer(agent, start_time)
+    # ── Phase 2: Session status footer ──
+    footer = _build_observability_footer(agent, start_time,
+                                         reasoning_count=len(reasoning_lines))
     if footer:
         console.print(footer)
 
@@ -450,9 +439,9 @@ def _stream_response(agent: Any, user_input: str) -> str:
 
 
 def _build_done_panel_content(agent: Any, start_time: float) -> str:
-    """v0.7.12: Build Done panel body WITH observability.
+    """v0.7.13: Build Done panel with observability data (tokens + time).
 
-    Always shows timing. Token details shown when available (> 0).
+    This is the primary observability display — Session footer shows status summary.
     """
     elapsed = time.monotonic() - start_time
     lines = ["[bold green]✓ Done[/bold green]"]
@@ -474,27 +463,26 @@ def _build_done_panel_content(agent: Any, start_time: float) -> str:
     return "\n".join(lines)
 
 
-def _build_observability_footer(agent: Any, start_time: float) -> Panel | str:
-    """v0.7.12: Build persistent Session footer that survives Live widget exit."""
+def _build_observability_footer(
+    agent: Any, start_time: float, reasoning_count: int = 0
+) -> Panel | str:
+    """v0.7.13: Build Session footer with status summary (not duplicate data).
+
+    Shows session state info instead of repeating Done panel observability.
+    """
     elapsed = time.monotonic() - start_time
     parts: list[str] = []
 
-    if hasattr(agent, "token_counter"):
-        snap = agent.token_counter.snapshot()
-        total = snap.get("total_tokens", 0)
-        if total > 0:
-            prompt_tok = snap.get("prompt_tokens", 0)
-            completion_tok = snap.get("completion_tokens", 0)
-            call_count = snap.get("call_count", 0)
-            parts.append(
-                f"Tokens: {total:,} (in: {prompt_tok:,}, out: {completion_tok:,})"
-            )
-            if call_count:
-                parts.append(f"Calls: {call_count}")
-        parts.append(f"⏱ {elapsed:.1f}s")
+    # Status summary
+    if reasoning_count > 0:
+        parts.append(f"Thinking complete ({reasoning_count} chunks)")
+    parts.append(f"⏱ {elapsed:.1f}s")
 
-    if not parts:
-        return ""
+    # Turn count
+    if hasattr(agent, "ctx"):
+        turn_count = getattr(agent.ctx, "_turn_count", 0)
+        if turn_count:
+            parts.append(f"Turn #{turn_count}")
 
     return Panel(
         " │ ".join(f"[dim]{p}[/dim]" for p in parts),
