@@ -119,6 +119,13 @@ class CapBus:
             return f"Tool '{tool_name}' is not available in this agent."
 
         if result is None:
+            # v0.7.11: Distinguish "no executor" vs "truly not found"
+            if cap is not None:
+                # Capability exists but has no executor (e.g., mcp_proxy not connected)
+                raise CapabilityNotFoundError(
+                    f"Tool '{tool_name}' is registered but has no executor. "
+                    f"The capability backend may not be available or connected."
+                )
             raise CapabilityNotFoundError(f"Tool '{tool_name}' not found on CapBus")
 
         # v0.7.6: Validate tool output against output_schema

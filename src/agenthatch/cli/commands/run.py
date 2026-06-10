@@ -28,6 +28,7 @@ from agenthatch_core.config import (
     resolve_runtime_config,
 )
 from agenthatch_core.loop.agent_loop import RichToolCallEvent
+from agenthatch_core.loop.token_counter import ThinkingDelta
 from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
@@ -406,6 +407,11 @@ def _stream_response(agent: Any, user_input: str) -> str:
             lines.append(body)
         if not full_text and not reasoning_lines:
             lines.append("[dim]Thinking...[/dim]")
+        # v0.7.11: Show reasoning in status bar when toggle is ON
+        if getattr(agent, "_show_reasoning", False) and reasoning_lines:
+            last_reasoning = reasoning_lines[-2:]
+            for r in last_reasoning:
+                lines.append(f"[dim italic]{r[:80]}[/dim italic]")
         lines.append("")  # spacer
         lines.append(statusbar())
         return "\n".join(lines)
@@ -429,28 +435,27 @@ def _stream_response(agent: Any, user_input: str) -> str:
                         f"[bold green]done[/] ({elapsed}) "
                         f"[dim]→ {preview}[/]"
                     )
+            elif isinstance(event, ThinkingDelta):
+                # v0.7.11: Reasoning content — show in status bar, NOT in response body
+                reasoning_lines.append(event.content)
             elif isinstance(event, str):
-                # event could be reasoning_content or content delta — both are strings
                 full_text.append(event)
             live.update(Panel(render(), title="Agent"))
         live.update(Panel("[dim]✓ Done[/dim]", title="Agent"))
-        # v0.7.10: Build done-state footer with accumulated observability
-        done_footer = _build_done_footer(agent, start_time)
-        if done_footer:
-            console.print(done_footer)
+        # v0.7.11: Render observability INTO Done panel (not as separate footer)
+        done_body = _build_done_panel_content(agent, start_time)
+        live.update(Panel(done_body, title="Agent", border_style="green"))
     return final_text or "".join(full_text) or "(no response)"
 
 
-def _build_done_footer(agent: Any, start_time: float) -> str | None:
-    """v0.7.10: Build observability footer for done state.
+def _build_done_panel_content(agent: Any, start_time: float) -> str:
+    """v0.7.11: Build Done panel body WITH observability.
 
-    Shows accumulated tokens (in/out/total) and elapsed time,
-    preventing the "vanishing tokens" bug where info disappeared
-    when status changed from running to done.
+    Renders "✓ Done" plus token/time metrics directly inside the panel,
+    ensuring observability data is always visible where users expect it.
     """
-    parts: list[str] = []
     elapsed = time.monotonic() - start_time
-    parts.append(f"[dim]⏱ {elapsed:.2f}s[/dim]")
+    lines = ["[bold green]✓ Done[/bold green]"]
 
     if hasattr(agent, "token_counter"):
         snap = agent.token_counter.snapshot()
@@ -459,12 +464,12 @@ def _build_done_footer(agent: Any, start_time: float) -> str | None:
             prompt_tok = snap.get("prompt_tokens", 0)
             completion_tok = snap.get("completion_tokens", 0)
             call_count = snap.get("call_count", 0)
-            tok_detail = f"in: {prompt_tok:,} / out: {completion_tok:,}"
-            parts.append(f"[dim]Tokens: {total:,} ({tok_detail}) [{call_count} calls][/dim]")
+            lines.append(
+                f"[dim]Tokens: {total:,} (in: {prompt_tok:,}, out: {completion_tok:,})"
+                f" [{call_count} calls]  ⏱ {elapsed:.1f}s[/dim]"
+            )
 
-    if len(parts) <= 1:
-        return None
-    return " │ ".join(parts)
+    return "\n".join(lines)
 
 
 # ── /commands ───────────────────────────────────────────────────────────────
@@ -494,6 +499,12 @@ def _handle_command(user_input: str, agent: Any) -> str | None:
             return "[ok]Context compacted.[/ok]"
         except Exception as e:
             return f"[warn]Compact failed: {e}[/warn]"
+    elif cmd == "/thinking":
+        # v0.7.11: Toggle reasoning/thinking visibility for debugging
+        current = getattr(agent, "_show_reasoning", False)
+        agent._show_reasoning = not current
+        state = "ON" if agent._show_reasoning else "OFF"
+        return f"[ok]Reasoning display: {state}[/ok]"
     elif cmd in ("/quit", "/exit"):
         raise SystemExit(0)
     else:
@@ -668,6 +679,7 @@ def _render_help(agent: Any) -> str:
         "  [bold cyan]/config[/]     Configure API key, provider, or model",
         "  [bold cyan]/key-source[/] Show API key resolution chain",
         "  [bold cyan]/compact[/]    Trigger context compaction",
+        "  [bold cyan]/thinking[/]   Toggle reasoning display for debugging",
         "  [bold cyan]/quit[/]       Exit (or Ctrl+D)",
     ]
     return "\n".join(lines)

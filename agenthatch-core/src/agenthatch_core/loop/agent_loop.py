@@ -18,7 +18,7 @@ from agenthatch_core.context.manager import ContextManager
 from agenthatch_core.exceptions import CapabilityNotFoundError
 from agenthatch_core.hooks import HookPoint, HooksManager
 from agenthatch_core.llm.client import LLMClient, ToolCallResponse
-from agenthatch_core.loop.token_counter import TokenCounter
+from agenthatch_core.loop.token_counter import TokenCounter, ThinkingDelta
 from agenthatch_core.sandbox.executor import Sandbox
 from agenthatch_core.tools.bus import CapBus
 
@@ -85,6 +85,7 @@ class ConversationLoop:
         ctx: ContextManager,
         hooks: HooksManager | None = None,
         token_counter: TokenCounter | None = None,
+        memory_brick: Any = None,  # v0.7.11: MemoryBrick for persistent memory
     ):
         self.llm = llm
         self.capbus = capbus
@@ -92,6 +93,7 @@ class ConversationLoop:
         self.ctx = ctx
         self._hooks = hooks
         self._token_counter = token_counter
+        self._memory_brick = memory_brick  # v0.7.11
 
         self._max_retries: int = 3
         self._retry_base_delay: float = 1.0
@@ -182,6 +184,10 @@ class ConversationLoop:
                         ].arguments.get("summary", "Done.")
                         self.ctx.add_to_history("user", user_input)
                         self.ctx.add_to_history("assistant", summary)
+                        # v0.7.11: Record turn to memory
+                        if self._memory_brick:
+                            self._memory_brick.record_turn("user", user_input)
+                            self._memory_brick.record_turn("assistant", summary)
                         if self._hooks:
                             _ = self._hooks.execute(HookPoint.POST_TURN, {
                                 "turn_count": self.ctx._turn_count,
@@ -335,6 +341,11 @@ class ConversationLoop:
         final_text = response.text if response and response.text else ""
         if final_text:
             self.ctx.add_to_history("assistant", final_text)
+        # v0.7.11: Record turn to memory
+        if self._memory_brick:
+            self._memory_brick.record_turn("user", user_input)
+            if final_text:
+                self._memory_brick.record_turn("assistant", final_text)
 
         # POST_TURN hook
         if self._hooks:
@@ -582,8 +593,8 @@ class ConversationLoop:
                     yield delta.content
 
                 elif delta.type == "reasoning":
-                    # Reasoning content (including ThinkingDelta events)
-                    yield delta.content or ""
+                    # v0.7.11: Reasoning content emitted as ThinkingDelta, not visible text
+                    yield ThinkingDelta(content=delta.content or "")
 
                 elif delta.type == "tool_call_start" and not has_yielded_tool_header:
                     has_yielded_tool_header = True
@@ -611,6 +622,10 @@ class ConversationLoop:
                         yield summary if not full_response_text else ""
                         self.ctx.add_to_history("user", user_input)
                         self.ctx.add_to_history("assistant", summary)
+                        # v0.7.11: Record turn to memory
+                        if self._memory_brick:
+                            self._memory_brick.record_turn("user", user_input)
+                            self._memory_brick.record_turn("assistant", summary)
                         if self._hooks:
                             _ = self._hooks.execute(HookPoint.POST_TURN, {
                                 "turn_count": self.ctx._turn_count,
@@ -738,6 +753,11 @@ class ConversationLoop:
         final_text = full_response_text or accumulated_text
         if final_text:
             self.ctx.add_to_history("assistant", final_text)
+        # v0.7.11: Record turn to memory
+        if self._memory_brick:
+            self._memory_brick.record_turn("user", user_input)
+            if final_text:
+                self._memory_brick.record_turn("assistant", final_text)
 
         # POST_TURN hook (streaming)
         if self._hooks:

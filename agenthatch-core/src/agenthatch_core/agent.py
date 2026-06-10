@@ -244,6 +244,7 @@ class AHCoreAgent:
             if not cap_name:
                 continue
             schema = cap.get("input_schema", cap.get("schema", {}))
+            output_schema = cap.get("output_schema")
 
             if sandbox_usable:
                 executor = _provide_script_executor(
@@ -260,28 +261,61 @@ class AHCoreAgent:
                     },
                     source="spec",
                 )
-                # v0.7.6: Register output_schema for tool output validation
-                output_schema = cap.get("output_schema")
-                if output_schema:
-                    self.capbus._output_schemas[cap_name] = output_schema
-            else:
-                # v0.7.10: For MCP-only agents, register as description-only.
-                # The actual tool is provided via MCP tools registered below.
-                # The unprefixed alias will be added after MCP registration.
+            elif mcp_servers:
+                # v0.7.11: MCP-only agent — use MCPProxyExecutor
+                # with CLI fallback via mcporter
+                server_name = mcp_servers[0].get("name", "")
+                mcp_cfg = mcp_servers[0].get("config", {})
+                executor = MCPProxyExecutor(
+                    cap_name=cap_name,
+                    server_name=server_name,
+                    mcp_config=mcp_cfg,
+                    script_name=cap_to_script.get(cap_name),
+                )
                 self.capbus.register(
                     name=cap_name,
+                    executor=executor.execute,
                     schema={
                         "name": cap_name,
                         "description": cap.get("description", cap_name),
                         "parameters": schema.get("parameters", schema),
                     },
                     source="spec",
-                    cap_type="mcp_proxy",
                 )
-                # v0.7.6: Register output_schema for tool output validation
-                output_schema = cap.get("output_schema")
-                if output_schema:
-                    self.capbus._output_schemas[cap_name] = output_schema
+            else:
+                # v0.7.11: External skill agent (SandboxTier.NONE, no MCP)
+                # Use CLIExecutor for CLI-based capabilities
+                script_name = cap_to_script.get(cap_name)
+                if script_name:
+                    executor = CLIExecutor(
+                        cap_name=cap_name,
+                        cli_command=script_name,
+                    )
+                    self.capbus.register(
+                        name=cap_name,
+                        executor=executor.execute,
+                        schema={
+                            "name": cap_name,
+                            "description": cap.get("description", cap_name),
+                            "parameters": schema.get("parameters", schema),
+                        },
+                        source="spec",
+                    )
+                else:
+                    # Last resort: register as description-only
+                    self.capbus.register(
+                        name=cap_name,
+                        schema={
+                            "name": cap_name,
+                            "description": cap.get("description", cap_name),
+                            "parameters": schema.get("parameters", schema),
+                        },
+                        source="spec",
+                    )
+
+            # v0.7.6: Register output_schema for tool output validation
+            if output_schema:
+                self.capbus._output_schemas[cap_name] = output_schema
 
         # 2. requires → builtin injection or mark unavailable
         for req in requires:
@@ -298,29 +332,6 @@ class AHCoreAgent:
         # 3. MCP servers → connect and register tools
         for mcp_cfg in mcp_servers:
             _register_mcp_tools(self.capbus, mcp_cfg)
-
-        # v0.7.10: For MCP-only agents, wire unprefixed aliases so the LLM
-        # can call tools by the names it learned from interface.provides.
-        if not sandbox_usable and mcp_servers:
-            for cap in provides:
-                cap_name = cap.get("capability", cap.get("name", ""))
-                if not cap_name:
-                    continue
-                # Only alias if the unprefixed name isn't already registered
-                if cap_name not in self.capbus.capabilities:
-                    continue
-                cap_entry = self.capbus.capabilities[cap_name]
-                if cap_entry.executor is not None:
-                    continue  # Already has a real executor
-                # Search MCP-prefixed names for a match
-                for mcp_cfg in mcp_servers:
-                    mcp_name = mcp_cfg.get("name", "")
-                    prefixed = f"mcp__{mcp_name}__{cap_name}"
-                    if prefixed in self.capbus.capabilities:
-                        mcp_cap = self.capbus.capabilities[prefixed]
-                        if mcp_cap.executor is not None:
-                            cap_entry.executor = mcp_cap.executor
-                            break
 
         # 4. API templates → api__<name> tools
         for tmpl in api_templates:
@@ -682,3 +693,130 @@ def _api_template_executor(tmpl: dict) -> Callable[..., str]:
             return f"API call failed: {e}"
 
     return execute
+
+
+# ── v0.7.11: Proxy executors for MCP-only and external-skill agents ────
+
+class MCPProxyExecutor:
+    """Proxy executor for MCP-only agents.
+
+    Routes tool calls through mcporter CLI with graceful degradation.
+    Tries MCP server connection first; falls back to CLI script execution
+    if MCP is unavailable.
+    """
+
+    def __init__(
+        self,
+        cap_name: str,
+        server_name: str = "",
+        mcp_config: dict | None = None,
+        script_name: str | None = None,
+    ):
+        self.cap_name = cap_name
+        self.server_name = server_name
+        self.mcp_config = mcp_config or {}
+        self.script_name = script_name
+
+    def execute(self, arguments: dict) -> str:
+        """Execute capability, trying MCP first then CLI fallback."""
+        # Try MCP server connection
+        if self.mcp_config:
+            try:
+                return self._execute_via_mcp(arguments)
+            except Exception as e:
+                logger.debug(
+                    "MCPProxyExecutor: MCP call failed for %s: %s",
+                    self.cap_name, e,
+                )
+
+        # Fall back to CLI script execution
+        if self.script_name:
+            try:
+                return self._execute_via_cli(arguments)
+            except Exception as e:
+                return (
+                    f"Error: capability '{self.cap_name}' failed: {e}. "
+                    f"MCP server not connected and CLI fallback failed."
+                )
+
+        return (
+            f"Error: capability '{self.cap_name}' is not available. "
+            f"MCP server '{self.server_name}' not connected and "
+            f"no CLI fallback found."
+        )
+
+    def _execute_via_mcp(self, arguments: dict) -> str:
+        """Execute through mcporter MCP client."""
+        import subprocess
+
+        args_list = [
+            "mcporter", "call",
+            self.server_name,
+            self.cap_name,
+        ]
+        for k, v in arguments.items():
+            args_list.extend([f"--{k}", str(v)])
+
+        result = subprocess.run(
+            args_list,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"mcporter exited with {result.returncode}: {result.stderr}"
+            )
+        return result.stdout or "(empty response)"
+
+    def _execute_via_cli(self, arguments: dict) -> str:
+        """Execute as a CLI script directly."""
+        import subprocess
+
+        cmd = [self.script_name]
+        for k, v in arguments.items():
+            cmd.extend([f"--{k}", str(v)])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.stdout or result.stderr or "(no output)"
+
+
+class CLIExecutor:
+    """Execute capabilities as CLI commands for SandboxTier.NONE agents.
+
+    Used by external skill agents (e.g., agent-browser) that provide
+    capabilities via CLI tools rather than sandbox scripts or MCP servers.
+    """
+
+    def __init__(self, cap_name: str, cli_command: str):
+        self.cap_name = cap_name
+        self.cli_command = cli_command
+
+    def execute(self, arguments: dict) -> str:
+        """Run the CLI command with tool arguments."""
+        import subprocess
+
+        cmd = self.cli_command.split()
+        for k, v in arguments.items():
+            cmd.extend([f"--{k}", str(v)])
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return result.stdout or result.stderr or "(no output)"
+        except FileNotFoundError:
+            return (
+                f"Error: CLI tool '{self.cli_command}' not found. "
+                f"Capability '{self.cap_name}' requires this tool to be installed."
+            )
+        except Exception as e:
+            return f"Error executing '{self.cap_name}': {e}"

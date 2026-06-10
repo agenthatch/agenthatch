@@ -308,7 +308,8 @@ class LLMClient:
 
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_parts.append(delta.reasoning_content)
-                yield delta.reasoning_content
+                # v0.7.11: Emit as ThinkingDelta event, NOT as visible content
+                yield ThinkingDelta(content=delta.reasoning_content)
 
         text = "".join(text_parts)
         if not text and reasoning_parts:

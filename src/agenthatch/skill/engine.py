@@ -799,6 +799,43 @@ class InferMCPServersHarness(AgentHarness):
         )
 
 
+# ── v0.7.11: MCP config merge helper ────────────────────────────────────
+
+def _merge_mcp_configs(
+    interface_mcp: list[dict[str, Any]],
+    harness_f_mcp: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge MCP server configs from Harness F into interface spec.
+
+    Preserves existing interface config and enriches with Harness F's
+    detected transport, url, and command details.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for item in interface_mcp:
+        name = item.get("name", "")
+        if name:
+            merged[name] = dict(item)
+
+    for item in harness_f_mcp:
+        name = item.get("name", "")
+        if not name:
+            continue
+        if name in merged:
+            existing = merged[name]
+            config = dict(existing.get("config", {}))
+            harness_config = item.get("config", {})
+            # Harness F data takes precedence
+            config = {**config, **harness_config}
+            for key in ("transport", "url", "command"):
+                if key in item and key not in config:
+                    config[key] = item[key]
+            existing["config"] = config
+        else:
+            merged[name] = dict(item)
+
+    return list(merged.values())
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Orchestrator
 
@@ -1008,6 +1045,12 @@ class Orchestrator:
                 )
             # Enrich MCP servers from SKILL.md body patterns
             mcp_servers = self._enrich_mcp_from_body(mcp_servers, context.body)
+            # v0.7.11: Merge with existing interface.mcp_servers from Harness E
+            # This preserves Harness F detection results (with actual urls/transport)
+            # over Harness C defaults (which often have empty config)
+            interface_mcp = ahs_dict.get("interface", {}).get("mcp_servers", [])
+            if interface_mcp and mcp_servers:
+                mcp_servers = _merge_mcp_configs(interface_mcp, mcp_servers)
             if mcp_servers:
                 if "interface" not in ahs_dict:
                     ahs_dict["interface"] = {}
