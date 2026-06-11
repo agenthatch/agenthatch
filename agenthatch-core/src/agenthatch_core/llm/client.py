@@ -85,6 +85,8 @@ class LLMClient:
         max_tokens: int | None = None,
         features: ProviderFeatures | None = None,
         context_window: int | None = None,
+        thinking: bool = True,              # v0.8: deep thinking ON by default
+        reasoning_effort: str = "medium",    # v0.8: OpenAI o-series
         **kwargs: Any,
     ):
         if not api_key:
@@ -95,6 +97,8 @@ class LLMClient:
         self._features = features or ProviderFeatures()
         self._max_tokens = max_tokens or 4096
         self._context_window = context_window or 128000
+        self._thinking = thinking
+        self._reasoning_effort = reasoning_effort
         self.last_usage: Any = None
 
         if self._features.requires_anthropic_adapter:
@@ -138,6 +142,28 @@ class LLMClient:
     @property
     def context_window(self) -> int:
         return self._context_window
+
+    # ── v0.8: Deep thinking configuration ─────────────────────────────
+
+    def _build_thinking_body(self) -> dict | None:
+        """Build extra_body for deep thinking.
+
+        Provider-specific thinking configuration:
+          DeepSeek:  {"thinking": {"type": "enabled"}}
+          OpenAI:    {"reasoning_effort": "medium"}   (o-series)
+          Anthropic: {"thinking": {"type": "enabled", "budget_tokens": 4000}}
+          Others:    None (passthrough)
+        """
+        if not self._thinking:
+            return None
+        provider = self._provider_name.lower()
+        if "deepseek" in provider:
+            return {"thinking": {"type": "enabled"}}
+        elif "openai" in provider:
+            return {"reasoning_effort": self._reasoning_effort}
+        elif "anthropic" in provider:
+            return {"thinking": {"type": "enabled", "budget_tokens": 4000}}
+        return None
 
     def _effective_tool_choice(
         self,
@@ -327,54 +353,67 @@ class LLMClient:
         temperature: float = 0.3,
         max_tokens: int = 4096,
         max_retries: int = 2,
+        thinking: bool | None = None,  # v0.8: per-call thinking override
     ) -> Any:
-        """Structured output via Instructor (LLM -> Pydantic)."""
+        """v0.8: Structured output via Instructor with optional deep thinking.
+
+        Passes extra_body for thinking when enabled. Falls back gracefully
+        if Instructor + thinking are incompatible.
+        """
         import instructor
 
+        extra = self._build_thinking_body() if (
+            thinking if thinking is not None else self._thinking
+        ) else None
+
         client = instructor.from_openai(self._client, mode=instructor.Mode.JSON)
-
-        try:
-            return client.chat.completions.create(
-                model=model or self._model,
-                messages=messages,  # type: ignore[arg-type]
-                response_model=response_model,
-                max_retries=max_retries,
-            )
-        except Exception as e:
-            logger.warning(
-                "chat_structured() Instructor call failed, falling back to raw JSON parsing: %s",
-                e,
-            )
-            pass
-
-        # Fallback for reasoning models
-        response = self._retry(
-            self._client.chat.completions.create,
+        call_kwargs: dict[str, Any] = dict(
             model=model or self._model,
             messages=messages,  # type: ignore[arg-type]
-            temperature=0.0,
-            max_tokens=4096,
+            response_model=response_model,
+            max_retries=max_retries,
         )
-        self.last_usage = getattr(response, "usage", None)
-        msg = response.choices[0].message
-        content = self._extract_content(msg)
-        if not content:
-            raise ValueError(
-                "chat_structured: model returned empty content"
-            )
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as e:
-            from agenthatch_core.context.manager import _extract_balanced_json
+        if extra:
+            call_kwargs["extra_body"] = extra
 
-            json_strs = _extract_balanced_json(content)
-            if json_strs:
-                parsed = json.loads(json_strs[0])
-            else:
+        try:
+            return client.chat.completions.create(**call_kwargs)
+        except Exception as e:
+            logger.debug("chat_structured Instructor call failed: %s", e)
+            # v0.8: Try without thinking
+            if extra:
+                call_kwargs.pop("extra_body", None)
+                try:
+                    return client.chat.completions.create(**call_kwargs)
+                except Exception:
+                    pass
+            # Fallback: raw JSON parsing (pre-v0.8 behavior)
+            response = self._retry(
+                self._client.chat.completions.create,
+                model=model or self._model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=0.0,
+                max_tokens=4096,
+            )
+            self.last_usage = getattr(response, "usage", None)
+            msg = response.choices[0].message
+            content = self._extract_content(msg)
+            if not content:
                 raise ValueError(
-                    "chat_structured: no valid JSON found in response"
+                    "chat_structured: model returned empty content"
                 ) from e
-        return response_model.model_validate(parsed)  # type: ignore[attr-defined]
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError as e2:
+                from agenthatch_core.context.manager import _extract_balanced_json
+                json_strs = _extract_balanced_json(content)
+                if json_strs:
+                    parsed = json.loads(json_strs[0])
+                else:
+                    raise ValueError(
+                        "chat_structured: no valid JSON found in response"
+                    ) from e2
+            return response_model.model_validate(parsed)
 
     # ── Tool Calling ─────────────────────────────────────────────────
 

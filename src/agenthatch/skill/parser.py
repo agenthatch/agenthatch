@@ -1,4 +1,4 @@
-"""Phase 1: Deterministic Context Assembly.
+"""Phase 1: Deterministic Context Assembly + Phase 1.5 ScriptAnalyzer.
 
 Three-step processing, zero AI participation:
   Step 1: Path resolution → dir_name
@@ -7,12 +7,20 @@ Three-step processing, zero AI participation:
 
 Phase 1 makes NO semantic classification of files.
 That is LLM's responsibility (Phase 2 Harness).
+
+v0.8: Phase 1.5 ScriptAnalyzer adds deterministic AST parsing of Python
+scripts and regex parsing of shell scripts to extract function signatures.
+This feeds into Harness C for precise interface inference.
 """
 
 from __future__ import annotations
 
+import ast as _ast
 import hashlib
 import os
+import re as _re
+from dataclasses import dataclass
+from dataclasses import field as _dc_field
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +95,7 @@ def assemble_context(skill_path: str | Path) -> ContextPack:
         file_manifest=manifest,
         dir_name=dir_name,
         parse_warnings=warnings,
+        skill_dir=skill_dir,  # v0.8: for Phase 1.5 ScriptAnalyzer
     )
 
 
@@ -213,6 +222,220 @@ def _find_markdown_file(skill_dir: Path) -> Path:
     if not md_files:
         raise FileNotFoundError(f"No .md file found in {skill_dir}")
     return sorted(md_files)[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# v0.8: Phase 1.5 ScriptAnalyzer — deterministic AST/regex analysis
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class ToolSchema:
+    """Deterministically extracted tool signature from a script."""
+    name: str
+    args: list[dict[str, str | None]] = _dc_field(default_factory=list)
+    returns: str | None = None
+    docstring: str | None = None
+    source_file: str = ""
+
+
+@dataclass
+class ScriptManifest:
+    """Output of Phase 1.5 ScriptAnalyzer.
+
+    Contains deterministically extracted function signatures from all
+    scripts in the skill directory. Fed into Harness C for precise
+    interface inference instead of raw file content.
+    """
+    python_functions: list[ToolSchema] = _dc_field(default_factory=list)
+    shell_functions: list[dict[str, str]] = _dc_field(default_factory=list)
+    has_binary_assets: list[str] = _dc_field(default_factory=list)
+    asset_metadata: list[dict[str, Any]] = _dc_field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not self.python_functions and not self.shell_functions
+
+
+def extract_python_signatures(file_path: Path) -> list[ToolSchema]:
+    """AST-parse a Python script, extract public function signatures.
+
+    Deterministic, zero LLM. Uses Python's built-in ``ast`` module.
+    Skips private functions (those starting with ``_``).
+
+    Returns:
+        List of ToolSchema, one per public function found.
+    """
+    try:
+        tree = _ast.parse(file_path.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError, OSError) as e:
+        import logging
+        logging.getLogger("agenthatch").warning(
+            "ScriptAnalyzer: cannot parse %s: %s", file_path, e
+        )
+        return []
+
+    functions: list[ToolSchema] = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.FunctionDef) and not node.name.startswith("_"):
+            args: list[dict[str, str | None]] = []
+            for arg in node.args.args:
+                arg_type: str | None = None
+                if arg.annotation:
+                    try:
+                        arg_type = _ast.unparse(arg.annotation)
+                    except Exception:
+                        arg_type = None
+                args.append({"name": arg.arg, "type": arg_type})
+
+            returns: str | None = None
+            if node.returns:
+                try:
+                    returns = _ast.unparse(node.returns)
+                except Exception:
+                    returns = None
+
+            functions.append(ToolSchema(
+                name=node.name,
+                args=args,
+                returns=returns,
+                docstring=_ast.get_docstring(node),
+                source_file=str(file_path),
+            ))
+    return functions
+
+
+def extract_shell_functions(file_path: Path) -> list[dict[str, str]]:
+    """Regex-parse shell scripts for function definitions.
+
+    Matches both ``function name()`` and ``name()`` syntax.
+    """
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return []
+
+    functions: list[dict[str, str]] = []
+    pattern = _re.compile(r'^(?:function\s+)?(\w+)\s*\(\s*\)', _re.MULTILINE)
+    for match in pattern.finditer(content):
+        functions.append({
+            "name": match.group(1),
+            "source_file": str(file_path),
+        })
+    return functions
+
+
+def analyze_scripts(skill_dir: Path) -> ScriptManifest:
+    """Phase 1.5 entry point: analyze all scripts/ in a skill directory.
+
+    Walks the ``skills/scripts/`` subdirectory and extracts function
+    signatures from all Python (.py) and shell (.sh) files.
+
+    Args:
+        skill_dir: Path to the skill directory (contains skills/scripts/).
+
+    Returns:
+        ScriptManifest with all extracted function signatures.
+    """
+    manifest = ScriptManifest()
+    scripts_dir = skill_dir / "skills" / "scripts"
+    if not scripts_dir.is_dir():
+        return manifest
+
+    for script_file in sorted(scripts_dir.iterdir()):
+        if not script_file.is_file():
+            continue
+        if script_file.suffix == ".py":
+            manifest.python_functions.extend(
+                extract_python_signatures(script_file)
+            )
+        elif script_file.suffix == ".sh":
+            manifest.shell_functions.extend(
+                extract_shell_functions(script_file)
+            )
+    return manifest
+
+
+def analyze_scripts_from_manifest(file_manifest: FileManifest) -> ScriptManifest:
+    """Analyze scripts from a FileManifest (in-memory, no disk access).
+
+    Used when script content is already loaded in FileManifest entries.
+    Scans entries with .py/.sh suffixes and attempts AST/regex extraction
+    from their content strings.
+    """
+    manifest = ScriptManifest()
+    for entry in file_manifest.entries:
+        if entry.content is None:
+            continue
+        suffix = Path(entry.path).suffix.lower()
+        if suffix == ".py":
+            try:
+                tree = _ast.parse(entry.content)
+            except SyntaxError:
+                continue
+            for node in _ast.walk(tree):
+                if isinstance(node, _ast.FunctionDef) and not node.name.startswith("_"):
+                    args: list[dict[str, str | None]] = []
+                    for arg in node.args.args:
+                        arg_type: str | None = None
+                        if arg.annotation:
+                            try:
+                                arg_type = _ast.unparse(arg.annotation)
+                            except Exception:
+                                arg_type = None
+                        args.append({"name": arg.arg, "type": arg_type})
+                    returns: str | None = None
+                    if node.returns:
+                        try:
+                            returns = _ast.unparse(node.returns)
+                        except Exception:
+                            returns = None
+                    manifest.python_functions.append(ToolSchema(
+                        name=node.name,
+                        args=args,
+                        returns=returns,
+                        docstring=_ast.get_docstring(node),
+                        source_file=entry.path,
+                    ))
+        elif suffix == ".sh":
+            pattern = _re.compile(r'^(?:function\s+)?(\w+)\s*\(\s*\)', _re.MULTILINE)
+            for match in pattern.finditer(entry.content):
+                manifest.shell_functions.append({
+                    "name": match.group(1),
+                    "source_file": entry.path,
+                })
+    return manifest
+
+
+def format_script_manifest(manifest: ScriptManifest) -> str:
+    """Format ScriptManifest for LLM consumption in Harness C.
+
+    Produces a compact summary (< 1KB typical) with all function
+    signatures, types, and docstrings. Harness C uses this instead
+    of raw file content for precise interface inference.
+    """
+    if manifest.is_empty():
+        return "(no script signatures extracted)"
+
+    lines: list[str] = ["## Extracted Script Signatures (deterministic)\n"]
+
+    if manifest.python_functions:
+        lines.append("### Python Functions\n")
+        for func in manifest.python_functions:
+            args_str = ", ".join(
+                f"{a['name']}: {a['type'] or 'Any'}" for a in func.args
+            )
+            returns = f" → {func.returns}" if func.returns else ""
+            lines.append(f"- `{func.name}({args_str})`{returns}")
+            if func.docstring:
+                doc = func.docstring[:120].replace("\n", " ")
+                lines.append(f"  > {doc}")
+
+    if manifest.shell_functions:
+        lines.append("\n### Shell Functions\n")
+        for func in manifest.shell_functions:  # type: ignore[assignment]
+            lines.append(f"- `{func['name']}()` (shell)")  # type: ignore[index]
+
+    return "\n".join(lines)
 
 
 def _best_effort_parse_yaml(skill_dir: Path) -> tuple[dict[str, Any] | None, str, list[str]]:

@@ -18,12 +18,10 @@ import yaml
 from agenthatch_core.bricks.manifest import (
     BrickManifest,
     LoopKind,
-    SandboxTier,
 )
 from agenthatch_core.bricks.stubs import (
     _NullCapBus,
     _NullHooks,
-    _NullSandbox,
 )
 from agenthatch_core.context.manager import ContextManager
 from agenthatch_core.hooks import HooksManager
@@ -170,15 +168,8 @@ class SkillAgent:
         else:
             loop_engine = LoopKind.CONVERSATION
 
-        # Map archetype → sandbox tier
-        if archetype == SkillArchetype.PROMPT_ONLY:
-            sandbox = SandboxTier.NONE
-        elif archetype == SkillArchetype.EXTERNAL_TOOL:
-            sandbox = SandboxTier.EXTENDED
-        elif archetype == SkillArchetype.MCP_CONNECTOR:
-            sandbox = SandboxTier.NONE
-        else:
-            sandbox = SandboxTier.STANDARD
+        # v0.8: All archetypes use direct subprocess execution.
+        # No sandbox tier selection — Sandbox is always enabled.
 
         capbus = archetype != SkillArchetype.PROMPT_ONLY
         hooks = archetype not in (
@@ -203,7 +194,6 @@ class SkillAgent:
         return BrickManifest(
             loop_engine=loop_engine,
             capbus=capbus,
-            sandbox=sandbox,
             hooks=hooks,
             guard=guard,
             guard_active=guard_active,
@@ -244,22 +234,17 @@ class SkillAgent:
 
         runtime_config = self._resolve_runtime_config(provider, api_key, model)
 
-        # ── v0.7: Assemble bricks via manifest (real or null stubs) ──
+        # v0.8: Sandbox always enabled — direct subprocess execution
         self.capbus: Any = CapBus() if self._manifest.capbus else _NullCapBus()
-        self.sandbox: Any = (
-            Sandbox() if self._manifest.sandbox != SandboxTier.NONE
-            else _NullSandbox()
-        )
+        self.sandbox: Any = Sandbox()
 
-        # Apply sandbox whitelist tier
-        if self._manifest.sandbox != SandboxTier.NONE and hasattr(
-            self.sandbox, "configure"
-        ):
+        # Apply default whitelist
+        if hasattr(self.sandbox, "configure"):
             from agenthatch_core.bricks.sandboxes import (
                 SandboxWhitelist,
             )
-            whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
-            self.sandbox._allowed_commands = whitelist.commands  # type: ignore[union-attr]
+            whitelist = SandboxWhitelist.default()
+            self.sandbox._allowed_commands = whitelist.commands  # type: ignore[union-attr,unused-ignore]
 
         # ── v0.5: Wire hooks + state management ──
         self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
@@ -485,7 +470,6 @@ class SkillAgent:
 
         self.sandbox.configure(
             runtime=self.spec.base.runtime,
-            isolated=self.spec.base.sandbox,
             timeout=self.spec.base.timeout,
             env={e.name: e.description for e in self.spec.base.env},
         )
@@ -494,10 +478,10 @@ class SkillAgent:
         self._mcp_client = MCPClient()
         for server_ref in self.spec.interface.mcp_servers:
             config = MCPServerConfig(
-                command=server_ref.config.get("command", ""),
-                args=server_ref.config.get("args", []),
-                env=server_ref.config.get("env", {}),
-                transport=server_ref.config.get("transport", "stdio"),
+                command=getattr(server_ref, "command", "") or "",
+                args=getattr(server_ref, "args", []) or [],
+                env=getattr(server_ref, "env", {}) or {},
+                transport=getattr(server_ref, "transport", "stdio") or "stdio",
             )
             self._mcp_client.add_server(server_ref.name, config)
         self._mcp_client.connect_all()

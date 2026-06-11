@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -55,6 +56,7 @@ class ContextPack:
     file_manifest: FileManifest
     dir_name: str
     parse_warnings: list[str] = field(default_factory=list)
+    skill_dir: Path | None = None  # v0.8: skill directory path for Phase 1.5 ScriptAnalyzer
 
 
 # ─── Harness Contracts ─────────────────────────────────────────────────
@@ -124,10 +126,18 @@ class Capability(BaseModel):
     output_schema: dict[str, Any] = {}   # v0.7.6: JSON Schema for tool output validation
 
 
-class MCPServerRef(BaseModel):
-    """Reference to an MCP server."""
+class MCPServerEntry(BaseModel):
+    """Single MCP server reference from Harness F inference."""
     name: str
-    config: dict[str, Any] = {}
+    transport: str = ""          # "stdio", "streamable_http", "sse", or ""
+    url: str = ""
+    command: str = ""
+    description: str = ""
+
+
+class InferMCPServersOutput(BaseModel):
+    """Harness F structured output."""
+    mcp_servers: list[MCPServerEntry] = Field(default_factory=list)
 
 
 class APIParam(BaseModel):
@@ -152,7 +162,7 @@ class Interface(BaseModel):
     provides: list[Capability]
     requires: list[Capability] = []
     compatible_with: list[str] = []
-    mcp_servers: list[MCPServerRef] = []
+    mcp_servers: list[MCPServerEntry] = []
     api_templates: list[APITemplate] = []
 
 
@@ -190,7 +200,6 @@ class Instructions(BaseModel):
 class BaseSpec(BaseModel):
     """Runtime base specification."""
     runtime: str | None = None     # python3.11, bash, node20, or null (pure instruction)
-    sandbox: bool = False
     timeout: str = "60s"
     env: list[EnvVar] = []
     dependencies: list[str] = []
@@ -226,16 +235,6 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
             data["timeout"] = "60s"
         elif val is None:
             data["timeout"] = "60s"
-
-    # sandbox: "true"/"false" → True/False, also handle int 0/1 and None
-    if "sandbox" in data:
-        val = data["sandbox"]
-        if isinstance(val, str):
-            data["sandbox"] = val.lower().strip() in ("true", "yes", "1")
-        elif isinstance(val, (int, float)):
-            data["sandbox"] = bool(val)
-        elif val is None:
-            data["sandbox"] = False
 
     # runtime: normalize, reject invalid values
     VALID_RUNTIMES = {"python3.11", "bash", "node20"}

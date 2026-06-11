@@ -114,7 +114,7 @@ Confidence rules:
 """
 
 INTENT_FEW_SHOT = """\
-Example — Weather Reporter skill:
+Example 1 — Weather Reporter (API-driven):
 ```
 description: "Fetches current weather conditions and 5-day forecast for any city"
 body: (2KB of Markdown with API endpoints, scripts, examples)
@@ -122,6 +122,33 @@ frontmatter_name: "Weather Reporter"
 ```
 Output:
 {""intent"": {""triggers"": [""weather"", ""forecast"", ""temperature"", ""humidity"", ""wind"", ""climate"", ""meteorological""], ""satisfies"": [""get weather for {city}"", ""check temperature in {city}"", ""get forecast for {city}"", ""weather report for {location}""], ""summary"": ""Fetches current weather conditions and multi-day forecasts for any city using real-time API data.""}}  # noqa: E501
+
+Example 2 — Knowledge-Type (coding guide):
+```
+description: "Python coding style guide and best practices reference"
+body: (3KB Markdown with naming conventions, formatting rules, commit message templates)
+frontmatter_name: "Python Style Guide"
+```
+Output:
+{""intent"": {""triggers"": [""style"", ""formatting"", ""convention"", ""naming"", ""pep8"", ""lint"", ""best practice"", ""code review""], ""satisfies"": [""check code style for {file}"", ""review {code} against conventions"", ""suggest naming for {function}"", ""format code according to style guide"", ""explain best practice for {topic}""], ""summary"": ""Provides Python coding style conventions, formatting rules, and best practices for maintaining consistent code quality across projects.""}}  # noqa: E501
+
+Example 3 — Integration-Type (MCP connector):
+```
+description: "Connects to Cooper knowledge base via MCP server for document search and management"
+body: (1.5KB Markdown with mcp__cooper__search, mcp__cooper__read_document patterns)
+frontmatter_name: "Cooper Knowledge Base"
+```
+Output:
+{""intent"": {""triggers"": [""cooper"", ""knowledge base"", ""search"", ""document"", ""doc"", ""wiki"", ""find"", ""lookup"", ""query""], ""satisfies"": [""search knowledge base for {query}"", ""find documents about {topic}"", ""read document {id}"", ""create knowledge base entry"", ""list team spaces""], ""summary"": ""Connects to Cooper knowledge management platform for searching, reading, creating, and managing documents across team spaces and knowledge bases.""}}  # noqa: E501
+
+Example 4 — Pure Instruction (no scripts):
+```
+description: "Generate weekly project status reports from git activity"
+body: (1KB Markdown with instructions for gathering commits, formatting, and sending)
+frontmatter_name: "Weekly Status Reporter"
+```
+Output:
+{""intent"": {""triggers"": [""status"", ""report"", ""weekly"", ""summary"", ""update"", ""progress"", ""recap"", ""standup""], ""satisfies"": [""generate weekly status report"", ""summarize project progress"", ""create sprint recap"", ""send status update to {team}""], ""summary"": ""Generates structured weekly project status reports by aggregating git activity, commit messages, and recent changes into a formatted summary.""}}  # noqa: E501
 """
 
 
@@ -160,23 +187,41 @@ Confidence rules:
 """
 
 INTERFACE_FEW_SHOT = """\
-Example — Weather Reporter skill:
+Example 1 — Weather Reporter (API-driven, shell script):
 ```
 body: (skill that calls weather API and returns current conditions + forecast + alerts)
 script_paths: ["scripts/query_weather.sh"]
 frontmatter_allowed_tools: null
 ```
 Output:
-{""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data"", ""input_schema"": {""city"": ""string"", ""temp"": ""number"", ""condition"": ""string""}}, {""capability"": ""weather_forecast"", ""type"": ""data"", ""input_schema"": {""city"": ""string"", ""daily"": [{}]}}, {""capability"": ""weather_alert"", ""type"": ""event"", ""input_schema"": {""alert_type"": ""string"", ""severity"": ""string"", ""message"": ""string""}}], ""requires"": [{""capability"": ""http_client"", ""type"": ""transport"", ""optional"": false}, {""capability"": ""json_parser"", ""type"": ""utility"", ""optional"": false}], ""compatible_with"": [""slack-notifier"", ""dashboard-builder""]}}  # noqa: E501
+{""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data"", ""input_schema"": {""city"": ""string"", ""temp"": ""number"", ""condition"": ""string""}}, {""capability"": ""weather_forecast"", ""type"": ""data"", ""input_schema"": {""city"": ""string"", ""daily"": [{}]}}, {""capability"": ""weather_alert"", ""type"": ""event"", ""input_schema"": {""alert_type"": ""string"", ""severity"": ""string"", ""message"": ""string""}}], ""requires"": [{""capability"": ""http_client"", ""type"": ""action"", ""optional"": false}, {""capability"": ""json_parser"", ""type"": ""transform"", ""optional"": false}], ""compatible_with"": [""slack-notifier"", ""dashboard-builder""]}}  # noqa: E501
 
-Example — PDF Editor multi-mode:
+Example 2 — PDF Editor (multi-mode, Python script):
 ```
 body: (PDF editor with edit, merge, and split modes)
 script_paths: ["scripts/edit_pdf.py"]
 frontmatter_allowed_tools: ["pdf_tool"]
 ```
 Output:
-{""interface"": {""provides"": [{""capability"": ""pdf_edit"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_merge"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_split"", ""type"": ""transform"", ""input_schema"": {}}], ""requires"": [{""capability"": ""file_reader"", ""type"": ""io"", ""optional"": false}, {""capability"": ""file_writer"", ""type"": ""io"", ""optional"": false}], ""compatible_with"": [""report-generator""]}}  # noqa: E501
+{""interface"": {""provides"": [{""capability"": ""pdf_edit"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_merge"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_split"", ""type"": ""transform"", ""input_schema"": {}}], ""requires"": [{""capability"": ""file_reader"", ""type"": ""data"", ""optional"": false}, {""capability"": ""file_writer"", ""type"": ""data"", ""optional"": false}], ""compatible_with"": [""report-generator""]}}  # noqa: E501
+
+Example 3 — MCP Connector (integration-type, multiple tools):
+```
+body: (Cooper knowledge base connector with mcp__cooper__search, mcp__cooper__read_document, mcp__cooper__create_document, mcp__cooper__download_file)
+script_paths: []
+frontmatter_allowed_tools: null
+```
+Output:
+{""interface"": {""provides"": [{""capability"": ""search_content"", ""type"": ""data"", ""input_schema"": {""query"": ""string"", ""limit"": ""number""}}, {""capability"": ""read_document"", ""type"": ""data"", ""input_schema"": {""doc_id"": ""string""}}, {""capability"": ""create_document"", ""type"": ""action"", ""input_schema"": {""title"": ""string"", ""content"": ""string""}}, {""capability"": ""download_file"", ""type"": ""data"", ""input_schema"": {""file_id"": ""string""}}], ""requires"": [{""capability"": ""http_client"", ""type"": ""action"", ""optional"": false}], ""compatible_with"": [""slack-notifier"", ""report-generator""]}}  # noqa: E501
+
+Example 4 — Single-Script (no-script type, pure instruction):
+```
+body: (Weekly status report generator using git log analysis and markdown formatting)
+script_paths: []
+frontmatter_allowed_tools: null
+```
+Output:
+{""interface"": {""provides"": [{""capability"": ""generate_report"", ""type"": ""transform"", ""input_schema"": {""period"": ""string"", ""repo"": ""string""}}, {""capability"": ""format_markdown"", ""type"": ""renderer"", ""input_schema"": {""content"": ""string""}}], ""requires"": [{""capability"": ""http_client"", ""type"": ""action"", ""optional"": true}], ""compatible_with"": [""slack-notifier"", ""email-sender""]}}  # noqa: E501
 """
 
 
@@ -189,7 +234,6 @@ You are a runtime environment and workflow structure analyst.
 
 Rules:
   - runtime: python3.11 (.py), bash (.sh), node20 (.js), or null (no scripts)
-  - sandbox: true if network/filesystem/external API calls detected
   - timeout: "30s" (simple), "120s" (API calls), "600s" (heavy processing)
   - env: UPPERCASE named variables, especially with _API_KEY, _TOKEN, _SECRET suffixes
   - dependencies: "pip install X" → X, "npm install X" → X
@@ -198,7 +242,6 @@ Rules:
 
 Pure instruction skill (no scripts):
   - runtime = null
-  - sandbox = false
   - timeout = "60s"
 
 Confidence rules:
@@ -209,7 +252,7 @@ Confidence rules:
 """
 
 BASE_FEW_SHOT = """\
-Example — Weather Reporter (script-driven):
+Example 1 — Weather Reporter (script-driven):
 ```
 body: (2KB markdown with weather API calls, .sh script reference, numbered steps)
 script_paths: ["scripts/query_weather.sh"]
@@ -217,9 +260,9 @@ frontmatter_compatibility: null
 frontmatter_allowed_tools: null
 ```
 Output:
-{""base"": {""runtime"": ""bash"", ""sandbox"": true, ""timeout"": ""120s"", ""env"": [{""name"": ""OPENWEATHER_API_KEY"", ""required"": true, ""description"": ""OpenWeather API key for authentication""}], ""dependencies"": [""curl"", ""jq""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Validate environment variables"", ""script"": null}, {""step"": 2, ""description"": ""Call OpenWeather API"", ""script"": ""scripts/query_weather.sh""}, {""step"": 3, ""description"": ""Format JSON response"", ""script"": null}], ""rules"": [""Always include source attribution to OpenWeather"", ""Never expose API key in output""], ""safety"": {""confirmation_required_for"": [], ""plan_required"": false, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
+{""base"": {""runtime"": ""bash"", ""timeout"": ""120s"", ""env"": [{""name"": ""OPENWEATHER_API_KEY"", ""required"": true, ""description"": ""OpenWeather API key for authentication""}], ""dependencies"": [""curl"", ""jq""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Validate environment variables"", ""script"": null}, {""step"": 2, ""description"": ""Call OpenWeather API"", ""script"": ""scripts/query_weather.sh""}, {""step"": 3, ""description"": ""Format JSON response"", ""script"": null}], ""rules"": [""Always include source attribution to OpenWeather"", ""Never expose API key in output""], ""safety"": {""confirmation_required_for"": [], ""plan_required"": false, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
 
-Example — Coding Style Guide (pure instruction):
+Example 2 — Coding Style Guide (pure instruction):
 ```
 body: (Markdown style guide with rules for naming, formatting, commit messages)
 script_paths: []
@@ -227,7 +270,17 @@ frontmatter_compatibility: null
 frontmatter_allowed_tools: null
 ```
 Output:
-{""base"": {""runtime"": null, ""sandbox"": false, ""timeout"": null, ""env"": [], ""dependencies"": []}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Review code against style rules"", ""script"": null}], ""rules"": [""Always use camelCase for variables"", ""Never commit directly to main"", ""Ensure all functions have docstrings""], ""safety"": {""confirmation_required_for"": [""committing code""], ""plan_required"": true, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
+{""base"": {""runtime"": null, ""timeout"": null, ""env"": [], ""dependencies"": []}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Review code against style rules"", ""script"": null}], ""rules"": [""Always use camelCase for variables"", ""Never commit directly to main"", ""Ensure all functions have docstrings""], ""safety"": {""confirmation_required_for"": [""committing code""], ""plan_required"": true, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
+
+Example 3 — Mixed Script + Instruction (MCP connector with documents):
+```
+body: (1.5KB markdown with mcp__cooper__search and mcp__cooper__read_document patterns, numbered workflow steps)
+script_paths: []
+frontmatter_compatibility: null
+frontmatter_allowed_tools: null
+```
+Output:
+{""base"": {""runtime"": ""python3.11"", ""timeout"": ""120s"", ""env"": [{""name"": ""COOPER_TOKEN"", ""required"": true, ""description"": ""Cooper API bearer token for authentication""}], ""dependencies"": [""requests""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""List available knowledge bases"", ""script"": null}, {""step"": 2, ""description"": ""Search for relevant documents"", ""script"": null}, {""step"": 3, ""description"": ""Read selected document"", ""script"": null}, {""step"": 4, ""description"": ""Format and present results"", ""script"": null}], ""rules"": [""Always verify document exists before reading"", ""Never expose bearer token in output"", ""Ensure results are formatted as markdown tables""], ""safety"": {""confirmation_required_for"": [""create_document"", ""delete_document""], ""plan_required"": false, ""max_rows_default"": 50, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
 """
 
 
@@ -247,6 +300,10 @@ Cross-field checks to perform:
   5. data type provides → schema should not be empty
   6. body mentions API key → base.env must include corresponding env var
   7. version is valid semver → fix if not
+  8. WORKFLOW-SCRIPT CONSISTENCY: For each workflow step that references a script
+     by name, verify that script exists in resources.scripts. If a workflow step
+     references a script_name, the corresponding script must be present in the
+     discovered scripts list. Flag any workflow→script mismatches as warnings.
 
 Confidence calculation:
   overall = A * 0.15 + B * 0.20 + C * 0.35 + D * 0.30
@@ -255,7 +312,7 @@ Confidence calculation:
 
 ASSEMBLE_FEW_SHOT = """\
 Input:
-{""identity"": {""id"": ""weather-reporter"", ""display_name"": ""Weather Reporter"", ""version"": ""1.2.0""}, ""intent"": {""triggers"": [""weather"", ""forecast""], ""satisfies"": [""get weather for {city}""], ""summary"": ""Fetches current weather""}, ""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data""}, {""capability"": ""weather_alert"", ""type"": ""event""}], ""requires"": [{""capability"": ""http_client"", ""type"": ""transport""}]}, ""base"": {""runtime"": ""bash"", ""sandbox"": true, ""timeout"": ""120s"", ""env"": [{}]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Call API""}]}, ""resources"": {""scripts"": [{""name"": ""query_weather.sh"", ""hash"": ""abc123""}]}, ""dir_name"": ""weather-reporter""}  # noqa: E501
+{""identity"": {""id"": ""weather-reporter"", ""display_name"": ""Weather Reporter"", ""version"": ""1.2.0""}, ""intent"": {""triggers"": [""weather"", ""forecast""], ""satisfies"": [""get weather for {city}""], ""summary"": ""Fetches current weather""}, ""interface"": {""provides"": [{""capability"": ""weather_current"", ""type"": ""data""}, {""capability"": ""weather_alert"", ""type"": ""event""}], ""requires"": [{""capability"": ""http_client"", ""type"": ""action""}]}, ""base"": {""runtime"": ""bash"", ""timeout"": ""120s"", ""env"": [{}]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Call API""}]}, ""resources"": {""scripts"": [{""name"": ""query_weather.sh"", ""hash"": ""abc123""}]}, ""dir_name"": ""weather-reporter""}  # noqa: E501
 Output:
 {""confidence_report"": {""overall"": 0.92, ""per_harness"": {""A"": 0.95, ""B"": 0.97, ""C"": 0.88, ""D"": 0.91, ""E"": 0.92}}, ""warnings"": [""weather_alert is event type — composition.event_listeners added""]}  # noqa: E501
 """
@@ -291,7 +348,9 @@ Return ONLY valid JSON:
 
 If no MCP servers found, return: {"mcp_servers": []}
 
-Example 1 — Skill with MCP server:
+## Few-Shot Examples
+
+Example 1 — Skill with MCP server (HTTP transport):
 ```
 This skill queries the data infrastructure via mcp__data-infra-mcp__query_database.
 MCP server URL: http://localhost:8080/mcp
@@ -299,7 +358,14 @@ MCP server URL: http://localhost:8080/mcp
 Output:
 {"mcp_servers": [{"name": "data-infra-mcp", "transport": "streamable_http", "url": "http://localhost:8080/mcp", "command": "", "description": "Data infrastructure database query service"}]}
 
-Example 2 — Skill with no MCP references:
+Example 2 — Skill with MCP server (stdio transport):
+```
+Uses Apollo MCP for configuration management. Run via: mcporter call Apollo-mcp.get_config key=app.settings
+```
+Output:
+{"mcp_servers": [{"name": "Apollo-mcp", "transport": "stdio", "url": "", "command": "mcporter", "description": "Apollo configuration management service"}]}
+
+Example 3 — Skill with no MCP references:
 ```
 A simple skill that formats JSON output from API responses.
 ```

@@ -1,7 +1,7 @@
 """AHCoreAgent — base class for agenthatch-generated independent Agents.
 
 This is the universal chassis that all generated Agents inherit from.
-It wires together LLMClient, CapBus, Sandbox, ConversationLoop, and
+It wires together LLMClient, CapBus, ConversationLoop, and
 ContextManager into a ready-to-run agent.
 """
 
@@ -12,8 +12,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
-from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
-from agenthatch_core.bricks.stubs import _NullCapBus, _NullSandbox, _NullHooks
+from agenthatch_core.bricks.manifest import BrickManifest, LoopKind
+from agenthatch_core.bricks.stubs import _NullCapBus, _NullHooks
 from agenthatch_core.config import resolve_runtime_config
 from agenthatch_core.context.manager import ContextManager
 from agenthatch_core.hooks import HooksManager
@@ -34,7 +34,7 @@ class AHCoreAgent:
     * Identity management (id, display_name, version)
     * LLM client wiring via runtime.toml or programmatic config
     * Tool bus (CapBus) with provides/requires/MCP/API template registration
-    * Sandbox for script execution
+    * Script execution via direct subprocess (no Docker sandbox)
     * Context manager (system prompt, history, compaction)
     * Conversation loop (chat, chat_stream)
     * Lifecycle hooks (pre/post turn, compact, tool call)
@@ -59,13 +59,14 @@ class AHCoreAgent:
 
         # Assemble bricks — use null stubs for disabled features
         self.capbus: Any = CapBus() if self._manifest.capbus else _NullCapBus()
-        self.sandbox: Any = Sandbox() if self._manifest.sandbox != SandboxTier.NONE else _NullSandbox()
+        # v0.8: Sandbox always enabled — direct subprocess execution (no Docker)
+        self.sandbox: Any = Sandbox()
         self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
 
-        # Apply sandbox tier
-        if self._manifest.sandbox != SandboxTier.NONE and hasattr(self.sandbox, 'configure'):
+        # Apply default whitelist from sandboxes module
+        if hasattr(self.sandbox, 'configure'):
             from agenthatch_core.bricks.sandboxes import SandboxWhitelist
-            whitelist = SandboxWhitelist.from_tier(self._manifest.sandbox)
+            whitelist = SandboxWhitelist.default()
             self.sandbox._ALLOWED_COMMANDS = whitelist.commands
 
         # OutputGuard (v0.7) — compiled regex validators from ANCHOR_RULES
@@ -255,13 +256,8 @@ class AHCoreAgent:
 
         # 1. provides → tool executors
         # v0.7.15: Priority order when multiple runtime backends are available:
-        #   MCP servers (MCPProxyExecutor) > Sandbox scripts > CLI > description-only
-        # Previously, sandbox_usable=True would shadow MCP, causing MCP-only
-        # tools to be registered as (failing) sandbox script executors.
-        sandbox_usable = (
-            self._manifest.sandbox != SandboxTier.NONE
-            and not isinstance(self.sandbox, _NullSandbox)
-        )
+        #   MCP servers (MCPProxyExecutor) > direct subprocess scripts > CLI > description-only
+        sandbox_usable = isinstance(self.sandbox, Sandbox)
         has_mcp = bool(mcp_servers)
 
         for cap in provides:
@@ -309,7 +305,7 @@ class AHCoreAgent:
                     source="spec",
                 )
             else:
-                # v0.7.11: External skill agent (SandboxTier.NONE, no MCP)
+                # v0.8: External skill agent (direct subprocess, no MCP)
                 # Use CLIExecutor for CLI-based capabilities
                 script_name = cap_to_script.get(cap_name)
                 if script_name:
@@ -872,10 +868,10 @@ class MCPProxyExecutor:
 
 
 class CLIExecutor:
-    """Execute capabilities as CLI commands for SandboxTier.NONE agents.
+    """Execute capabilities as CLI commands for direct-execution agents.
 
     Used by external skill agents (e.g., agent-browser) that provide
-    capabilities via CLI tools rather than sandbox scripts or MCP servers.
+    capabilities via CLI tools rather than direct subprocess scripts or MCP servers.
     """
 
     def __init__(self, cap_name: str, cli_command: str):

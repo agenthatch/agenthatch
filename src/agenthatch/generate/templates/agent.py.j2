@@ -2,10 +2,10 @@
 
 from typing import Any
 
-from agenthatch_core import AHCoreAgent, ConversationLoop, CapBus, Sandbox, ContextManager, LLMClient
+from agenthatch_core import AHCoreAgent, ConversationLoop, CapBus, ContextManager, LLMClient
 from agenthatch_core.types import AgentIdentity
 {% if brick_manifest %}
-from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
+from agenthatch_core.bricks.manifest import BrickManifest, LoopKind
 {% if brick_manifest.guard_active %}
 from agenthatch_core.bricks.guards import CompiledGuard
 {% endif %}
@@ -51,7 +51,6 @@ class {{ agent_class }}(AHCoreAgent):
         manifest = BrickManifest(
             loop_engine=LoopKind.{{ brick_manifest.loop_engine.upper() }},
             capbus={{ brick_manifest.capbus | pybool }},
-            sandbox=SandboxTier.{{ brick_manifest.sandbox.upper() }},
             hooks={{ brick_manifest.hooks | pybool }},
 {% if brick_manifest.guard_active %}
             guard=CompiledGuard.from_rules(ANCHOR_RULES),
@@ -110,7 +109,10 @@ class {{ agent_class }}(AHCoreAgent):
             if step.script is None:
                 continue
             try:
-                result = self.sandbox.run(step.script, cwd=cwd)
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).parent.parent.parent / "skills" / "scripts" / step.script)],
+                    capture_output=True, text=True, timeout=30, cwd=cwd,
+                )
                 warmup_results.append(
                     f"Step {step.step} ({step.description}): {result.stdout[:300]}"
                 )

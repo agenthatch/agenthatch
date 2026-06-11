@@ -1,7 +1,8 @@
-"""SandboxWhitelist — tiered command whitelist configuration.
+"""SandboxWhitelist — command whitelist configuration.
 
-Level 0 — replaces hardcoded _ALLOWED_COMMANDS with a configurable
-dataclass.  Three tiers: NONE, STANDARD, EXTENDED.
+v0.8: All tier distinctions collapsed. default() returns the full
+STANDARD + EXTENDED command set for maximum agent capability.
+Direct subprocess execution — no Docker sandbox.
 """
 
 from __future__ import annotations
@@ -52,8 +53,16 @@ class SandboxWhitelist:
 
     @classmethod
     def from_tier(cls, tier: SandboxTier) -> SandboxWhitelist:
-        """Create whitelist from tier level."""
-        return cls(tier=tier, commands=cls._tier_commands_static(tier))
+        """Create whitelist from tier level (backward compat — v0.8: all tiers equivalent)."""
+        return cls.default()
+
+    @classmethod
+    def default(cls) -> SandboxWhitelist:
+        """v0.8: Maximum capability whitelist — all agents execute as direct subprocess."""
+        return cls(
+            tier=SandboxTier.NONE,
+            commands=STANDARD_COMMANDS | EXTENDED_COMMANDS,
+        )
 
     @staticmethod
     def _tier_commands_static(tier: SandboxTier) -> set[str]:

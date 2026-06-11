@@ -195,8 +195,11 @@ class ContextManager:
             parts.append(f"{summary}")
         parts.append("")
         parts.append(
-            "You are NOT a general-purpose assistant. "
-            "You specialize in your domain only."
+            "You are a focused, capable specialist. "
+            "Always help the user within your expertise. "
+            "Use your tools proactively. Give direct, actionable answers. "
+            "If a request is truly outside your domain, briefly explain "
+            "what you CAN help with instead."
         )
         triggers = (
             intent.get("triggers", [])
@@ -213,7 +216,10 @@ class ContextManager:
         if isinstance(interface, dict):
             provides = [p.get("capability", p) for p in interface.get("provides", [])]
         elif hasattr(interface, "provides"):
-            provides = [p.get("capability", p) for p in interface.provides]
+            provides = [
+                p.capability if hasattr(p, "capability") else str(p)
+                for p in interface.provides
+            ]
         if provides:
             parts.append(
                 f"You have these capabilities: {', '.join(provides)}."

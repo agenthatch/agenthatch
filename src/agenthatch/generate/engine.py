@@ -255,10 +255,7 @@ class GenerateEngine:
                 SkillArchetype,
                 classify_skill,
             )
-            from agenthatch_core.bricks.manifest import (
-                LoopKind,
-                SandboxTier,
-            )
+            from agenthatch_core.bricks.manifest import LoopKind
         except ImportError:
             return None
 
@@ -290,26 +287,6 @@ class GenerateEngine:
         else:
             loop_engine = LoopKind.CONVERSATION
 
-        # Map archetype → sandbox tier
-        # v0.7.15: Read YAML base.sandbox to override defaults
-        base_config = ahspec.get("base", {})
-        yaml_sandbox = base_config.get("sandbox") if isinstance(base_config, dict) else None
-
-        if archetype == SkillArchetype.PROMPT_ONLY:
-            sandbox = SandboxTier.NONE
-        elif archetype == SkillArchetype.EXTERNAL_TOOL:
-            sandbox = SandboxTier.EXTENDED
-        elif archetype == SkillArchetype.MCP_CONNECTOR:
-            # v0.7.15: If YAML explicitly requests sandbox (sandbox: true),
-            # use STANDARD instead of NONE so warmup scripts + MCPProxyExecutor
-            # have a real sandbox for mcporter subprocess calls.
-            if yaml_sandbox is True:
-                sandbox = SandboxTier.STANDARD
-            else:
-                sandbox = SandboxTier.NONE
-        else:
-            sandbox = SandboxTier.STANDARD
-
         # Map archetype → capbus
         capbus = archetype != SkillArchetype.PROMPT_ONLY
 
@@ -334,7 +311,6 @@ class GenerateEngine:
         return {
             "loop_engine": loop_engine.value,
             "capbus": capbus,
-            "sandbox": sandbox.value,
             "hooks": hooks,
             "guard_active": guard_active,
             "credential_vault": credential_vault,

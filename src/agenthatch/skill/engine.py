@@ -53,6 +53,7 @@ from agenthatch.skill.spec import (
     FileManifest,
     HarnessOutput,
     IdentityOutput,
+    InferMCPServersOutput,
     Instructions,
     IntentOutput,
     InterfaceOutput,
@@ -61,6 +62,43 @@ from agenthatch.skill.spec import (
 )
 
 logger = logging.getLogger("agenthatch")
+
+# ─────────────────────────────────────────────────────────────────────────
+# v0.8: Per-harness thinking + temperature configuration
+# ─────────────────────────────────────────────────────────────────────────
+
+HARNESS_CONFIG: dict[str, dict[str, Any]] = {
+    "A": {
+        "thinking": True,
+        "temperature": 0.1,
+        "reason": "Identity extraction is deterministic — low temp for consistency",
+    },
+    "B": {
+        "thinking": True,
+        "temperature": 0.5,
+        "reason": "Intent inference requires creativity for long-tail triggers",
+    },
+    "C": {
+        "thinking": True,
+        "temperature": 0.5,
+        "reason": "Interface inference is complex — needs SKILL.md + ScriptManifest",
+    },
+    "D": {
+        "thinking": True,
+        "temperature": 0.3,
+        "reason": "Base detection needs precision — moderate temp",
+    },
+    "E": {
+        "thinking": True,
+        "temperature": 0.2,
+        "reason": "Assembly validation is structured — low temp for consistency",
+    },
+    "F": {
+        "thinking": True,
+        "temperature": 0.3,
+        "reason": "MCP config extraction needs exact matching — moderate temp",
+    },
+}
 
 # ─────────────────────────────────────────────────────────────────────────
 # Phase 2 helpers
@@ -322,10 +360,14 @@ body (first 50 lines):
 {files_str}"""
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
+        # v0.8: Use HARNESS_CONFIG for per-task thinking + temperature
+        cfg = HARNESS_CONFIG.get("A", {})
         result = self.client.chat_structured(
             messages=messages,
             response_model=IdentityOutput,
             model=self.model,
+            thinking=cfg.get("thinking"),
+            temperature=cfg.get("temperature", 0.3),
         )
         return result.model_dump()
 
@@ -345,10 +387,11 @@ body (first 50 lines):
         return True, ""
 
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        # v0.8: Align correction round context to initial round (was: [:500], now matches 2500)
         return {
             "frontmatter": inputs["frontmatter"],
             "dir_name": inputs["dir_name"],
-            "body_first_50_lines": str(inputs["body_first_50_lines"])[:500],
+            "body_first_50_lines": str(inputs["body_first_50_lines"])[:2500],
         }
 
     def _get_correction_response_model(self) -> Any:
@@ -388,10 +431,14 @@ body:
 {files_str}"""
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
+        # v0.8: Use HARNESS_CONFIG for per-task thinking + temperature
+        cfg = HARNESS_CONFIG.get("B", {})
         result = self.client.chat_structured(
             messages=messages,
             response_model=IntentOutput,
             model=self.model,
+            thinking=cfg.get("thinking"),
+            temperature=cfg.get("temperature", 0.3),
         )
         return result.model_dump()
 
@@ -444,23 +491,35 @@ class InferInterfaceHarness(AgentHarness):
         body = inputs["body"]
         file_contents = inputs["file_contents"]
         frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
+        script_manifest = inputs.get("script_manifest")
         files_text = _format_file_contents_for_harness(
             file_contents if isinstance(file_contents, list) else []
         )
         tools = frontmatter_allowed_tools if isinstance(frontmatter_allowed_tools, list) else []
+
+        # v0.8: Include ScriptManifest from Phase 1.5 for precise interface inference
+        script_section = ""
+        if script_manifest is not None:
+            from agenthatch.skill.parser import format_script_manifest
+            script_section = "\n" + format_script_manifest(script_manifest) + "\n"  # type: ignore[arg-type]
+
         return f"""Infer the interface for this skill:
 
 frontmatter_allowed_tools: {tools}
 body:
 {str(body)[:4000]}
-
+{script_section}
 {files_text}"""
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
+        # v0.8: Use HARNESS_CONFIG for per-task thinking + temperature
+        cfg = HARNESS_CONFIG.get("C", {})
         result = self.client.chat_structured(
             messages=messages,
             response_model=InterfaceOutput,
             model=self.model,
+            thinking=cfg.get("thinking"),
+            temperature=cfg.get("temperature", 0.3),
         )
         return result.model_dump()
 
@@ -533,10 +592,14 @@ body:
 {files_text}"""
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
+        # v0.8: Use HARNESS_CONFIG for per-task thinking + temperature
+        cfg = HARNESS_CONFIG.get("D", {})
         result = self.client.chat_structured(
             messages=messages,
             response_model=BaseAndInstructionsOutput,
             model=self.model,
+            thinking=cfg.get("thinking"),
+            temperature=cfg.get("temperature", 0.3),
         )
         return result.model_dump()
 
@@ -552,8 +615,9 @@ body:
         return True, ""
 
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
+        # v0.8: Align correction round context to initial round (was: [:2000], now matches 4000)
         return {
-            "body": str(inputs["body"])[:2000],
+            "body": str(inputs["body"])[:4000],
             "file_contents": inputs["file_contents"],
             "frontmatter_compatibility": inputs["frontmatter_compatibility"],
             "frontmatter_allowed_tools": inputs["frontmatter_allowed_tools"],
@@ -760,29 +824,42 @@ class InferMCPServersHarness(AgentHarness):
                 {"role": "system", "content": self.build_system_prompt()},
                 {"role": "user", "content": self.build_user_message(body=body)},
             ]
-            response = self.client.chat(messages=messages, model=self.model)
-            import json as _json
-
-            data = _json.loads(response)
-            llm_servers = data.get("mcp_servers", [])
+            # v0.8: Use chat_structured with Pydantic response model
+            response: InferMCPServersOutput = self.client.chat_structured(
+                messages=messages,
+                model=self.model,
+                response_model=InferMCPServersOutput,
+            )
+            llm_servers_raw = []
+            for s in response.mcp_servers:
+                llm_servers_raw.append({
+                    "name": s.name,
+                    "transport": s.transport,
+                    "url": s.url,
+                    "command": s.command,
+                    "description": s.description,
+                })
         except Exception as e:
             # M13 fix: log the error instead of silently swallowing it
             logger.warning("Harness F LLM call failed (%s: %s), falling back to regex",
                            type(e).__name__, e)
             # Fallback to regex-based extraction
-            llm_servers = []
+            llm_servers_raw = []
             mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
             server_names = set(mcp_pattern.findall(body))
             for sname in sorted(server_names):
-                llm_servers.append({
+                llm_servers_raw.append({
                     "name": sname,
-                    "config": {"transport": "auto"},
+                    "transport": "",
+                    "url": "",
+                    "command": "",
+                    "description": "",
                 })
 
         # Verify against actual mcp__ patterns in body
         mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
         referenced = set(mcp_pattern.findall(body))
-        for server in llm_servers:
+        for server in llm_servers_raw:
             name = server.get("name", "")
             if name in referenced:
                 mcp_servers.append(server)
@@ -808,7 +885,7 @@ def _merge_mcp_configs(
     """Merge MCP server configs from Harness F into interface spec.
 
     Preserves existing interface config and enriches with Harness F's
-    detected transport, url, and command details.
+    detected transport, url, command, and description details.
     """
     merged: dict[str, dict[str, Any]] = {}
     for item in interface_mcp:
@@ -822,14 +899,10 @@ def _merge_mcp_configs(
             continue
         if name in merged:
             existing = merged[name]
-            config = dict(existing.get("config", {}))
-            harness_config = item.get("config", {})
-            # Harness F data takes precedence
-            config = {**config, **harness_config}
-            for key in ("transport", "url", "command"):
-                if key in item and key not in config:
-                    config[key] = item[key]
-            existing["config"] = config
+            # Harness F top-level fields take precedence
+            for key in ("transport", "url", "command", "description"):
+                if item.get(key) and not existing.get(key):
+                    existing[key] = item[key]
         else:
             merged[name] = dict(item)
 
@@ -920,6 +993,18 @@ class Orchestrator:
         # Step 1: Build harness instances
         harnesses = self._build_harnesses(tier_map)
 
+        # v0.8 Phase 1.5: Run ScriptAnalyzer for deterministic script signatures
+        script_manifest = None
+        if context.skill_dir is not None:
+            from agenthatch.skill.parser import analyze_scripts
+            script_manifest = analyze_scripts(context.skill_dir)
+            if not script_manifest.is_empty():
+                logger.info(
+                    "ScriptAnalyzer: %d Python + %d shell functions extracted",
+                    len(script_manifest.python_functions),
+                    len(script_manifest.shell_functions),
+                )
+
         # Phase 2 generates resources deterministically (not via LLM)
         resources = self._build_resources(context.file_manifest)
 
@@ -955,6 +1040,7 @@ class Orchestrator:
                 body=context.body,
                 file_contents=file_contents,
                 frontmatter_allowed_tools=frontmatter.get("allowed_tools"),
+                script_manifest=script_manifest,  # v0.8: Phase 1.5 ScriptManifest
             )
 
         # Step 3: Check self-validation
