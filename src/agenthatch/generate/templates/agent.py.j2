@@ -10,40 +10,13 @@ from agenthatch_core.bricks.manifest import BrickManifest, LoopKind, SandboxTier
 from agenthatch_core.bricks.guards import CompiledGuard
 {% endif %}
 {% endif %}
+{% if workflow_steps %}
+from agenthatch_core.bricks.workflow import CompiledWorkflow, WorkflowStep
+{% endif %}
 from pathlib import Path
 
 {% if workflow_steps %}
-# v0.7.6: CompiledWorkflow — structured step execution from agenthatch.yaml
-from dataclasses import dataclass
-
-@dataclass
-class WorkflowStep:
-    step: int
-    description: str
-    script: str | None = None
-
-class CompiledWorkflow:
-    """Compiled linear workflow from agenthatch.yaml instructions.
-
-    Enforces step order sequentially. Steps with scripts are executed
-    deterministically without LLM decision-making.
-    """
-
-    steps: list[WorkflowStep]
-    _current_index: int = 0
-
-    def __init__(self, steps: list[WorkflowStep]):
-        self.steps = steps
-        self._current_index = 0
-
-    def next_step(self) -> WorkflowStep:
-        """Get the next step in linear order."""
-        step = self.steps[self._current_index]
-        self._current_index += 1
-        return step
-
-    def is_complete(self) -> bool:
-        return self._current_index >= len(self.steps)
+# v0.7.15: CompiledWorkflow imported from agenthatch_core.bricks.workflow
 
 {% endif %}
 

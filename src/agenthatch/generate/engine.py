@@ -6,8 +6,10 @@ a self-contained, independently-runnable Agent directory.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
+import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -75,7 +77,9 @@ class GenerateEngine:
 
     # ── variable extraction ───────────────────────────────────────────
 
-    def extract_variables(self, ahspec: dict[str, Any]) -> dict[str, Any]:
+    def extract_variables(
+        self, ahspec: dict[str, Any], *, skill_dir: Path | None = None
+    ) -> dict[str, Any]:
         """Extract template variables from an AHSSPEC dict.
 
         Handles both raw YAML dicts and Pydantic model dumps.
@@ -126,7 +130,7 @@ class GenerateEngine:
         tools = self._extract_tool_names(interface.get("provides", []))
 
         # v0.7: Brick manifest from skill classification
-        brick_manifest = self._build_brick_manifest(ahspec)
+        brick_manifest = self._build_brick_manifest(ahspec, skill_dir=skill_dir)
 
         return {
             "agent_name": agent_name,
@@ -233,13 +237,21 @@ class GenerateEngine:
         return (provider, model, base_url)
 
     @staticmethod
-    def _build_brick_manifest(ahspec: dict[str, Any]) -> dict[str, Any] | None:
-        """v0.7: Build BrickManifest dict from skill classification.
+    def _build_brick_manifest(
+        ahspec: dict[str, Any], *, skill_dir: Path | None = None
+    ) -> dict[str, Any] | None:
+        """v0.7.15: Build BrickManifest dict from skill classification.
 
         Returns None if classification fails (backward-compatible fallback).
+
+        v0.7.15 fixes:
+          - Accepts skill_dir to check physical scripts/ directory, upgrading
+            PROMPT_ONLY → TOOL_WRAPPER when scripts exist on disk.
+          - Respects YAML base.sandbox for MCP_CONNECTOR (was: forced NONE).
         """
         try:
             from agenthatch_core.bricks.archetypes import (
+                ClassificationResult,
                 SkillArchetype,
                 classify_skill,
             )
@@ -257,6 +269,21 @@ class GenerateEngine:
 
         archetype = result.archetype
 
+        # v0.7.15: Upgrade PROMPT_ONLY if scripts/ directory exists on disk
+        if archetype == SkillArchetype.PROMPT_ONLY and skill_dir is not None:
+            scripts_path = skill_dir / "skills" / "scripts"
+            if scripts_path.is_dir():
+                script_files = [f for f in scripts_path.iterdir() if f.is_file()]
+                if script_files:
+                    archetype = SkillArchetype.TOOL_WRAPPER
+                    result = ClassificationResult(
+                        archetype=SkillArchetype.TOOL_WRAPPER,
+                        confidence=0.70,
+                        reasons=[
+                            f"Found {len(script_files)} script(s) in skills/scripts/"
+                        ],
+                    )
+
         # Map archetype → loop engine
         if archetype == SkillArchetype.PROMPT_ONLY:
             loop_engine = LoopKind.DIRECT
@@ -264,12 +291,22 @@ class GenerateEngine:
             loop_engine = LoopKind.CONVERSATION
 
         # Map archetype → sandbox tier
+        # v0.7.15: Read YAML base.sandbox to override defaults
+        base_config = ahspec.get("base", {})
+        yaml_sandbox = base_config.get("sandbox") if isinstance(base_config, dict) else None
+
         if archetype == SkillArchetype.PROMPT_ONLY:
             sandbox = SandboxTier.NONE
         elif archetype == SkillArchetype.EXTERNAL_TOOL:
             sandbox = SandboxTier.EXTENDED
         elif archetype == SkillArchetype.MCP_CONNECTOR:
-            sandbox = SandboxTier.NONE
+            # v0.7.15: If YAML explicitly requests sandbox (sandbox: true),
+            # use STANDARD instead of NONE so warmup scripts + MCPProxyExecutor
+            # have a real sandbox for mcporter subprocess calls.
+            if yaml_sandbox is True:
+                sandbox = SandboxTier.STANDARD
+            else:
+                sandbox = SandboxTier.NONE
         else:
             sandbox = SandboxTier.STANDARD
 
@@ -374,7 +411,7 @@ class GenerateEngine:
         Returns:
             List of Paths that were (or would be) written.
         """
-        variables = self.extract_variables(ahspec)
+        variables = self.extract_variables(ahspec, skill_dir=skill_dir)
         written: list[Path] = []
 
         if dry_run:
@@ -426,7 +463,81 @@ class GenerateEngine:
                 )
             written.append(pkg_init)
 
+        # v0.7.15: Validate generated Python files compile correctly
+        if not dry_run:
+            validation_errors = self._validate_generated_python(output_dir)
+            if validation_errors:
+                for err in validation_errors:
+                    logger.error("Validation error: %s", err)
+                raise RuntimeError(
+                    f"Generated agent contains {len(validation_errors)} validation "
+                    f"error(s).  This is a template bug — the agent may crash at "
+                    f"runtime.  Aborting generation.\n"
+                    + "\n".join(f"  • {e}" for e in validation_errors)
+                )
+
         return written
+
+    # ── Generation validation ──────────────────────────────────────────
+
+    @staticmethod
+    def _validate_generated_python(output_dir: Path) -> list[str]:
+        """Validate all generated Python files compile and contain no JS artifacts.
+
+        v0.7.15: Catches template bugs like ``null`` instead of ``None``
+        and truncated output before the user discovers them at runtime.
+
+        Returns a list of error messages (empty list = all clear).
+        """
+        errors: list[str] = []
+
+        for py_file in output_dir.rglob("*.py"):
+            content = py_file.read_text(encoding="utf-8")
+
+            # 1. Check for JavaScript/JSON artifacts
+            for js_kw in ("null", "undefined", "true", "false"):
+                # Use word-boundary-ish check: keyword not inside a string or comment
+                if re.search(rf"\b{js_kw}\b", content) and f'"{js_kw}"' not in content:
+                    # Heuristic: if it appears as a bare keyword (not in quotes)
+                    # Check each line independently
+                    for lineno, line in enumerate(content.splitlines(), 1):
+                        stripped = line.strip()
+                        if (
+                            stripped == js_kw
+                            or stripped.endswith(f"={js_kw}")
+                            or stripped.endswith(f"= {js_kw}")
+                        ):
+                            if js_kw == "true":
+                                errors.append(
+                                    f"{py_file.relative_to(output_dir)}:{lineno}: "
+                                    f"'{js_kw}' found (use 'True' in Python)"
+                                )
+                            elif js_kw == "false":
+                                errors.append(
+                                    f"{py_file.relative_to(output_dir)}:{lineno}: "
+                                    f"'{js_kw}' found (use 'False' in Python)"
+                                )
+                            elif js_kw == "null":
+                                errors.append(
+                                    f"{py_file.relative_to(output_dir)}:{lineno}: "
+                                    f"'{js_kw}' found (use 'None' in Python)"
+                                )
+                            elif js_kw == "undefined":
+                                errors.append(
+                                    f"{py_file.relative_to(output_dir)}:{lineno}: "
+                                    f"'{js_kw}' found (not a Python keyword)"
+                                )
+
+            # 2. Check Python syntax compiles
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                errors.append(
+                    f"{py_file.relative_to(output_dir)}:{e.lineno}: "
+                    f"SyntaxError: {e.msg}"
+                )
+
+        return errors
 
     def _prepare_output_dir(self, output_dir: Path, force: bool) -> None:
         """Prepare the output directory."""

@@ -9,6 +9,7 @@ Old config-driven SkillAgent.from_ahspec() path has been removed.
 from __future__ import annotations
 
 import sys
+import textwrap
 import time
 
 try:
@@ -364,19 +365,17 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
 
 
 def _stream_response(agent: Any, user_input: str) -> str:
-    """v0.7.13 Unified streaming renderer.
+    """v0.7.14 Unified streaming renderer.
 
-    Single-panel Live layout with inline thinking.  Persistent
-    Session footer shows status summary after Live exits.
+    Single-panel Live layout with inline thinking.  Done panel is the
+    sole observability surface — no redundant Session footer.
 
-    v0.7.13 changes:
-      - Removed Group two-panel layout (caused rendering corruption in terminals).
-      - Thinking rendered inline as dim italic (last 5 lines) inside single Panel.
-      - Done panel shows observability (tokens, time).
-      - Session footer shows "Thinking complete" status instead of duplicate data.
+    v0.7.14 fixes:
+      - Thinking chars joined before line-split (was: per-char = per-line).
+      - Removed _build_observability_footer (redundant with Done panel).
     """
     full_text: list[str] = []
-    reasoning_lines: list[str] = []
+    reasoning_chars: list[str] = []
     tool_status: dict[str, str] = {}
     start_time = time.monotonic()
     show_thinking = getattr(agent, "_show_reasoning", True)
@@ -389,15 +388,41 @@ def _stream_response(agent: Any, user_input: str) -> str:
             lines.append("".join(full_text)[-500:])
         if not full_text and not tool_status:
             lines.append("[dim]Thinking...[/dim]")
-        # v0.7.13: inline thinking display (last 5 lines, dim italic)
-        if show_thinking and reasoning_lines and not full_text:
-            visible = reasoning_lines[-5:]
-            for line in visible:
-                stripped = line.strip()[:120]
+        if show_thinking and reasoning_chars and not full_text:
+            joined = "".join(reasoning_chars)
+            # v0.7.15: textwrap instead of [:120] hard truncation.
+            # DeepSeek reasoning often emits one continuous line —
+            # textwrap breaks it into displayable chunks without cutting mid-content.
+            real_lines = [L for L in joined.split("\n") if L.strip()]
+            display_lines: list[str] = []
+            for line in real_lines[-3:]:
+                if len(line) > 100:
+                    display_lines.extend(
+                        textwrap.wrap(line, width=100, break_long_words=False,
+                                      break_on_hyphens=False)
+                    )
+                else:
+                    display_lines.append(line)
+            for line in display_lines[-6:]:
+                stripped = line.strip()
                 if stripped:
                     lines.append(f"[dim italic]  {stripped}[/dim italic]")
         elapsed = time.monotonic() - start_time
-        lines.append(f"[dim]⏱ {elapsed:.1f}s[/dim]")
+        stats_parts = [f"[dim]⏱ {elapsed:.1f}s[/dim]"]
+        if hasattr(agent, "token_counter"):
+            snap = agent.token_counter.snapshot()
+            total = snap.get("total_tokens", 0)
+            if total > 0:
+                prompt_tok = snap.get("prompt_tokens", 0)
+                completion_tok = snap.get("completion_tokens", 0)
+                call_count = snap.get("call_count", 0)
+                stats_parts.append(
+                    f"[dim]{total:,} tokens (in: {prompt_tok:,}, "
+                    f"out: {completion_tok:,})[/dim]"
+                )
+                if call_count > 0:
+                    stats_parts.append(f"[dim]{call_count} calls[/dim]")
+        lines.append(" · ".join(stats_parts))
         return "\n".join(lines)
 
     # ── Phase 1: Live streaming (single panel) ──
@@ -420,7 +445,7 @@ def _stream_response(agent: Any, user_input: str) -> str:
                         f"[bold green]done[/] ({es}) [dim]→ {preview}[/]"
                     )
             elif isinstance(event, ThinkingDelta):
-                reasoning_lines.append(event.content)
+                reasoning_chars.append(event.content)
             elif isinstance(event, str):
                 full_text.append(event)
 
@@ -429,11 +454,7 @@ def _stream_response(agent: Any, user_input: str) -> str:
         done_body = _build_done_panel_content(agent, start_time)
         live.update(Panel(done_body, title="Agent", border_style="green"))
 
-    # ── Phase 2: Session status footer ──
-    footer = _build_observability_footer(agent, start_time,
-                                         reasoning_count=len(reasoning_lines))
-    if footer:
-        console.print(footer)
+    # v0.7.14: No redundant Session footer.  Done panel is the sole sink.
 
     return final_text or "".join(full_text) or "(no response)"
 

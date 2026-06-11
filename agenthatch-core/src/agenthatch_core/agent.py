@@ -253,13 +253,16 @@ class AHCoreAgent:
             provides, resources, instructions, scripts_dir,
         )
 
-        # 1. provides → Sandbox script executors (only if sandbox is usable)
-        # v0.7.10: Skip script executor registration for MCP-only agents
-        # (SandboxTier.NONE) to prevent "script directory not found" errors.
+        # 1. provides → tool executors
+        # v0.7.15: Priority order when multiple runtime backends are available:
+        #   MCP servers (MCPProxyExecutor) > Sandbox scripts > CLI > description-only
+        # Previously, sandbox_usable=True would shadow MCP, causing MCP-only
+        # tools to be registered as (failing) sandbox script executors.
         sandbox_usable = (
             self._manifest.sandbox != SandboxTier.NONE
             and not isinstance(self.sandbox, _NullSandbox)
         )
+        has_mcp = bool(mcp_servers)
 
         for cap in provides:
             cap_name = cap.get("capability", cap.get("name", ""))
@@ -268,24 +271,10 @@ class AHCoreAgent:
             schema = cap.get("input_schema", cap.get("schema", {}))
             output_schema = cap.get("output_schema")
 
-            if sandbox_usable:
-                executor = _provide_script_executor(
-                    cap_name, self.sandbox, self._agent_root,
-                    script_name=cap_to_script.get(cap_name),
-                )
-                self.capbus.register(
-                    name=cap_name,
-                    executor=executor,
-                    schema={
-                        "name": cap_name,
-                        "description": cap.get("description", cap_name),
-                        "parameters": schema.get("parameters", schema),
-                    },
-                    source="spec",
-                )
-            elif mcp_servers:
-                # v0.7.11: MCP-only agent — use MCPProxyExecutor
-                # with CLI fallback via mcporter
+            if has_mcp:
+                # v0.7.15: MCP configured → use MCPProxyExecutor (top priority).
+                # Sandbox (if also usable) is kept for warmup scripts but not
+                # used for tool execution — mcporter handles the transport.
                 server_name = mcp_servers[0].get("name", "")
                 mcp_cfg = mcp_servers[0].get("config", {})
                 executor = MCPProxyExecutor(
@@ -297,6 +286,21 @@ class AHCoreAgent:
                 self.capbus.register(
                     name=cap_name,
                     executor=executor.execute,
+                    schema={
+                        "name": cap_name,
+                        "description": cap.get("description", cap_name),
+                        "parameters": schema.get("parameters", schema),
+                    },
+                    source="spec",
+                )
+            elif sandbox_usable:
+                executor = _provide_script_executor(
+                    cap_name, self.sandbox, self._agent_root,
+                    script_name=cap_to_script.get(cap_name),
+                )
+                self.capbus.register(
+                    name=cap_name,
+                    executor=executor,
                     schema={
                         "name": cap_name,
                         "description": cap.get("description", cap_name),
@@ -352,8 +356,12 @@ class AHCoreAgent:
                 self.capbus.mark_unavailable(req_name)
 
         # 3. MCP servers → connect and register tools
-        for mcp_cfg in mcp_servers:
-            _register_mcp_tools(self.capbus, mcp_cfg)
+        # v0.7.15: Skip when provides were already registered via MCPProxyExecutor
+        # (Step 1, has_mcp guard).  Only run when provides list is empty (server-side
+        # tool discovery) to avoid double registration.
+        if not provides:
+            for mcp_cfg in mcp_servers:
+                _register_mcp_tools(self.capbus, mcp_cfg)
 
         # 4. API templates → api__<name> tools
         for tmpl in api_templates:
@@ -804,16 +812,31 @@ class MCPProxyExecutor:
         )
 
     def _execute_via_mcp(self, arguments: dict) -> str:
-        """Execute through mcporter MCP client."""
+        """Execute through mcporter MCP client.
+
+        v0.7.15: Uses correct mcporter syntax:
+          - Dot notation: mcporter call Cooper.listKnowledgeBases
+          - key=value args: ownType=0 (not --ownType 0)
+          - Extracts real MCP tool name from script_name when available
+            (capability names in YAML often differ from MCP tool names).
+        """
         import subprocess
 
-        args_list = [
-            "mcporter", "call",
-            self.server_name,
-            self.cap_name,
-        ]
+        # Determine the mcporter server.tool selector
+        mcp_tool = f"{self.server_name}.{self.cap_name}"
+        if self.script_name:
+            # Parse "Cooper.listKnowledgeBases" from workflow script like:
+            #   "mcporter call Cooper.listKnowledgeBases ownType=0 --output json"
+            parts = self.script_name.split()
+            for i, part in enumerate(parts):
+                if part == "call" and i + 1 < len(parts):
+                    mcp_tool = parts[i + 1]
+                    break
+
+        args_list = ["mcporter", "call", mcp_tool]
+        # v0.7.15: mcporter expects key=value, not --key value
         for k, v in arguments.items():
-            args_list.extend([f"--{k}", str(v)])
+            args_list.append(f"{k}={v}")
 
         result = subprocess.run(
             args_list,
@@ -828,10 +851,14 @@ class MCPProxyExecutor:
         return result.stdout or "(empty response)"
 
     def _execute_via_cli(self, arguments: dict) -> str:
-        """Execute as a CLI script directly."""
+        """Execute as a CLI script directly.
+
+        v0.7.15: Splits script_name into command + args (was: treated entire
+        string as a single command name, causing 'No such file or directory').
+        """
         import subprocess
 
-        cmd = [self.script_name]
+        cmd = self.script_name.split() if self.script_name else []
         for k, v in arguments.items():
             cmd.extend([f"--{k}", str(v)])
 
