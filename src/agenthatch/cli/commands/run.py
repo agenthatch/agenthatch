@@ -268,7 +268,7 @@ def _launch(
     try:
         # Dynamic import using importlib
         spec = _importlib_util.spec_from_file_location(
-            agent_pkg, agent_module_path
+            f"{agent_pkg}.agent", agent_module_path
         )
         if spec is None or spec.loader is None:
             console.print(
@@ -277,6 +277,8 @@ def _launch(
             raise typer.Exit(code=1)
 
         module = _importlib_util.module_from_spec(spec)
+        # Set __package__ so relative imports (from .tools import ...) work
+        module.__package__ = agent_pkg
         spec.loader.exec_module(module)
 
         # Get Agent class from the AGENT_CLASS constant

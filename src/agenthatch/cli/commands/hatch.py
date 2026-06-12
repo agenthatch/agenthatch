@@ -22,7 +22,11 @@ from typing import Annotated, Any
 
 import typer
 import yaml
+from rich.console import Group
+from rich.live import Live
 from rich.panel import Panel
+from rich.spinner import Spinner
+from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
@@ -122,25 +126,29 @@ def _run_phase3_generate(
         confidence = 0.0
 
     console.print(f"  [dim]→ {archetype} (confidence: {confidence:.0%})[/dim]")
-    console.print("  [dim]Generating agent files...[/dim]")
-    try:
-        engine = GenerateEngine()
-        written = engine.generate(
-            ahspec=spec_dict,
-            output_dir=agent_output_dir,
-            dry_run=dry_run,
-            force=force,
-            copy_skills=copy_skills,
-            skill_dir=skill_dir,
-            ai_chat_fn=ai_chat_fn,
-        )
-    except FileExistsError as e:
-        console.print(f"[yellow]{e}[/yellow]")
-        console.print("Use --force to overwrite.")
-        raise typer.Exit(code=2) from e
-    except Exception as e:
-        console.print(f"[error]Generation error: {e}[/error]")
-        raise typer.Exit(code=5) from e
+    with Status(
+        "[dim]Generating agent files...[/dim]",
+        spinner="dots",
+        console=console,
+    ) as status:
+        try:
+            engine = GenerateEngine()
+            written = engine.generate(
+                ahspec=spec_dict,
+                output_dir=agent_output_dir,
+                dry_run=dry_run,
+                force=force,
+                copy_skills=copy_skills,
+                skill_dir=skill_dir,
+                ai_chat_fn=ai_chat_fn,
+            )
+        except FileExistsError as e:
+            console.print(f"[yellow]{e}[/yellow]")
+            console.print("Use --force to overwrite.")
+            raise typer.Exit(code=2) from e
+        except Exception as e:
+            console.print(f"[error]Generation error: {e}[/error]")
+            raise typer.Exit(code=5) from e
 
     t3_elapsed = time.time() - t3_start
     return len(written), agent_output_dir, t3_elapsed
@@ -369,6 +377,10 @@ def hatch_command(
         bool,
         typer.Option("--no-ai-tools", help="Skip AI-driven tool implementation generation"),
     ] = False,
+    report: Annotated[
+        bool,
+        typer.Option("--report", "-r", help="Show detailed hatch readiness report"),
+    ] = False,
     framework: Annotated[
         str,
         typer.Option("--framework", help="Agent framework [python-typer]"),
@@ -502,19 +514,48 @@ def hatch_command(
         "F": "infer_mcp_servers",
         "E": "assemble_and_validate",
     }
+    harness_order = ["A", "B", "C", "D", "F", "E"]
+
+    _state: dict[str, Any] = {"current": "A", "completed": []}
+
+    def _render_harness_progress() -> Group:
+        renderables: list[Any] = []
+        for key in harness_order:
+            label = harness_labels.get(key, key)
+            if key in _state["completed"]:
+                renderables.append(
+                    Text(f"     ✓ Harness {key}: {label}", style="ok")
+                )
+            elif key == _state["current"]:
+                renderables.append(
+                    Spinner("dots", text=f"Harness {key}: {label}...")
+                )
+        return Group(*renderables)
 
     def _on_harness_done(key: str) -> None:
-        label = harness_labels.get(key, key)
-        console.print(f"     [dim]Harness {key}: {label} ✓[/dim]")
-
-    try:
-        ahs_spec, harness_outputs = build_ahspec(
-            context, config, large_model=large_model, small_model=small_model,
-            progress_callback=_on_harness_done,
+        _state["completed"].append(key)
+        for k in harness_order:
+            if k not in _state["completed"]:
+                _state["current"] = k
+                break
+        live.update(
+            Panel(_render_harness_progress(), border_style="cyan", padding=(0, 1))
         )
-    except Exception as e:
-        console.print(f"[error]Inference error: {e}[/error]")
-        raise typer.Exit(code=4) from e
+
+    with Live(
+        Panel(_render_harness_progress(), border_style="cyan", padding=(0, 1)),
+        refresh_per_second=8,
+        console=console,
+        transient=False,
+    ) as live:
+        try:
+            ahs_spec, harness_outputs = build_ahspec(
+                context, config, large_model=large_model, small_model=small_model,
+                progress_callback=_on_harness_done,
+            )
+        except Exception as e:
+            console.print(f"[error]Inference error: {e}[/error]")
+            raise typer.Exit(code=4) from e
 
     elapsed2 = time.time() - t2
     harness_count = len(harness_outputs)
@@ -658,12 +699,14 @@ def hatch_command(
                 agent_path=str(agent_output_dir),
                 skip_network_probe=False,
             )
-            if result.report:
-                console.print(result.report)
             if result.readiness.status == "BLOCK":
                 console.print(
                     "[error]Hatch blocked by missing mandatory dependencies.[/error]"
                 )
+                if report and result.report:
+                    console.print(result.report)
+            elif report and result.report:
+                console.print(result.report)
         except Exception as e:
             logger.warning("Readiness phase skipped: %s", e)
 

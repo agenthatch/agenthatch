@@ -568,7 +568,7 @@ class GenerateEngine:
         skill_dir: Path,
         tool_metadata: list[dict[str, Any]],
         chat_fn: Any,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """Generate real Python tool implementations using AI.
 
         Reads the FULL skill directory context (not just SKILL.md):
@@ -661,13 +661,16 @@ class GenerateEngine:
             "to locate scripts, e.g. SKILLS_SCRIPTS_DIR / 'script_name'\n"
             "- For MCP-backed tools: return a placeholder (MCP handles execution)\n"
             "- For API template tools: generate HTTP requests based on the skill context\n"
-            "- For tools without backend: read the SKILL.md code examples and generate a real implementation\n"
+            "- For tools without backend: read SKILL.md code examples,"
+            " generate a real implementation\n"
             "- Do NOT use **kwargs — use the exact parameter names from the tool definition\n"
             "- Include proper error handling and return meaningful results\n"
             "- Import only from stdlib or packages mentioned in the skill context\n"
-            "- Use SKILLS_SCRIPTS_DIR (a pathlib.Path) for all script paths, never hardcode paths\n\n"
+            "- Use SKILLS_SCRIPTS_DIR (a pathlib.Path) for all script paths,"
+            " never hardcode paths\n\n"
             "Output format: Return a JSON object mapping func_name → implementation body.\n"
-            "The function body should be the code INSIDE the function (after the signature and docstring).\n"
+            "The function body should be the code INSIDE the function"
+            " (after the signature and docstring).\n"
             'Example: {"fetch_url": "import subprocess\\n    ..."}'
         )
 
@@ -785,8 +788,8 @@ class GenerateEngine:
                     chat_fn=ai_chat_fn,
                 )
                 if ai_result:
-                    ai_tools = ai_result.get("tools", {})
-                    ai_refs = ai_result.get("references", {})
+                    ai_tools: dict[str, str] = ai_result.get("tools", {})
+                    ai_refs: dict[str, str] = ai_result.get("references", {})
                     if ai_tools:
                         variables["ai_tool_impls"] = ai_tools
                         logger.info(
