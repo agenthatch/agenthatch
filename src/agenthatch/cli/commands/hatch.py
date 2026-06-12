@@ -23,6 +23,14 @@ from typing import Annotated, Any
 import typer
 import yaml
 from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
+from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
@@ -126,6 +134,7 @@ def _render_confidence(ahs_spec: Any) -> None:
         "C": "infer_interface",
         "D": "detect_base_and_instructions",
         "E": "assemble_and_validate",
+        "F": "infer_mcp_servers",
     }
 
     BAR_WIDTH = 22
@@ -136,7 +145,7 @@ def _render_confidence(ahs_spec: Any) -> None:
     )
 
     lines: list[Text] = []
-    for key in ["A", "B", "C", "D", "E"]:
+    for key in ["A", "B", "C", "D", "E", "F"]:
         if key not in cr.per_harness:
             continue
         name = labels.get(key, key)
@@ -157,7 +166,7 @@ def _render_confidence(ahs_spec: Any) -> None:
 
         line.append(f"  {score:.2f}")
 
-        if key == "D" and mcp_servers:
+        if key == "F" and mcp_servers:
             s = "s" if len(mcp_servers) > 1 else ""
             line.append(f"  mcp: {len(mcp_servers)} server{s}", style="dim")
 
@@ -175,8 +184,9 @@ def _render_harness_traces(harness_outputs: dict[str, Any]) -> None:
         "C": "infer_interface",
         "D": "detect_base_and_instructions",
         "E": "assemble_and_validate",
+        "F": "infer_mcp_servers",
     }
-    for key in ["A", "B", "C", "D", "E"]:
+    for key in ["A", "B", "C", "D", "E", "F"]:
         if key not in harness_outputs:
             continue
         h_output = harness_outputs[key]
@@ -194,6 +204,57 @@ def _render_harness_traces(harness_outputs: dict[str, Any]) -> None:
             tree.add(f"[yellow]degradations: {h_output.degradation_applied}[/yellow]")
         console.print(tree)
         console.print()
+
+
+def _render_summary(
+    harness_outputs: dict[str, Any],
+    archetype: Any,
+    file_count: int,
+    agent_output_dir: Path | None,
+    dry_run: bool,
+    no_generate: bool,
+) -> None:
+    """Render final summary table with harness confidence and output info."""
+    labels = {
+        "A": "extract_identity",
+        "B": "infer_intent",
+        "C": "infer_interface",
+        "D": "detect_base_and_instructions",
+        "E": "assemble_and_validate",
+        "F": "infer_mcp_servers",
+    }
+
+    table = Table(title="Hatch Summary", border_style="cyan")
+    table.add_column("Harness", style="accent", justify="center")
+    table.add_column("Task")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Self-Check", justify="center")
+
+    for key in ["A", "B", "C", "D", "F", "E"]:
+        if key not in harness_outputs:
+            continue
+        h = harness_outputs[key]
+        label = labels.get(key, key)
+        conf = f"{h.confidence:.2f}"
+        check = "[ok]✓[/ok]" if h.self_check_passed else "[error]✗[/error]"
+        table.add_row(key, label, conf, check)
+
+    if archetype:
+        arch_val = archetype.value if hasattr(archetype, "value") else str(archetype)
+        table.add_row("", "[dim]Archetype[/dim]", f"[bold]{arch_val}[/bold]", "")
+
+    if not no_generate:
+        if dry_run:
+            table.add_row("", "[dim]Output[/dim]", f"[dim]{file_count} files (dry-run)[/dim]", "")
+        elif agent_output_dir:
+            home = Path.home()
+            dest = str(agent_output_dir)
+            if dest.startswith(str(home)):
+                dest = "~" + dest[len(str(home)):]
+            table.add_row("", "[dim]Output[/dim]", f"{file_count} files → {dest}", "")
+
+    console.print()
+    console.print(table)
 
 
 def _render_phase3_result(
@@ -276,7 +337,7 @@ def hatch_command(
 
     v0.6: hatch now runs the full three-phase pipeline by default:
       Phase 1: Deterministic context assembly (no AI)
-      Phase 2: 5 AgentHarnesses inference (LLM-driven)
+      Phase 2: 6 AgentHarnesses inference (LLM-driven)
       Phase 3: Agent generation via Jinja2 templates (default on)
 
     Examples:
@@ -392,17 +453,38 @@ def hatch_command(
     large_model = harness_cfg.get("large_model", "") if isinstance(harness_cfg, dict) else ""
     small_model = harness_cfg.get("small_model", "") if isinstance(harness_cfg, dict) else ""
 
-    try:
-        with console.status(
-            "[dim]Analyzing skill structure (Harness A→B→C→D→E)...[/dim]",
-            spinner="dots",
-        ):
+    harness_labels = {
+        "A": "extract_identity",
+        "B": "infer_intent",
+        "C": "infer_interface",
+        "D": "detect_base_and_instructions",
+        "F": "infer_mcp_servers",
+        "E": "assemble_and_validate",
+    }
+    completed_harnesses: list[str] = []
+
+    def _on_harness_done(key: str) -> None:
+        completed_harnesses.append(key)
+        label = harness_labels.get(key, key)
+        progress.update(task, advance=1, description=f"[dim]Harness {key}: {label}[/dim]")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[dim]Initializing harnesses...[/dim]", total=6)
+
+        try:
             ahs_spec, harness_outputs = build_ahspec(
-                context, config, large_model=large_model, small_model=small_model
+                context, config, large_model=large_model, small_model=small_model,
+                progress_callback=_on_harness_done,
             )
-    except Exception as e:
-        console.print(f"[error]Inference error: {e}[/error]")
-        raise typer.Exit(code=4) from e
+        except Exception as e:
+            console.print(f"[error]Inference error: {e}[/error]")
+            raise typer.Exit(code=4) from e
 
     elapsed2 = time.time() - t2
     harness_count = len(harness_outputs)
@@ -425,6 +507,8 @@ def hatch_command(
     )
 
     # ── 8. Confidence panel ─────────────────────────────────────────────
+    _render_confidence(ahs_spec)
+
     # ── 9. Dry-run YAML/JSON output ─────────────────────────────────────
     if dry_run:
         console.print()
@@ -439,16 +523,25 @@ def hatch_command(
             )
             console.print(yaml_str)
 
-    # ── 10. Ensure v0.6 agent status ────────────────────────────────────
+    # ── 10. Ensure v0.8.2 agent lifecycle status ────────────────────────
+    from datetime import UTC, datetime
     if ahs_spec.agent is None:
-        ahs_spec.agent = AgentConfig(status="not_generated")
-    else:
-        ahs_spec.agent.status = "not_generated"
+        ahs_spec.agent = AgentConfig(status="unhatched")
+    ahs_spec.agent.status = "hatched"
+    ahs_spec.agent.hatched_at = datetime.now(UTC)
 
     # ── 11. Phase 3 header (v0.7.10: print before work to eliminate gap) ─
     if no_generate:
         console.print(
             "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](skipped)[/dim]"
+        )
+        _render_summary(
+            harness_outputs=harness_outputs,
+            archetype=getattr(classification, "archetype", None),
+            file_count=0,
+            agent_output_dir=None,
+            dry_run=False,
+            no_generate=True,
         )
         return
 
@@ -507,10 +600,37 @@ def hatch_command(
     if not dry_run:
         _update_skillhouse_agent_output(ahs_spec.identity.id, agent_output_dir, config)
 
-    # ── 13. Confidence panel ─────────────────────────────────────────────
-    _render_confidence(ahs_spec)
+    # ── 13. Final summary ───────────────────────────────────────────────
+    _render_summary(
+        harness_outputs=harness_outputs,
+        archetype=getattr(classification, "archetype", None),
+        file_count=file_count if not dry_run else 0,
+        agent_output_dir=agent_output_dir if not dry_run else None,
+        dry_run=dry_run,
+        no_generate=False,
+    )
 
-    # ── 14. Next step ───────────────────────────────────────────────────
+    # ── 14. Phase 4: Runtime Readiness ──────────────────────────────────
+    if not no_generate and not dry_run:
+        try:
+            from agenthatch.generate.readiness import run_readiness_phase
+
+            result = run_readiness_phase(
+                skill_dir=skill_dir,
+                ahspec=ahs_spec.model_dump(),
+                agent_path=str(agent_output_dir),
+                skip_network_probe=False,
+            )
+            if result.report:
+                console.print(result.report)
+            if result.readiness.status == "BLOCK":
+                console.print(
+                    "[error]Hatch blocked by missing mandatory dependencies.[/error]"
+                )
+        except Exception as e:
+            logger.warning("Readiness phase skipped: %s", e)
+
+    # ── 15. Next step ───────────────────────────────────────────────────
     if not no_generate and not dry_run:
         console.print(
             f"[dim]Next step:[/dim] [bold]agenthatch run {ahs_spec.identity.id}[/bold]"

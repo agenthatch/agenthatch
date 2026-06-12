@@ -33,12 +33,6 @@ class Sandbox:
 
     config: SandboxConfig = field(default_factory=SandboxConfig)
 
-    _ALLOWED_COMMANDS: set[str] = field(default_factory=lambda: {
-        "python3", "python", "bash", "node", "curl", "jq",
-        "cat", "head", "tail", "grep", "awk", "sed", "echo",
-        "ls", "find", "wc", "sort", "uniq", "cut", "tr",
-    })
-
     def configure(
         self,
         runtime: str | None = None,
@@ -93,16 +87,6 @@ class Sandbox:
         if not cmd_parts:
             return SandboxResult(stderr="Error: empty command", returncode=1)
 
-        cmd_name = cmd_parts[0]
-        if cmd_name not in self._ALLOWED_COMMANDS:
-            return SandboxResult(
-                stderr=(
-                    f"Error: command '{cmd_name}' is not in the sandbox whitelist. "
-                    f"Allowed: {', '.join(sorted(self._ALLOWED_COMMANDS))}"
-                ),
-                returncode=1,
-            )
-
         try:
             result = subprocess.run(
                 cmd_parts,
@@ -125,7 +109,7 @@ class Sandbox:
             )
         except FileNotFoundError:
             return SandboxResult(
-                stderr=f"Error: command '{cmd_name}' not found",
+                stderr=f"Error: command '{cmd_parts[0]}' not found",
                 returncode=1,
             )
         except Exception as e:

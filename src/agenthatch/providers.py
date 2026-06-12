@@ -110,7 +110,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="DEEPSEEK_API_KEY",
         base_url="https://api.deepseek.com/v1",
-        default_model="deepseek-chat",
+        default_model="deepseek-v4-pro",
         context_window=128000,
         features=ProviderFeatures(
             supports_tools=True,
@@ -133,10 +133,10 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         default_model="llama3",
         context_window=4096,
         features=ProviderFeatures(
-            supports_tools=False,
-            supports_stream_tools=False,
-            supports_json_mode=False,
-            supports_parallel_tool_calls=False,
+            supports_tools=True,
+            supports_stream_tools=True,
+            supports_json_mode=True,
+            supports_parallel_tool_calls=True,
         ),
     ),
 }
@@ -352,14 +352,6 @@ def resolve_api_key(
     # Level 3: Config file
     key = _read_config_key(provider, config)
     if key:
-        if provider not in _warned_providers:
-            _warned_providers.add(provider)
-            console.print(
-                f"[yellow]Warning: API key for '{provider}' read from config file.[/yellow]",
-            )
-            console.print(
-                f"[yellow]  Consider using {info.env_key} environment variable instead.[/yellow]",
-            )
         return key
 
     # Level 4: Interactive prompt

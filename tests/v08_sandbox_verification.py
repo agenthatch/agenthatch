@@ -35,25 +35,20 @@ def test_brick_manifest_has_sandbox_field():
 
 
 def test_whitelist_default_full():
-    """v0.8: default() returns maximum whitelist for unshackled agents."""
+    """v0.8.1: Whitelist no longer applied — SandboxWhitelist retained as compat sentinel."""
     wl = SandboxWhitelist.default()
-    assert len(wl.commands) >= 30
-    assert "docker" in wl.commands
-    assert "pip" in wl.commands
-    assert "git" in wl.commands
-    assert "python3" in wl.commands
+    assert isinstance(wl.commands, set)
 
 
 def test_ahcore_agent_always_uses_sandbox():
-    """v0.8: Sandbox always instantiated, never _NullSandbox."""
+    """v0.8: Sandbox always instantiated, never _NullSandbox.
+    v0.8.1: Whitelist removed — no _ALLOWED_COMMANDS check."""
     agent = AHCoreAgent(
         identity=AgentIdentity(id="test", display_name="Test", version="0.1.0"),
     )
     assert isinstance(agent.sandbox, Sandbox), (
         f"Expected Sandbox instance, got {type(agent.sandbox).__name__}"
     )
-    assert agent.sandbox._ALLOWED_COMMANDS is not None
-    assert len(agent.sandbox._ALLOWED_COMMANDS) >= 30
 
 
 def test_sandbox_execution():
@@ -65,18 +60,18 @@ def test_sandbox_execution():
 
 
 def test_sandbox_truncated_command():
-    """Whitelist properly blocks unknown commands."""
+    """v0.8.1: No whitelist — unknown commands return FileNotFoundError."""
     s = Sandbox()
     result = s.run("nonexistent_command_xyz arg1")
     assert result.returncode == 1
-    assert "not in the sandbox whitelist" in result.stderr
+    assert "not found" in result.stderr
 
 
 def test_real_api_chat():
     """End-to-end: AHCoreAgent chats via DeepSeek API with real API key."""
     api_key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not api_key:
-        api_key = "sk-d7c914da78a649608c3cc2a55e66135c"
+        api_key = ""
 
     agent = AHCoreAgent(
         identity=AgentIdentity(id="test", display_name="Test Agent", version="1.0"),

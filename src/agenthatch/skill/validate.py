@@ -93,6 +93,7 @@ _HARNESS_LABEL: dict[str, str] = {
     "C": "infer_interface",
     "D": "detect_base_and_instructions",
     "E": "assemble_and_validate",
+    "F": "infer_mcp_servers",
 }
 
 
@@ -153,7 +154,7 @@ def validate_and_repair(
                 from agenthatch.skill.spec import ConfidenceReport
                 ahs_spec.confidence_report = ConfidenceReport(**confidence_report)
             ahs_spec.harness_traces = [
-                outputs[k] for k in ["A", "B", "C", "D", "E"] if k in outputs
+                outputs[k] for k in ["A", "B", "C", "D", "E", "F"] if k in outputs
             ]
             logger.info(
                 f"validate_and_repair: passed after {retries} repair rounds, "
@@ -354,6 +355,13 @@ def _retarget_harness(
             resources=resources,
             dir_name=context.dir_name,
         )
+    elif harness_key == "F":
+        resources = _build_validate_resources(context.file_manifest)
+        output = h.run(
+            body=context.body,
+            references=resources.get("references", []),
+            api_templates=None,
+        )
     else:
         output = h.run()
 
@@ -369,6 +377,7 @@ def _estimate_token_savings(harness_key: str) -> int:
         "C": 6000,   # 75% savings → ~2000 tokens
         "D": 6500,   # 81% savings → ~1500 tokens
         "E": 7000,   # 87% savings → ~1000 tokens
+        "F": 7500,   # 94% savings → ~500 tokens
     }
     return estimates.get(harness_key, 0)
 

@@ -38,7 +38,7 @@ from whatever metadata is available.
 Rules:
   - id MUST be kebab-case: only lowercase letters, digits, and hyphens
   - display_name MUST be non-empty, human-readable
-  - version MUST be valid semver (e.g. 0.1.0, 1.2.3)
+  - version: just use "0.1.0" as default (v0.8.2: version is deprecated, hatched_at is the canonical timestamp)
   - Never hallucinate fields — if unknown, set license/author to null
   - If frontmatter is missing, infer id from dir_name via slugify
   - meta SHOULD preserve any original metadata not mapped to standard fields
@@ -134,12 +134,12 @@ Output:
 
 Example 3 — Integration-Type (MCP connector):
 ```
-description: "Connects to Cooper knowledge base via MCP server for document search and management"
-body: (1.5KB Markdown with mcp__cooper__search, mcp__cooper__read_document patterns)
-frontmatter_name: "Cooper Knowledge Base"
+description: "Connects to Notion knowledge base via MCP server for document search and management"
+body: (1.5KB Markdown with mcp__notion__search, mcp__notion__read_document patterns)
+frontmatter_name: "Notion Knowledge Base"
 ```
 Output:
-{""intent"": {""triggers"": [""cooper"", ""knowledge base"", ""search"", ""document"", ""doc"", ""wiki"", ""find"", ""lookup"", ""query""], ""satisfies"": [""search knowledge base for {query}"", ""find documents about {topic}"", ""read document {id}"", ""create knowledge base entry"", ""list team spaces""], ""summary"": ""Connects to Cooper knowledge management platform for searching, reading, creating, and managing documents across team spaces and knowledge bases.""}}  # noqa: E501
+{""intent"": {""triggers"": [""notion"", ""knowledge base"", ""search"", ""document"", ""doc"", ""wiki"", ""find"", ""lookup"", ""query""], ""satisfies"": [""search knowledge base for {query}"", ""find documents about {topic}"", ""read document {id}"", ""create knowledge base entry"", ""list team spaces""], ""summary"": ""Connects to Notion knowledge management platform for searching, reading, creating, and managing documents across team spaces and knowledge bases.""}}  # noqa: E501
 
 Example 4 — Pure Instruction (no scripts):
 ```
@@ -168,6 +168,10 @@ Rules:
   - requires MUST be selected from the provided infrastructure catalog
   - capability names MUST be snake_case and descriptive (verb_object)
   - type values: data, analysis, media, transform, action, event, knowledge, renderer
+  - input_schema: JSON Schema describing what inputs the capability accepts
+    (field names → types like "string", "number", "boolean", "array", "object")
+  - output_schema: JSON Schema describing what the capability returns
+    (at minimum include a "type" key: "string", "object", "array", etc.)
 
 provide type inference:
   - Output JSON/Dict → data
@@ -203,11 +207,11 @@ script_paths: ["scripts/edit_pdf.py"]
 frontmatter_allowed_tools: ["pdf_tool"]
 ```
 Output:
-{""interface"": {""provides"": [{""capability"": ""pdf_edit"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_merge"", ""type"": ""transform"", ""input_schema"": {}}, {""capability"": ""pdf_split"", ""type"": ""transform"", ""input_schema"": {}}], ""requires"": [{""capability"": ""file_reader"", ""type"": ""data"", ""optional"": false}, {""capability"": ""file_writer"", ""type"": ""data"", ""optional"": false}], ""compatible_with"": [""report-generator""]}}  # noqa: E501
+{""interface"": {""provides"": [{""capability"": ""pdf_edit"", ""type"": ""transform"", ""input_schema"": {""file_path"": ""string"", ""modifications"": ""object""}, ""output_schema"": {""type"": ""object"", ""properties"": {""output_path"": ""string"", ""pages_changed"": ""number""}}}, {""capability"": ""pdf_merge"", ""type"": ""transform"", ""input_schema"": {""files"": ""array"", ""output_name"": ""string""}, ""output_schema"": {""type"": ""object"", ""properties"": {""output_path"": ""string"", ""total_pages"": ""number""}}}, {""capability"": ""pdf_split"", ""type"": ""transform"", ""input_schema"": {""file_path"": ""string"", ""pages_per_chunk"": ""number""}, ""output_schema"": {""type"": ""array"", ""items"": {""type"": ""string""}}}], ""requires"": [{""capability"": ""file_reader"", ""type"": ""data"", ""optional"": false}, {""capability"": ""file_writer"", ""type"": ""data"", ""optional"": false}], ""compatible_with"": [""report-generator""]}}  # noqa: E501
 
 Example 3 — MCP Connector (integration-type, multiple tools):
 ```
-body: (Cooper knowledge base connector with mcp__cooper__search, mcp__cooper__read_document, mcp__cooper__create_document, mcp__cooper__download_file)
+body: (Notion knowledge base connector with mcp__notion__search, mcp__notion__read_document, mcp__notion__create_document, mcp__notion__download_file)
 script_paths: []
 frontmatter_allowed_tools: null
 ```
@@ -274,13 +278,13 @@ Output:
 
 Example 3 — Mixed Script + Instruction (MCP connector with documents):
 ```
-body: (1.5KB markdown with mcp__cooper__search and mcp__cooper__read_document patterns, numbered workflow steps)
+body: (1.5KB markdown with mcp__notion__search and mcp__notion__read_document patterns, numbered workflow steps)
 script_paths: []
 frontmatter_compatibility: null
 frontmatter_allowed_tools: null
 ```
 Output:
-{""base"": {""runtime"": ""python3.11"", ""timeout"": ""120s"", ""env"": [{""name"": ""COOPER_TOKEN"", ""required"": true, ""description"": ""Cooper API bearer token for authentication""}], ""dependencies"": [""requests""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""List available knowledge bases"", ""script"": null}, {""step"": 2, ""description"": ""Search for relevant documents"", ""script"": null}, {""step"": 3, ""description"": ""Read selected document"", ""script"": null}, {""step"": 4, ""description"": ""Format and present results"", ""script"": null}], ""rules"": [""Always verify document exists before reading"", ""Never expose bearer token in output"", ""Ensure results are formatted as markdown tables""], ""safety"": {""confirmation_required_for"": [""create_document"", ""delete_document""], ""plan_required"": false, ""max_rows_default"": 50, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
+{""base"": {""runtime"": ""python3.11"", ""timeout"": ""120s"", ""env"": [{""name"": ""NOTION_TOKEN"", ""required"": true, ""description"": ""Notion API bearer token for authentication""}], ""dependencies"": [""requests""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""List available knowledge bases"", ""script"": null}, {""step"": 2, ""description"": ""Search for relevant documents"", ""script"": null}, {""step"": 3, ""description"": ""Read selected document"", ""script"": null}, {""step"": 4, ""description"": ""Format and present results"", ""script"": null}], ""rules"": [""Always verify document exists before reading"", ""Never expose bearer token in output"", ""Ensure results are formatted as markdown tables""], ""safety"": {""confirmation_required_for"": [""create_document"", ""delete_document""], ""plan_required"": false, ""max_rows_default"": 50, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
 """
 
 
@@ -305,6 +309,23 @@ Cross-field checks to perform:
      references a script_name, the corresponding script must be present in the
      discovered scripts list. Flag any workflow→script mismatches as warnings.
 
+v0.8.2 — QUALITY REVIEW (perform AFTER assembly, before output):
+  9. INTENT FIDELITY: Compare intent.summary against the original SKILL.md body
+     included in the input. Does the summary accurately describe what the skill
+     actually does? If the body describes a "document search" skill but the
+     summary says "weather reporter", fix the summary.
+  10. CAPABILITY COVERAGE: For every major workflow described in the skill body,
+      there must be at least one provides entry and one workflow step. If a
+      workflow is described in the body but missing from the assembled output,
+      add it.
+  11. MCP INTEGRITY: If interface.mcp_servers includes servers with non-empty
+      command or transport fields, verify the server names match what is
+      described in the body. If the body uses "mcporter call Notion.X" but
+      mcp_servers has name "Notion" with empty command, it's wrong — fix it.
+  12. TOOL FIDELITY: interface.provides should list capabilities that are
+      actually described in the skill body, not fabricated ones. If a tool
+      name appears in provides but is never mentioned in the body, flag it.
+
 Confidence calculation:
   overall = A * 0.15 + B * 0.20 + C * 0.35 + D * 0.30
   (Harness C has highest weight because interface is the core of AHSSPEC)
@@ -324,24 +345,24 @@ Output:
 
 INFER_MCP_SERVERS_PROMPT = """You are analyzing a skill's documentation to identify MCP servers it depends on.
 
-SKILL BODY:
-{body}
-
-Find ALL MCP server references. Look for:
-1. Pattern: `mcp__SERVER_NAME__TOOL_NAME` — extract SERVER_NAME
-2. Pattern: `mcp_servers:` YAML sections in configuration blocks
-3. Pattern: "MCP server" or "MCP service" mentions with connection details
-4. Named MCP tools with `mcp__` prefix in tool usage examples
+The user message contains the full SKILL.md body. Analyze it to find ALL MCP server references. Look for:
+1. Pattern: `mcporter call SERVER_NAME.TOOL_NAME` — identifies mcporter-based MCP servers (command="mcporter", transport="stdio")
+2. Pattern: `mcp__SERVER_NAME__TOOL_NAME` — extract SERVER_NAME
+3. Pattern: `mcp_servers:` YAML sections in configuration blocks
+4. Pattern: "MCP server" or "MCP service" mentions with connection details
+5. Pattern: `requires: { "bins": ["mcporter"], "mcpServers": ["SERVER_NAME"] }` in frontmatter
 
 For each MCP server found in the skill text, extract:
-- name: server identifier (e.g., "data-infra-mcp", "Apollo-mcp")
-- transport: "stdio" if a CLI command is mentioned, "streamable_http" if a URL/endpoint is given, "sse" if SSE
-- url: full URL with http:// or https:// prefix (for HTTP/SSE transport)
-- command: CLI command (for stdio transport)
+- name: server identifier (e.g., "data-infra-mcp", "ConfigHub-mcp", "Notion")
+- transport: "stdio" if `mcporter call` is used, "streamable_http" if a URL/endpoint is given, "sse" if SSE
+- url: full URL with http:// or https:// prefix (for HTTP/SSE transport), empty string for mcporter
+- command: "mcporter" if the skill uses `mcporter call SERVER.TOOL` syntax, otherwise empty string
 - description: what the server provides
 
-If the skill mentions MCP tool names like mcp__SERVER__TOOL but gives no
-URL or command, set transport="" and do NOT fabricate a URL.
+CRITICAL RULES:
+- If the skill uses `mcporter call X.Y` syntax, ALWAYS set command="mcporter" and transport="stdio"
+- If the skill frontmatter has `"mcpServers": ["X"]`, detect server "X" with mcporter defaults
+- Never fabricate a URL if no URL is given — set transport="" and url="" if unknown
 
 Return ONLY valid JSON:
 {"mcp_servers": [{"name": "...", "transport": "...", "url": "...", "command": "...", "description": "..."}]}
@@ -358,14 +379,23 @@ MCP server URL: http://localhost:8080/mcp
 Output:
 {"mcp_servers": [{"name": "data-infra-mcp", "transport": "streamable_http", "url": "http://localhost:8080/mcp", "command": "", "description": "Data infrastructure database query service"}]}
 
-Example 2 — Skill with MCP server (stdio transport):
+Example 2 — Skill with mcporter-based MCP server (stdio transport):
 ```
-Uses Apollo MCP for configuration management. Run via: mcporter call Apollo-mcp.get_config key=app.settings
+Uses ConfigHub MCP for configuration management. Run via: mcporter call ConfigHub-mcp.get_config key=app.settings
 ```
 Output:
-{"mcp_servers": [{"name": "Apollo-mcp", "transport": "stdio", "url": "", "command": "mcporter", "description": "Apollo configuration management service"}]}
+{"mcp_servers": [{"name": "ConfigHub-mcp", "transport": "stdio", "url": "", "command": "mcporter", "description": "Configuration management service"}]}
 
-Example 3 — Skill with no MCP references:
+Example 3 — Skill with mcporter as forwarding layer, multiple tool calls:
+```
+This skill forwards requests through mcporter to the Notion MCP server.
+mcporter call Notion.read_document resourceId="xxx"
+mcporter call Notion.listSpaces type=1
+```
+Output:
+{"mcp_servers": [{"name": "Notion", "transport": "stdio", "url": "", "command": "mcporter", "description": "Notion collaborative documentation platform MCP server"}]}
+
+Example 4 — Skill with no MCP references:
 ```
 A simple skill that formats JSON output from API responses.
 ```

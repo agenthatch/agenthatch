@@ -12,6 +12,7 @@ environment BEFORE the hatch is declared successful. Checks:
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import shutil
 import subprocess
@@ -254,7 +255,11 @@ def _check_credential_present(key: str) -> bool:
 
 
 def _probe_mcp_server(mcp: dict[str, str]) -> bool:
-    """Optional: probe MCP server reachability via mcporter."""
+    """Optional: probe MCP server reachability via mcporter.
+
+    v0.8.1: Also validate that tools have usable inputSchema (non-empty properties).
+    Returns False if server unreachable OR if any tool has empty schema.
+    """
     if not shutil.which("mcporter"):
         return False  # Can't probe without mcporter
     try:
@@ -262,7 +267,21 @@ def _probe_mcp_server(mcp: dict[str, str]) -> bool:
             ["mcporter", "call", f"{mcp['name']}.list_tools"],
             capture_output=True, text=True, timeout=10,
         )
-        return result.returncode == 0
+        if result.returncode != 0:
+            return False
+        # v0.8.1: Check tool schema quality
+        data = json.loads(result.stdout)
+        tools = data.get("result", {}).get("tools", [])
+        empty_schema_tools = [
+            t["name"] for t in tools
+            if isinstance(t, dict) and not t.get("inputSchema", {}).get("properties")
+        ]
+        if empty_schema_tools:
+            logger.warning(
+                "MCP server '%s': %d tools have empty inputSchema: %s",
+                mcp["name"], len(empty_schema_tools), ", ".join(empty_schema_tools),
+            )
+        return True
     except Exception:
         return False  # Network error, timeout, or other
 

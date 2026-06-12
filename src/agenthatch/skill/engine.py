@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -372,8 +373,6 @@ body (first 50 lines):
         return result.model_dump()
 
     def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:
-        import re
-
         identity = result.get("identity", {})
         identity_id = identity.get("id", "")
         if not identity_id:
@@ -531,7 +530,6 @@ body:
             return False, "interface.provides is empty — fatal"
 
         # Check capability names are snake_case
-        import re
         for cap in provides:
             name = cap.get("capability", "")
             if not re.match(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$", name):
@@ -819,6 +817,9 @@ class InferMCPServersHarness(AgentHarness):
                 self_check_passed=True,
             )
 
+        # v0.8.1: Apply HARNESS_CONFIG for thinking + temperature
+        cfg = HARNESS_CONFIG.get("F", {})
+
         try:
             messages = [
                 {"role": "system", "content": self.build_system_prompt()},
@@ -829,6 +830,8 @@ class InferMCPServersHarness(AgentHarness):
                 messages=messages,
                 model=self.model,
                 response_model=InferMCPServersOutput,
+                thinking=cfg.get("thinking"),
+                temperature=cfg.get("temperature", 0.3),
             )
             llm_servers_raw = []
             for s in response.mcp_servers:
@@ -843,22 +846,47 @@ class InferMCPServersHarness(AgentHarness):
             # M13 fix: log the error instead of silently swallowing it
             logger.warning("Harness F LLM call failed (%s: %s), falling back to regex",
                            type(e).__name__, e)
-            # Fallback to regex-based extraction
+            # Fallback to regex-based extraction (mcp__ + mcporter patterns)
             llm_servers_raw = []
+            # Pattern 1: mcp__SERVER__TOOL pattern
             mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
             server_names = set(mcp_pattern.findall(body))
-            for sname in sorted(server_names):
-                llm_servers_raw.append({
+            # Pattern 2: mcporter call SERVER.TOOL pattern
+            mcporter_pattern = re.compile(r'mcporter\s+call\s+(\w[\w-]*)\.')
+            mcporter_names = set(mcporter_pattern.findall(body))
+            # Pattern 3: frontmatter mcpServers
+            mcp_servers_json = re.findall(
+                r'"mcpServers"\s*:\s*\[([^\]]+)\]', body
+            )
+            for match in mcp_servers_json:
+                for name_match in re.findall(r'"(\w[\w-]*)"', match):
+                    mcporter_names.add(name_match)
+            all_names = server_names | mcporter_names
+            for sname in sorted(all_names):
+                entry: dict[str, str] = {
                     "name": sname,
                     "transport": "",
                     "url": "",
                     "command": "",
-                    "description": "",
-                })
+                    "description": f"MCP server: {sname}",
+                }
+                # mcporter-detected servers get stdio defaults
+                if sname in mcporter_names:
+                    entry["transport"] = "stdio"
+                    entry["command"] = "mcporter"
+                    entry["description"] = f"mcporter-bridged MCP server: {sname}"
+                llm_servers_raw.append(entry)
 
-        # Verify against actual mcp__ patterns in body
+        # Verify against actual MCP references in body
+        # v0.8.1: Include mcporter patterns in verification, not just mcp__
         mcp_pattern = re.compile(r'mcp__([a-zA-Z0-9_-]+)__')
+        mcporter_pattern = re.compile(r'mcporter\s+call\s+(\w[\w-]*)\.')
+        mcp_servers_json = re.findall(r'"mcpServers"\s*:\s*\[([^\]]+)\]', body)
         referenced = set(mcp_pattern.findall(body))
+        referenced |= set(mcporter_pattern.findall(body))
+        for match in mcp_servers_json:
+            referenced |= set(re.findall(r'"(\w[\w-]*)"', match))
+
         for server in llm_servers_raw:
             name = server.get("name", "")
             if name in referenced:
@@ -871,7 +899,8 @@ class InferMCPServersHarness(AgentHarness):
         return HarnessOutput(
             result={"mcp_servers": mcp_servers},
             confidence=0.9 if mcp_servers else 0.5,
-            reasoning_trace=[f"detected {len(mcp_servers)} MCP servers"],
+            reasoning_trace=[f"detected {len(mcp_servers)} MCP servers: "
+                             f"{[s.get('name') for s in mcp_servers]}"],
             self_check_passed=True,
         )
 
@@ -886,6 +915,9 @@ def _merge_mcp_configs(
 
     Preserves existing interface config and enriches with Harness F's
     detected transport, url, command, and description details.
+
+    v0.8.1: When Harness F detects mcporter (command="mcporter"), force
+    transport to "stdio" to override any HTTP default from Harness C.
     """
     merged: dict[str, dict[str, Any]] = {}
     for item in interface_mcp:
@@ -897,12 +929,17 @@ def _merge_mcp_configs(
         name = item.get("name", "")
         if not name:
             continue
+        is_mcporter = item.get("command", "") == "mcporter"
         if name in merged:
             existing = merged[name]
-            # Harness F top-level fields take precedence
+            # Harness F top-level fields take precedence over empty fields
             for key in ("transport", "url", "command", "description"):
                 if item.get(key) and not existing.get(key):
                     existing[key] = item[key]
+            # v0.8.1: mcporter always forces stdio transport
+            if is_mcporter:
+                existing["transport"] = "stdio"
+                existing["command"] = "mcporter"
         else:
             merged[name] = dict(item)
 
@@ -950,6 +987,10 @@ class Orchestrator:
         api_key = resolve_api_key(provider_name, config=config, prompt=True)
 
         timeout = provider_cfg.get("timeout", 180)
+        harness_cfg = config.get("harness", {})
+        if not isinstance(harness_cfg, dict):
+            harness_cfg = {}
+        reasoning_effort = harness_cfg.get("reasoning_effort", "medium")
 
         self._large_client = LLMClient(
             provider=provider_name,
@@ -959,6 +1000,7 @@ class Orchestrator:
             features=provider_info.features,  # type: ignore[arg-type]
             context_window=provider_info.context_window,
             timeout=timeout,
+            reasoning_effort=reasoning_effort,
         )
 
         # H2 fix: if large and small models are identical, reuse large_client
@@ -975,11 +1017,12 @@ class Orchestrator:
                 features=provider_info.features,  # type: ignore[arg-type]
                 context_window=provider_info.context_window,
                 timeout=timeout,
+                reasoning_effort=reasoning_effort,
             )
 
         self._provider_name = provider_name
 
-    def run(self, context: ContextPack) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
+    def run(self, context: ContextPack, progress_callback: Callable[[str], None] | None = None) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
         """Run Phase 2 on a ContextPack.
 
         Returns:
@@ -1022,6 +1065,8 @@ class Orchestrator:
                 body_first_50_lines=context.body[:2500],
                 file_contents=file_contents,
             )
+            if progress_callback:
+                progress_callback("A")
 
         if tier_map.get("B") != "skip":
             logger.info("Running harness B: infer_intent")
@@ -1032,6 +1077,8 @@ class Orchestrator:
                 frontmatter_name=frontmatter.get("name"),
                 file_contents=file_contents,
             )
+            if progress_callback:
+                progress_callback("B")
 
         if tier_map.get("C") != "skip":
             logger.info("Running harness C: infer_interface")
@@ -1042,6 +1089,8 @@ class Orchestrator:
                 frontmatter_allowed_tools=frontmatter.get("allowed_tools"),
                 script_manifest=script_manifest,  # v0.8: Phase 1.5 ScriptManifest
             )
+            if progress_callback:
+                progress_callback("C")
 
         # Step 3: Check self-validation
         for name, output in outputs.items():
@@ -1060,26 +1109,61 @@ class Orchestrator:
                 frontmatter_compatibility=frontmatter.get("compatibility"),
                 frontmatter_allowed_tools=frontmatter.get("allowed_tools"),
             )
+            if progress_callback:
+                progress_callback("D")
 
-        # Step 5: Assemble (E)
+        # Step 5: Infer MCP servers (F) — v0.8.2: moved BEFORE E assembly
+        # so E receives the merged MCP config directly, eliminating the
+        # post-hoc merge pattern that was fragile for mcporter detection.
+        if tier_map.get("F") != "skip":
+            logger.info("Running harness F: infer_mcp_servers")
+            outputs["F"] = harnesses["F"].run(
+                body=context.body,
+                references=resources.get("references", []),
+                api_templates=None,
+            )
+            if progress_callback:
+                progress_callback("F")
+
+        # Step 5b: Merge F's MCP servers into C's interface before E sees it
+        interface_for_e = dict(outputs["C"].result) if "C" in outputs else {}
+        if "F" in outputs:
+            f_output: Any = outputs["F"]
+            f_mcp = (
+                f_output.result.get("mcp_servers", [])
+                if hasattr(f_output, "result") else []
+            )
+            f_mcp = self._enrich_mcp_from_body(f_mcp, context.body)
+            c_mcp = interface_for_e.get("interface", {}).get("mcp_servers", [])
+            if f_mcp:
+                mcp_merged = (
+                    _merge_mcp_configs(c_mcp, f_mcp) if c_mcp else f_mcp
+                )
+                if "interface" not in interface_for_e:
+                    interface_for_e["interface"] = {}
+                interface_for_e["interface"]["mcp_servers"] = mcp_merged
+
+        # Step 6: Assemble (E) — receives merged MCP config from C+F
         try:
             logger.info("Running harness E: assemble_and_validate")
             outputs["E"] = harnesses["E"].run(
                 identity=outputs["A"].result if "A" in outputs else {},
                 intent=outputs["B"].result if "B" in outputs else {},
-                interface=outputs["C"].result if "C" in outputs else {},
+                interface=interface_for_e if "C" in outputs else {},
                 base=outputs["D"].result.get("base", {}) if "D" in outputs else {},
                 instructions=outputs["D"].result.get("instructions", {}) if "D" in outputs else {},
                 resources=resources,
                 dir_name=context.dir_name,
             )
+            if progress_callback:
+                progress_callback("E")
         except (ValueError, TypeError, RuntimeError, json.JSONDecodeError) as e:
             logger.warning(f"Harness E assembly failed: {e}, retrying once")
             try:
                 outputs["E"] = harnesses["E"].run(
                     identity=outputs["A"].result if "A" in outputs else {},
                     intent=outputs["B"].result if "B" in outputs else {},
-                    interface=outputs["C"].result if "C" in outputs else {},
+                    interface=interface_for_e if "C" in outputs else {},
                     base=outputs["D"].result.get("base", {}) if "D" in outputs else {},
                     instructions=(
                         outputs["D"].result.get("instructions", {})
@@ -1088,21 +1172,14 @@ class Orchestrator:
                     resources=resources,
                     dir_name=context.dir_name,
                 )
+                if progress_callback:
+                    progress_callback("E")
             except Exception as e2:
                 logger.error(f"Harness E retry also failed: {e2}")
                 from agenthatch.exceptions import SchemaValidationError
                 raise SchemaValidationError(f"Harness E failed: {e2}") from e2
 
-        # Step 5b: Infer MCP servers (F)
-        if tier_map.get("F") != "skip":
-            logger.info("Running harness F: infer_mcp_servers")
-            outputs["F"] = harnesses["F"].run(
-                body=context.body,
-                references=resources.get("references", []),
-                api_templates=None,
-            )
-
-        # Step 6: Build AHSSpec from Harness E assembly output
+        # Step 7: Build AHSSpec from Harness E assembly output
         ahs_dict: dict[str, Any] = {}
         try:
             ahs_dict = outputs["E"].result.get("ahs_spec", {})
@@ -1120,27 +1197,6 @@ class Orchestrator:
             if "interface" not in ahs_dict:
                 ahs_dict["interface"] = {}
             ahs_dict["interface"]["api_templates"] = api_templates
-
-            # Merge MCP servers from Harness F
-            mcp_servers: list[dict[str, Any]] = []
-            if "F" in outputs:
-                f_output: Any = outputs["F"]
-                mcp_servers = (
-                    f_output.result.get("mcp_servers", [])
-                    if hasattr(f_output, "result") else []
-                )
-            # Enrich MCP servers from SKILL.md body patterns
-            mcp_servers = self._enrich_mcp_from_body(mcp_servers, context.body)
-            # v0.7.11: Merge with existing interface.mcp_servers from Harness E
-            # This preserves Harness F detection results (with actual urls/transport)
-            # over Harness C defaults (which often have empty config)
-            interface_mcp = ahs_dict.get("interface", {}).get("mcp_servers", [])
-            if interface_mcp and mcp_servers:
-                mcp_servers = _merge_mcp_configs(interface_mcp, mcp_servers)
-            if mcp_servers:
-                if "interface" not in ahs_dict:
-                    ahs_dict["interface"] = {}
-                ahs_dict["interface"]["mcp_servers"] = mcp_servers
 
             ahs_spec = self._dict_to_ahspec(ahs_dict)
 
@@ -1259,37 +1315,53 @@ class Orchestrator:
         else:
             name = parsed.netloc.replace(".", "_")
         # Clean up non-alphanumeric
-        import re as _re
-        name = _re.sub(r'[^a-zA-Z0-9_]', '_', name)
+        name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
         return f"{method.lower()}_{name}"[:50]
 
     @staticmethod
     def _enrich_mcp_from_body(
         servers: list[dict[str, Any]], body: str
     ) -> list[dict[str, Any]]:
-        """Scan SKILL.md body for mcp__ patterns.
+        """Scan SKILL.md body for MCP server references.
 
-        Fills in missing server info from mcp__SERVER__TOOL references.
+        Detects both mcp__SERVER__TOOL and mcporter call SERVER.TOOL patterns.
+        For mcporter-detected servers, sets command="mcporter" and transport="stdio".
         Never fabricates URLs — if no URL in SKILL.md, transport stays empty.
         """
         mcp_pattern = re.compile(r'mcp__(\w[\w-]*)__')
+        mcporter_pattern = re.compile(r'mcporter\s+call\s+(\w[\w-]*)\.')
         found = set(mcp_pattern.findall(body))
+        mcporter_names = set(mcporter_pattern.findall(body))
+        # Also detect frontmatter mcpServers declarations
+        mcp_servers_json = re.findall(r'"mcpServers"\s*:\s*\[([^\]]+)\]', body)
+        for match in mcp_servers_json:
+            mcporter_names |= set(re.findall(r'"(\w[\w-]*)"', match))
+        all_found = found | mcporter_names
         existing_names = {s.get('name', '') for s in servers}
 
-        for name in found:
+        for name in all_found:
             if name not in existing_names:
-                servers.append({
+                entry: dict[str, str] = {
                     'name': name,
                     'transport': '',
                     'url': '',
                     'command': '',
                     'description': f'MCP server referenced in skill as mcp__{name}__*',
-                })
+                }
+                if name in mcporter_names:
+                    entry['transport'] = 'stdio'
+                    entry['command'] = 'mcporter'
+                    entry['description'] = f'mcporter-bridged MCP server: {name}'
+                servers.append(entry)
             else:
-                # Existing server without transport — don't fabricate
+                # Existing server — enrich with mcporter defaults if applicable
                 for s in servers:
-                    if s.get('name') == name and not s.get('transport'):
-                        s['transport'] = ''
+                    if s.get('name') == name:
+                        if name in mcporter_names and not s.get('command'):
+                            s['command'] = 'mcporter'
+                            s['transport'] = 'stdio'
+                        elif not s.get('transport'):
+                            s['transport'] = ''
         return servers
 
     def _detect_api_templates(self, body: str) -> list[dict[str, Any]]:

@@ -189,6 +189,7 @@ class ConversationLoop:
 
         task_completed = False
         has_executed_tools = False
+        tool_stats: dict[str, int] = {}
         for _ in range(self.MAX_TOOL_ROUNDS):
             # v0.6: detect task_complete signal, return summary
             if response.tool_calls:
@@ -290,6 +291,7 @@ class ConversationLoop:
             ):
                 tc = entry["tc"]
                 elapsed = entry["elapsed"]
+                tool_stats[tc.name] = tool_stats.get(tc.name, 0) + 1
                 result_str = entry["result"]
                 if len(result_str) > MAX_TOOL_RESULT_CHARS:
                     result_str = result_str[:MAX_TOOL_RESULT_CHARS] + "\n... (truncated)"
@@ -331,10 +333,11 @@ class ConversationLoop:
                     tool_calls=[],
                 )
         else:
-            # v0.6: Max rounds exhausted — synthesize best-effort summary
+            # v0.8.1: Max rounds exhausted — diagnostic summary
+            stats_str = ", ".join(f"{k}×{v}" for k, v in tool_stats.items())
             task_completed = True
 
-        # ── v0.6: Max-rounds fallback ──
+        # ── v0.8.1: Max-rounds fallback with diagnostic ──
         if task_completed:
             self.ctx.add_to_history("user", user_input)
             messages.append({
@@ -351,7 +354,8 @@ class ConversationLoop:
                 self._cb_record(False)
                 logger.error("Fallback summarization failed: %s", e)
                 response = ToolCallResponse(
-                    text="(Task partially completed — max rounds reached)",
+                    text=f"(Max rounds ({self.MAX_TOOL_ROUNDS}) reached. "
+                         f"Tools: {stats_str})",
                     tool_calls=[],
                 )
 
@@ -579,6 +583,7 @@ class ConversationLoop:
         task_completed = False
         has_executed_tools = False
         accumulated_text = ""
+        tool_stats: dict[str, int] = {}
         for _ in range(self.MAX_TOOL_ROUNDS):
             has_yielded_tool_header = False
 
@@ -713,6 +718,7 @@ class ConversationLoop:
                 tc = entry["tc"]
                 elapsed = entry["elapsed"]
                 result = entry["result"]
+                tool_stats[tc.name] = tool_stats.get(tc.name, 0) + 1
 
                 yield RichToolCallEvent(
                     phase="done",
@@ -747,9 +753,11 @@ class ConversationLoop:
         else:
             task_completed = True
 
-        # ── v0.6: Max-rounds fallback ──
+        # ── v0.8.1: Max-rounds fallback with diagnostic ──
         if task_completed:
-            yield "(Max rounds reached, summarizing...)"
+            stats_str = ", ".join(f"{k}×{v}" for k, v in tool_stats.items())
+            yield f"(Max rounds ({self.MAX_TOOL_ROUNDS}) reached. "
+            yield f"Tools called: {stats_str}. Summarizing...)"
             messages.append({
                 "role": "user",
                 "content": "Summarize what you accomplished in 1-3 sentences.",

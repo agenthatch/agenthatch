@@ -385,6 +385,19 @@ class MCPClient:
                 input_schema=tool.get("inputSchema", {}),
             )
 
+        # v0.8.1: Validate tool schema quality
+        empty_schema_tools = [
+            t["name"] for t in tools
+            if isinstance(t, dict) and not t.get("inputSchema", {}).get("properties")
+        ]
+        if empty_schema_tools:
+            logger.warning(
+                "MCP server '%s': %d tools have empty/missing inputSchema: %s. "
+                "These tools may fail when called with arguments.",
+                sname, len(empty_schema_tools),
+                ", ".join(empty_schema_tools),
+            )
+
     def call_tool(
         self, server_name: str, tool_name: str, arguments: dict[str, Any],
         timeout: float | None = None,

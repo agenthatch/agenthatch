@@ -63,11 +63,7 @@ class AHCoreAgent:
         self.sandbox: Any = Sandbox()
         self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
 
-        # Apply default whitelist from sandboxes module
-        if hasattr(self.sandbox, 'configure'):
-            from agenthatch_core.bricks.sandboxes import SandboxWhitelist
-            whitelist = SandboxWhitelist.default()
-            self.sandbox._ALLOWED_COMMANDS = whitelist.commands
+        # v0.8.1: Whitelist removed — agent has full CLI capability
 
         # OutputGuard (v0.7) — compiled regex validators from ANCHOR_RULES
         self.guard: Any = self._manifest.guard
@@ -811,7 +807,7 @@ class MCPProxyExecutor:
         """Execute through mcporter MCP client.
 
         v0.7.15: Uses correct mcporter syntax:
-          - Dot notation: mcporter call Cooper.listKnowledgeBases
+          - Dot notation: mcporter call KnowledgeBase.listDocuments
           - key=value args: ownType=0 (not --ownType 0)
           - Extracts real MCP tool name from script_name when available
             (capability names in YAML often differ from MCP tool names).
@@ -821,8 +817,8 @@ class MCPProxyExecutor:
         # Determine the mcporter server.tool selector
         mcp_tool = f"{self.server_name}.{self.cap_name}"
         if self.script_name:
-            # Parse "Cooper.listKnowledgeBases" from workflow script like:
-            #   "mcporter call Cooper.listKnowledgeBases ownType=0 --output json"
+            # Parse "KnowledgeBase.listDocuments" from workflow script like:
+            #   "mcporter call KnowledgeBase.listDocuments ownType=0 --output json"
             parts = self.script_name.split()
             for i, part in enumerate(parts):
                 if part == "call" and i + 1 < len(parts):
