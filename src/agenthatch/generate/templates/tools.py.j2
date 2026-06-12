@@ -7,7 +7,7 @@ in agenthatch.yaml. Each tool follows the same pattern:
 2. For MCP-backed capabilities: handled by MCP proxy (wrapper is placeholder)
 3. For API templates: follow the API template definition
 4. For native capabilities: direct implementation
-5. For description-only capabilities: clear placeholder implementation
+5. For description-only capabilities: AI-generated or template fallback
 """
 import json
 import subprocess
@@ -43,11 +43,13 @@ def {{ tool.func_name }}() -> Any:
     API template capability. Follows the API template definition from the spec.
 {% endif %}
 {% if tool.backend_kind == "none" %}
-    Description-only capability. You are the runtime - you have the context
-    to handle this capability directly.
+    AI-generated implementation based on skill context.
 {% endif %}
     """
-{% if tool.backend_kind == "script" %}
+{% if tool.func_name in ai_tool_impls %}
+    # === AI-generated implementation ===
+{{ ai_tool_impls[tool.func_name] }}
+{% elif tool.backend_kind == "script" %}
     args = [str(SKILLS_SCRIPTS_DIR / "{{ tool.script_name }}")]
     {% for param_name, _, _ in tool.params %}
     args.append(str({{ param_name }}))
@@ -66,7 +68,7 @@ def {{ tool.func_name }}() -> Any:
     # API template will be injected by the API template loader
     return f"[API template tool: {{ tool.name }}] - call this capability to execute"
 {% else %}
-    # Description-only - return the description for the runtime to handle
+    # Fallback: description-only stub
     return f"[{{ tool.name }}]: {{ tool.description }}"
 {% endif %}
 {% endfor %}

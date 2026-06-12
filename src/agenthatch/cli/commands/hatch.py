@@ -41,6 +41,48 @@ _MAX_DIRS_PER_ROOT = 500       # max dirs to visit per search root
 # ── Phase 3 agent generation ───────────────────────────────────────────────
 
 
+def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
+    """Create a simple chat function for AI-driven tool generation.
+
+    Uses the same provider config as the harnesses but with a simpler
+    interface: (system_prompt, user_prompt) -> response_text.
+    """
+    import os
+
+    from agenthatch_core.llm.client import LLMClient
+
+    provider_name = config.get("providers", {}).get("default", "openai")
+    provider_cfg = config.get("providers", {}).get(provider_name, {})
+    if not isinstance(provider_cfg, dict):
+        return None
+
+    api_key = provider_cfg.get("api_key") or os.environ.get(
+        provider_cfg.get("api_key_env", ""), ""
+    )
+    if not api_key:
+        logger.warning("No API key configured for AI tool generation")
+        return None
+
+    model = provider_cfg.get("default_model", "gpt-4o")
+    base_url = provider_cfg.get("base_url", "")
+
+    client = LLMClient(
+        provider=provider_name,
+        model=model,
+        api_key=api_key,
+        base_url=base_url or None,
+    )
+
+    def chat_fn(system_prompt: str, user_prompt: str) -> str:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        return client.chat(messages=messages, temperature=0.3, max_tokens=4096)
+
+    return chat_fn
+
+
 def _run_phase3_generate(
     ahs_spec: Any,
     skill_dir: Path,
@@ -49,6 +91,7 @@ def _run_phase3_generate(
     dry_run: bool,
     copy_skills: bool,
     _framework: str,
+    ai_chat_fn: Any | None = None,
 ) -> tuple[int, Path, float]:
     """Run Phase 3: generate an independent Agent directory from AHSSPEC.
 
@@ -89,6 +132,7 @@ def _run_phase3_generate(
             force=force,
             copy_skills=copy_skills,
             skill_dir=skill_dir,
+            ai_chat_fn=ai_chat_fn,
         )
     except FileExistsError as e:
         console.print(f"[yellow]{e}[/yellow]")
@@ -320,6 +364,10 @@ def hatch_command(
     no_copy_skills: Annotated[
         bool,
         typer.Option("--no-copy-skills", help="Exclude original SKILL.md and resource files"),
+    ] = False,
+    no_ai_tools: Annotated[
+        bool,
+        typer.Option("--no-ai-tools", help="Skip AI-driven tool implementation generation"),
     ] = False,
     framework: Annotated[
         str,
@@ -559,6 +607,12 @@ def hatch_command(
         _register_skillhouse(ahs_spec, yaml_output_path, config)
 
     # ── 13. Phase 3: Run generation (header already printed above) ──────
+
+    # v0.9: Create AI chat function for tool implementation generation
+    ai_chat_fn = None
+    if not no_ai_tools:
+        ai_chat_fn = _create_ai_chat_fn(config)
+
     file_count, agent_output_dir, elapsed3 = _run_phase3_generate(
         ahs_spec=ahs_spec,
         skill_dir=skill_dir,
@@ -567,6 +621,7 @@ def hatch_command(
         dry_run=dry_run,
         copy_skills=not no_copy_skills,
         _framework=framework,
+        ai_chat_fn=ai_chat_fn,
     )
 
     _render_phase3_result(

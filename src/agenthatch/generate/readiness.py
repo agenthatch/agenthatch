@@ -313,8 +313,8 @@ def runtime_readiness_gate(
     if ahspec:
         tool_gaps = _check_tool_executor_coverage(ahspec)
         bare_tools = [t for t, kind in tool_gaps if kind == "none"]
-        mcp_tools = [t for t, kind in tool_gaps if kind == "mcp"]
-        script_tools = [t for t, kind in tool_gaps if kind == "script"]
+        _mcp_tools = [t for t, kind in tool_gaps if kind == "mcp"]
+        _script_tools = [t for t, kind in tool_gaps if kind == "script"]
 
         if bare_tools:
             coverage = 1.0 - len(bare_tools) / max(len(tool_gaps), 1)

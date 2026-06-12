@@ -24,6 +24,7 @@ TEMPLATE_MAP: dict[str, str] = {
     "pyproject.toml.j2": "pyproject.toml",
     "agent.py.j2": "src/{package_name}/agent.py",
     "tools.py.j2": "src/{package_name}/tools.py",
+    "references.py.j2": "src/{package_name}/references.py",
     "runtime.toml.j2": "runtime.toml",
     "README.md.j2": "README.md",
 }
@@ -183,6 +184,8 @@ class GenerateEngine:
             "script_map": script_map,
             "requires": requires,
             "brick_manifest": brick_manifest,
+            "ai_tool_impls": {},  # populated by AI generation step
+            "ai_references": {},  # populated by AI reference extraction
         }
 
     @staticmethod
@@ -405,11 +408,12 @@ class GenerateEngine:
         3. Direct filename match from scripts directory (runtime only, skipped here)
         """
         cap_to_script: dict[str, str] = {}
-        cap_names = {
-            c.get("capability", c.get("name", "")) for c in provides
-            if isinstance(c, dict)
-        }
-        cap_names.discard("")
+        cap_names: set[str] = set()
+        for c in provides:
+            if isinstance(c, dict):
+                name = str(c.get("capability", c.get("name", "")))
+                if name:
+                    cap_names.add(name)
 
         # Approach 1: workflow steps
         workflow = instructions.get("workflow", [])
@@ -479,7 +483,17 @@ class GenerateEngine:
           - backend_kind: "mcp" | "script" | "api_template" | "none"
         """
         result: list[dict[str, Any]] = []
-        mcp_names = {s.get("name", "") for s in (mcp_servers or [])}
+        # Build set of MCP TOOL names (not server names)
+        mcp_tool_names: set[str] = set()
+        mcp_tool_to_server: dict[str, str] = {}
+        for s in (mcp_servers or []):
+            server_name = s.get("name", "")
+            for t in s.get("tools", []):
+                if isinstance(t, dict):
+                    tn = t.get("name", "")
+                    if tn:
+                        mcp_tool_names.add(tn)
+                        mcp_tool_to_server[tn] = server_name
         script_map = script_map or {}
         api_map: dict[str, dict[str, Any]] = {}
         for tmpl in (api_templates or []):
@@ -515,13 +529,8 @@ class GenerateEngine:
                 has_inputs = False
 
             # Determine if MCP-backed
-            is_mcp = name in mcp_names or cap.get("type") == "mcp"
-            mcp_server = ""
-            if is_mcp and mcp_names:
-                for s in (mcp_servers or []):
-                    if name in [t.get("name", "") for t in s.get("tools", [])]:
-                        mcp_server = s.get("name", "")
-                        break
+            is_mcp = name in mcp_tool_names or cap.get("type") == "mcp"
+            mcp_server = mcp_tool_to_server.get(name, "")
 
             # Determine backend kind
             script_name = script_map.get(name, "")
@@ -551,6 +560,189 @@ class GenerateEngine:
 
         return result
 
+    # ── AI-driven tool implementation generation ──────────────────────
+
+    @staticmethod
+    def _ai_generate_tool_impls(
+        ahspec: dict[str, Any],
+        skill_dir: Path,
+        tool_metadata: list[dict[str, Any]],
+        chat_fn: Any,
+    ) -> dict[str, str]:
+        """Generate real Python tool implementations using AI.
+
+        Reads the FULL skill directory context (not just SKILL.md):
+          - SKILL.md — main skill description + code examples
+          - All reference files — detailed specifications
+          - All script files — existing working code as reference
+          - agenthatch.yaml — interface definitions
+
+        The AI cross-references these files to produce meaningful
+        implementations for each tool.
+
+        Returns dict mapping func_name → implementation body (Python code).
+        """
+        # ── Step 1: Collect full skill context ──────────────────────
+        context_files: list[dict[str, str]] = []
+
+        # SKILL.md is always first
+        skill_md = skill_dir / "SKILL.md"
+        if skill_md.exists():
+            context_files.append({
+                "path": "SKILL.md",
+                "content": skill_md.read_text(encoding="utf-8"),
+            })
+
+        # All reference files
+        refs_dir = skill_dir / "skills" / "references"
+        if refs_dir.is_dir():
+            for ref_file in sorted(refs_dir.glob("*")):
+                if ref_file.is_file() and ref_file.suffix in (".md", ".txt"):
+                    try:
+                        content = ref_file.read_text(encoding="utf-8")
+                        if len(content) > 0:
+                            context_files.append({
+                                "path": f"skills/references/{ref_file.name}",
+                                "content": content,
+                            })
+                    except Exception:
+                        pass
+
+        # All script files (as reference for implementation patterns)
+        scripts_dir = skill_dir / "skills" / "scripts"
+        if scripts_dir.is_dir():
+            for script_file in sorted(scripts_dir.glob("*")):
+                if script_file.is_file():
+                    try:
+                        content = script_file.read_text(encoding="utf-8")
+                        if len(content) > 0:
+                            context_files.append({
+                                "path": f"skills/scripts/{script_file.name}",
+                                "content": content,
+                            })
+                    except Exception:
+                        pass
+
+        # Build the file context block
+        file_context = ""
+        for f in context_files:
+            file_context += f"\n--- {f['path']} ---\n{f['content']}\n"
+
+        if not file_context:
+            logger.warning("No skill files found for AI tool generation")
+            return {}
+
+        # ── Step 2: Build tool metadata block ───────────────────────
+        tools_desc = ""
+        for t in tool_metadata:
+            params_str = ", ".join(
+                f"{n}: {ty}" for n, ty, _ in t.get("params", [])
+            )
+            tools_desc += (
+                f"\nTool: {t['name']} (func_name: {t['func_name']})\n"
+                f"  Description: {t['description']}\n"
+                f"  Backend: {t['backend_kind']}\n"
+                f"  Params: {params_str or 'none'}\n"
+            )
+            if t.get("script_name"):
+                tools_desc += f"  Script: {t['script_name']}\n"
+            if t.get("mcp_server"):
+                tools_desc += f"  MCP Server: {t['mcp_server']}\n"
+
+        # ── Step 3: System prompt ───────────────────────────────────
+        system_prompt = (
+            "You are an expert Python code generator for agent tool implementations. "
+            "You will receive:\n"
+            "1. A full skill directory context (SKILL.md, reference files, scripts)\n"
+            "2. A list of tool definitions with their metadata\n\n"
+            "Generate a complete Python function body for EACH tool. "
+            "Follow these rules:\n"
+            "- For script-backed tools: use the SKILLS_SCRIPTS_DIR constant (already defined) "
+            "to locate scripts, e.g. SKILLS_SCRIPTS_DIR / 'script_name'\n"
+            "- For MCP-backed tools: return a placeholder (MCP handles execution)\n"
+            "- For API template tools: generate HTTP requests based on the skill context\n"
+            "- For tools without backend: read the SKILL.md code examples and generate a real implementation\n"
+            "- Do NOT use **kwargs — use the exact parameter names from the tool definition\n"
+            "- Include proper error handling and return meaningful results\n"
+            "- Import only from stdlib or packages mentioned in the skill context\n"
+            "- Use SKILLS_SCRIPTS_DIR (a pathlib.Path) for all script paths, never hardcode paths\n\n"
+            "Output format: Return a JSON object mapping func_name → implementation body.\n"
+            "The function body should be the code INSIDE the function (after the signature and docstring).\n"
+            'Example: {"fetch_url": "import subprocess\\n    ..."}'
+        )
+
+        # ── Step 4: User prompt ─────────────────────────────────────
+        archetype = ahspec.get("base", {}).get("archetype", "generic")
+        identity = ahspec.get("identity", {})
+        agent_name = identity.get("display_name", "Unknown")
+
+        user_prompt = (
+            f"Generate Python implementations for the {agent_name} agent "
+            f"(archetype: {archetype}).\n\n"
+            f"=== SKILL FILES ===\n{file_context}\n\n"
+            f"=== TOOL DEFINITIONS ===\n{tools_desc}\n\n"
+            "Return a JSON object with TWO keys:\n"
+            '1. "tools": object mapping func_name → implementation body code\n'
+            '2. "references": object mapping dataclass/constant name → Python code\n\n'
+            "For references: extract structured data (enums, constants, "
+            "field definitions, configuration values) from the skill context "
+            "files. If the reference files contain form field types, API "
+            "endpoints, status codes, or other structured data, extract them "
+            "as Python constants or dataclasses.\n\n"
+            "Each implementation body should be the code INSIDE the function "
+            "(after the signature and docstring). Use the skill context to "
+            "understand what each tool should do."
+        )
+
+        # ── Step 5: Call LLM ────────────────────────────────────────
+        try:
+            response = chat_fn(system_prompt, user_prompt)
+        except Exception as e:
+            logger.error("AI tool generation LLM call failed: %s", e)
+            return {}
+
+        # ── Step 6: Parse response ──────────────────────────────────
+        try:
+            # Extract JSON from the response (may be wrapped in ```json blocks)
+            json_text = response
+            if "```json" in response:
+                json_text = response.split("```json")[1].split("```")[0]
+            elif "```" in response:
+                json_text = response.split("```")[1].split("```")[0]
+
+            impls = json.loads(json_text.strip())
+            if not isinstance(impls, dict):
+                logger.warning("AI returned non-dict response: %s", type(impls))
+                return {}
+
+            # Validate all keys are valid func_names
+            valid_tools = {}
+            tool_names = {t["func_name"] for t in tool_metadata}
+            tools_data = impls.get("tools", impls)  # backward compat
+            if isinstance(tools_data, dict):
+                for func_name, body in tools_data.items():
+                    if func_name in tool_names and isinstance(body, str) and len(body) > 10:
+                        # Normalize indentation: ensure 4-space indent for template insertion
+                        body_lines = body.strip().split("\n")
+                        indented = "\n".join(
+                            " " * 4 + line if line.strip() else ""
+                            for line in body_lines
+                        )
+                        valid_tools[func_name] = indented
+
+            # Extract reference structures
+            references = {}
+            refs_data = impls.get("references", {})
+            if isinstance(refs_data, dict):
+                for ref_name, ref_code in refs_data.items():
+                    if isinstance(ref_code, str) and len(ref_code) > 10:
+                        references[ref_name] = ref_code
+
+            return {"tools": valid_tools, "references": references}
+        except (json.JSONDecodeError, IndexError) as e:
+            logger.warning("Failed to parse AI tool generation response: %s", e)
+            return {}
+
     # ── generation ────────────────────────────────────────────────────
 
     def generate(
@@ -562,6 +754,7 @@ class GenerateEngine:
         force: bool = False,
         copy_skills: bool = True,
         skill_dir: Path | None = None,
+        ai_chat_fn: Any | None = None,
     ) -> list[Path]:
         """Generate a complete Agent directory from an AHSSPEC dict.
 
@@ -572,11 +765,41 @@ class GenerateEngine:
             force: If True, overwrite existing output directory.
             copy_skills: If True, copy SKILL.md and resources.
             skill_dir: Source skill directory (for copying resources).
+            ai_chat_fn: Optional callback for AI-driven tool generation.
+                Signature: (system_prompt: str, user_prompt: str) -> str
 
         Returns:
             List of Paths that were (or would be) written.
         """
         variables = self.extract_variables(ahspec, skill_dir=skill_dir)
+
+        # v0.9: AI-driven tool implementation generation
+        # Reads the full skill directory context and generates real Python
+        # implementations for each tool (not just stubs).
+        if ai_chat_fn and skill_dir and variables.get("tool_metadata"):
+            try:
+                ai_result = self._ai_generate_tool_impls(
+                    ahspec=ahspec,
+                    skill_dir=skill_dir,
+                    tool_metadata=variables["tool_metadata"],
+                    chat_fn=ai_chat_fn,
+                )
+                if ai_result:
+                    ai_tools = ai_result.get("tools", {})
+                    ai_refs = ai_result.get("references", {})
+                    if ai_tools:
+                        variables["ai_tool_impls"] = ai_tools
+                        logger.info(
+                            "AI generated %d tool implementations", len(ai_tools)
+                        )
+                    if ai_refs:
+                        variables["ai_references"] = ai_refs
+                        logger.info(
+                            "AI extracted %d reference structures", len(ai_refs)
+                        )
+            except Exception as e:
+                logger.warning("AI tool generation failed, using template defaults: %s", e)
+
         written: list[Path] = []
 
         if dry_run:
@@ -766,7 +989,7 @@ class GenerateEngine:
         """
         import fnmatch
 
-        def ignore(src, names):
+        def ignore(src: str, names: list[str]) -> list[str]:
             patterns = (
                 ".git", "__pycache__", "*.pyc", ".DS_Store",
                 "node_modules", ".venv", "venv", ".env",
