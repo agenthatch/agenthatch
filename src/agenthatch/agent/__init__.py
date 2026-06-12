@@ -23,7 +23,7 @@ from agenthatch_core.mcp.client import (
 from agenthatch_core.mcp.config import MCPServerConfig
 
 from agenthatch.agent.compact import CompactSummary
-from agenthatch.agent.offload import Checkpoint, CheckpointManager, SessionState, StateManager
+from agenthatch.agent.offload import Checkpoint, CheckpointManager, StateManager
 from agenthatch.agent.runtime import SkillAgent
 from agenthatch.cap.bus import APITemplateExecutor
 
@@ -32,7 +32,6 @@ __all__ = [
     "CompactSummary",
     "HookPoint",
     "HooksManager",
-    "SessionState",
     "StateManager",
     "MCPClient",
     "MCPServerConfig",

@@ -38,19 +38,6 @@ def _cleanup_locks() -> None:
 atexit.register(_cleanup_locks)
 
 
-@dataclass
-class SessionState:
-    skill_id: str
-    session_id: str
-    started_at: str
-    last_active_at: str
-    summary: CompactSummary | None = None
-    total_turns: int = 0
-    total_tokens: int = 0
-    provider: str = ""
-    model: str = ""
-
-
 class StateManager:
     def __init__(self, state_dir: Path):
         self.state_dir = state_dir

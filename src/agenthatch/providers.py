@@ -35,8 +35,6 @@ from agenthatch.exceptions import ProviderNotFoundError
 # Built-in providers
 # ---------------------------------------------------------------------------
 
-_warned_providers: set[str] = set()
-
 ProviderKind = Literal["builtin", "custom"]
 
 
@@ -168,54 +166,6 @@ def _probe_reasoning_content(api_key: str, base_url: str, model: str) -> bool:
         return bool(not content and reasoning)
     except Exception:
         return False
-
-
-def _probe_provider_capabilities(
-    api_key: str, base_url: str, model: str
-) -> ProviderFeatures:
-    """Probe a custom provider to auto-detect capabilities."""
-    features = ProviderFeatures()
-
-    try:
-        import openai
-
-        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=10.0)
-
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Say hi."}],
-            max_tokens=5,
-        )
-        msg = resp.choices[0].message
-        if not getattr(msg, "content", "") and getattr(msg, "reasoning_content", None):
-            features = ProviderFeatures(
-                supports_reasoning_content=True,
-                supports_tools=features.supports_tools,
-                supports_stream_tools=features.supports_stream_tools,
-                supports_json_mode=features.supports_json_mode,
-            )
-
-        try:
-            client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "test"}],
-                tools=[{"type": "function", "function": {
-                    "name": "test", "parameters": {"type": "object", "properties": {}}
-                }}],
-                max_tokens=5,
-            )
-        except Exception:
-            features = ProviderFeatures(
-                supports_tools=False,
-                supports_reasoning_content=features.supports_reasoning_content,
-                supports_stream_tools=False,
-                supports_json_mode=features.supports_json_mode,
-            )
-
-    except Exception as e:
-        logger.warning("Provider probe failed for %s: %s", model, e)
-
-    return features
 
 
 # ---------------------------------------------------------------------------

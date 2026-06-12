@@ -46,7 +46,6 @@ from agenthatch.skill.spec import AHSSpec
 logger = logging.getLogger(__name__)
 
 
-_SAFE_ENV_PREFIXES = ("",)  # Allow all by default, but block known dangerous keys
 _DANGEROUS_ENV_KEYS = {
     "PATH", "HOME", "USER", "SHELL", "PWD",
     "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
