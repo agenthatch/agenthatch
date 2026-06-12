@@ -222,8 +222,14 @@ class CapBus:
         try:
             data = json.loads(result)
         except json.JSONDecodeError as e:
-            logger.warning("Tool %s output JSON decode failed: %s", tool_name, e)
-            return f"Error: Tool '{tool_name}' output was not valid JSON: {e}"
+            trimmed = result.strip()
+            if not trimmed:
+                return (
+                    f"MCP server returned empty response for '{tool_name}'. "
+                    "Check that mcporter is running and the MCP server is configured."
+                )
+            logger.debug("Tool %s output JSON decode failed: %s", tool_name, e)
+            return f"Tool '{tool_name}' returned non-JSON: {trimmed[:100]}"
 
         if isinstance(data, dict) and "properties" in output_schema:
             _JSON_TYPE_MAP = {

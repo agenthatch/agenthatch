@@ -336,9 +336,7 @@ class ContextManager:
         if references:
             parts.append("\n## Reference Documents")
             parts.append(
-                "These documents contain domain knowledge. "
-                "Read them with the read_file tool when you need "
-                "detailed information."
+                "These reference documents are available for domain knowledge:"
             )
             for ref in references:
                 ref_name = ref.get("name", ref.get("path", "unknown"))

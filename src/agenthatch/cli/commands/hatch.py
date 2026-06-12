@@ -102,8 +102,6 @@ def _run_phase3_generate(
     Returns:
         (file_count, agent_output_dir, elapsed_seconds)
     """
-    from agenthatch_core.bricks.archetypes import classify_skill
-
     from agenthatch.generate.engine import GenerateEngine
 
     agent_id = ahs_spec.identity.id
@@ -112,25 +110,15 @@ def _run_phase3_generate(
     else:
         agent_output_dir = Path.cwd() / f"{agent_id}-agent"
 
-    t3_start = time.time()  # v0.7.9: moved before serialization for accurate timing
+    t3_start = time.time()
 
-    spec_dict = ahs_spec.model_dump()  # v0.7.9: direct dict, avoids json round-trip
+    spec_dict = ahs_spec.model_dump()
 
-    # Classify skill archetype first for user feedback
-    try:
-        result = classify_skill(spec_dict)
-        archetype = result.archetype.value
-        confidence = result.confidence
-    except Exception:
-        archetype = "unknown"
-        confidence = 0.0
-
-    console.print(f"  [dim]→ {archetype} (confidence: {confidence:.0%})[/dim]")
     with Status(
         "[dim]Generating agent files...[/dim]",
         spinner="dots",
         console=console,
-    ) as status:
+    ) as _status:
         try:
             engine = GenerateEngine()
             written = engine.generate(
@@ -601,7 +589,31 @@ def hatch_command(
     ahs_spec.agent.status = "hatched"
     ahs_spec.agent.hatched_at = datetime.now(UTC)
 
-    # ── 11. Phase 3 header (v0.7.10: print before work to eliminate gap) ─
+    # ── 11. Write agenthatch.yaml ───────────────────────────────────────
+    if not dry_run:
+        yaml_output_path = _resolve_yaml_path(skill_dir, output)
+        if yaml_output_path.exists() and not force:
+            console.print(
+                f"[dim]agenthatch.yaml already exists at {yaml_output_path}, "
+                "skipping yaml generation.[/dim]"
+            )
+        else:
+            yaml_output_path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_str = yaml.dump(
+                ahs_spec.model_dump(
+                    exclude={"harness_traces", "confidence_report"}
+                ),
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+            yaml_output_path.write_text(yaml_str, encoding="utf-8")
+            console.print(f"  [dim]Written: {yaml_output_path}[/dim]")
+
+        # ── Register in skillhouse.json ─────────────────────────────────
+        _register_skillhouse(ahs_spec, yaml_output_path, config)
+
+    # ── 12. Phase 3: Runtime Readiness (BEFORE generation) ───────────
     if no_generate:
         console.print(
             "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](skipped)[/dim]"
@@ -616,38 +628,57 @@ def hatch_command(
         )
         return
 
+    # Resolve agent output dir for readiness check and generation
+    agent_id = ahs_spec.identity.id
+    if output:
+        agent_output_dir = Path(output).expanduser().resolve()
+    else:
+        agent_output_dir = Path.cwd() / f"{agent_id}-agent"
+
+    if not dry_run:
+        _blocked = False
+        try:
+            from agenthatch.generate.readiness import run_readiness_phase
+
+            result = run_readiness_phase(
+                skill_dir=skill_dir,
+                ahspec=ahs_spec.model_dump(),
+                agent_path=str(agent_output_dir),
+                skip_network_probe=False,
+            )
+            if result.readiness.status == "BLOCK":
+                _blocked = True
+                console.print(
+                    "[error]Hatch blocked by missing mandatory dependencies.[/error]"
+                )
+                if result.report:
+                    console.print(result.report)
+                console.print(
+                    "[dim]Fix the issues above, then re-run "
+                    "[bold]agenthatch hatch[/bold].[/dim]"
+                )
+                console.print(
+                    "[dim]Use [bold]--report[/bold] for detailed diagnostics.[/dim]"
+                )
+                return
+            elif result.readiness.status == "WARN":
+                console.print(
+                    "[warn]Hatch completed with warnings.[/warn]"
+                )
+                if report and result.report:
+                    console.print(result.report)
+            elif report and result.report:
+                console.print(result.report)
+        except Exception as e:
+            logger.warning("Readiness phase skipped: %s", e)
+
+    # ── 13. Phase 4: Agent Generation ────────────────────────────────
     if dry_run:
         console.print(
-            "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](dry-run)[/dim]"
+            "[accent]▸ Phase 4/4[/accent]  Agent Generation  [dim](dry-run)[/dim]"
         )
     else:
-        console.print("[accent]▸ Phase 3/3[/accent]  Agent Generation")
-
-    # ── 12. Write agenthatch.yaml ───────────────────────────────────────
-    if not dry_run:
-        yaml_output_path = _resolve_yaml_path(skill_dir, output)
-        if yaml_output_path.exists() and not force:
-            console.print(
-                f"[dim]agenthatch.yaml already exists at {yaml_output_path}, "
-                "skipping yaml generation.[/dim]"
-            )
-        else:
-            yaml_output_path.parent.mkdir(parents=True, exist_ok=True)
-            yaml_str = yaml.dump(
-                ahs_spec.model_dump(  # v0.7.9: direct dict, avoids json round-trip
-                    exclude={"harness_traces", "confidence_report"}
-                ),
-                allow_unicode=True,
-                default_flow_style=False,
-                sort_keys=False,
-            )
-            yaml_output_path.write_text(yaml_str, encoding="utf-8")
-            console.print(f"  [dim]Written: {yaml_output_path}[/dim]")
-
-        # ── Register in skillhouse.json ─────────────────────────────────
-        _register_skillhouse(ahs_spec, yaml_output_path, config)
-
-    # ── 13. Phase 3: Run generation (header already printed above) ──────
+        console.print("[accent]▸ Phase 4/4[/accent]  Agent Generation")
 
     # v0.9: Create AI chat function for tool implementation generation
     ai_chat_fn = None
@@ -678,7 +709,7 @@ def hatch_command(
     if not dry_run:
         _update_skillhouse_agent_output(ahs_spec.identity.id, agent_output_dir, config)
 
-    # ── 13. Final summary ───────────────────────────────────────────────
+    # ── 14. Final summary ───────────────────────────────────────────────
     _render_summary(
         harness_outputs=harness_outputs,
         archetype=getattr(classification, "archetype", None),
@@ -687,28 +718,6 @@ def hatch_command(
         dry_run=dry_run,
         no_generate=False,
     )
-
-    # ── 14. Phase 4: Runtime Readiness ──────────────────────────────────
-    if not no_generate and not dry_run:
-        try:
-            from agenthatch.generate.readiness import run_readiness_phase
-
-            result = run_readiness_phase(
-                skill_dir=skill_dir,
-                ahspec=ahs_spec.model_dump(),
-                agent_path=str(agent_output_dir),
-                skip_network_probe=False,
-            )
-            if result.readiness.status == "BLOCK":
-                console.print(
-                    "[error]Hatch blocked by missing mandatory dependencies.[/error]"
-                )
-                if report and result.report:
-                    console.print(result.report)
-            elif report and result.report:
-                console.print(result.report)
-        except Exception as e:
-            logger.warning("Readiness phase skipped: %s", e)
 
     # ── 15. Next step ───────────────────────────────────────────────────
     if not no_generate and not dry_run:
