@@ -17,9 +17,12 @@ from agenthatch_core.bricks.guards import CompiledGuard
 from agenthatch_core.bricks.workflow import CompiledWorkflow, WorkflowStep
 {% endif %}
 
-{% if workflow_steps %}
-# v0.7.15: CompiledWorkflow imported from agenthatch_core.bricks.workflow
-
+{% if tool_metadata %}
+from .tools import (
+{% for tool in tool_metadata %}
+    {{ tool.func_name }},
+{% endfor %}
+)
 {% endif %}
 
 {% if workflow %}
@@ -68,15 +71,27 @@ class {{ agent_class }}(AHCoreAgent):
 {% else %}
         manifest = None
 {% endif %}
+{% if tool_metadata %}
+        # Wire local tool implementations as fallback executors.
+        # CapBus checks YAML-defined executors (MCP, script) first;
+        # Python tools serve as fallback for description-only capabilities.
+        _local_tools = [
+{% for tool in tool_metadata %}
+            {{ tool.func_name }},
+{% endfor %}
+        ]
+{% else %}
+        _local_tools = []
+{% endif %}
         super().__init__(
             identity=identity,
             runtime_config=runtime_config or {},
             spec_path=Path(__file__).parent.parent.parent / "agenthatch.yaml",
             brick_manifest=manifest,
+            tools=_local_tools,
         )
 
-        # v0.7.9: CompiledWorkflow from instructions.workflow
-{% if workflow_steps %}
+        {% if workflow_steps %}
         self._workflow = CompiledWorkflow([
 {% for step in workflow_steps %}
             WorkflowStep(
@@ -87,13 +102,14 @@ class {{ agent_class }}(AHCoreAgent):
 {% endfor %}
         ])
 
-        # v0.7.9: Run all workflow scripts ONCE during initialization
         self._run_warmup_scripts()
 {% else %}
         self._workflow = None
 {% endif %}
 
-    # ── v0.7.9: Warmup scripts run ONCE at init ──────────────────────────
+        
+
+    # ── Warmup scripts (run once at initialization) ────────────────────
 
     def _run_warmup_scripts(self):
         """Execute all workflow scripts once during initialization.
@@ -104,16 +120,26 @@ class {{ agent_class }}(AHCoreAgent):
         if not self._workflow:
             return
 
-        cwd = str(Path(__file__).parent.parent.parent / "skills" / "scripts")
+        scripts_dir = Path(__file__).parent / "skills" / "scripts"
+        if not scripts_dir.is_dir():
+            return
+
         warmup_results = []
 
         for step in self._workflow.steps:
             if step.script is None:
                 continue
+            script_path = scripts_dir / step.script
+            if not script_path.exists():
+                warmup_results.append(
+                    f"Step {step.step} ({step.description}) SKIPPED: script not found"
+                )
+                continue
             try:
                 result = subprocess.run(
-                    [sys.executable, str(Path(__file__).parent.parent.parent / "skills" / "scripts" / step.script)],
-                    capture_output=True, text=True, timeout=30, cwd=cwd,
+                    [sys.executable, str(script_path)],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=str(scripts_dir),
                 )
                 warmup_results.append(
                     f"Step {step.step} ({step.description}): {result.stdout[:300]}"
@@ -129,14 +155,10 @@ class {{ agent_class }}(AHCoreAgent):
                 "Warmup scripts completed:\n" + "\n".join(warmup_results),
             )
 
-    # ── v0.7.9: Pre-turn workflow — LLM always runs ─────────────────────
+    # ── Pre-turn workflow (LLM always runs) ──────────────────────────
 
     def _pre_turn_workflow(self, user_input: str) -> str | None:
-        """Inject current workflow step as context. LLM always runs.
-
-        v0.7.9: Scripts are no longer executed per-turn.
-        All script execution happens once during warmup.
-        """
+        """Inject current workflow step as context. LLM always runs."""
         if self._workflow is None or self._workflow.is_complete():
             return None
 
@@ -145,7 +167,6 @@ class {{ agent_class }}(AHCoreAgent):
             f"Current workflow step: {step.step} — {step.description}"
         )
 
-        # v0.7.9: ALWAYS proceed to LLM — never skip conversation
         return None
 
     # ── chat / stream overrides for workflow integration ────────────────

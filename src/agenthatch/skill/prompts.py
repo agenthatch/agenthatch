@@ -168,10 +168,14 @@ Rules:
   - requires MUST be selected from the provided infrastructure catalog
   - capability names MUST be snake_case and descriptive (verb_object)
   - type values: data, analysis, media, transform, action, event, knowledge, renderer
-  - input_schema: JSON Schema describing what inputs the capability accepts
-    (field names → types like "string", "number", "boolean", "array", "object")
-  - output_schema: JSON Schema describing what the capability returns
-    (at minimum include a "type" key: "string", "object", "array", etc.)
+  - input_schema: use FLAT key→type format, NOT nested JSON Schema:
+    ✓ {"doc_id": "string", "limit": "number"}
+    ✗ {"type": "object", "properties": {}, "required": []}
+    Valid types: "string", "number", "boolean", "array", "object"
+    Leave empty {} only if the capability truly takes no parameters
+  - output_schema: describe the return shape, at minimum include a "type" key
+    ✓ {"type": "object", "properties": {"data": {"type": "string"}}}
+    ✓ {"type": "string"}
 
 provide type inference:
   - Output JSON/Dict → data
@@ -188,6 +192,7 @@ Confidence rules:
   - 2+ provides from script analysis: 0.90
   - 1 provide from body text: 0.75
   - no scripts, ambiguous output: 0.60
+  - MCP connector with tool names in body: 0.85
 """
 
 INTERFACE_FEW_SHOT = """\

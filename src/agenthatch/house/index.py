@@ -277,6 +277,12 @@ class SkillhouseIndex:
         }
         if agent_output:
             entry["agent_output"] = agent_output
+        # Persist agent lifecycle status (hatched/unhatched + hatched_at)
+        if hasattr(ahs_spec, "agent") and ahs_spec.agent is not None:
+            entry["agent"] = {
+                "status": getattr(ahs_spec.agent, "status", "unhatched"),
+                "hatched_at": str(getattr(ahs_spec.agent, "hatched_at", "")),
+            }
         # Generate embedding from satisfies + summary
         entry["embedding"] = self._compute_entry_embedding(entry)  # type: ignore[assignment]
 

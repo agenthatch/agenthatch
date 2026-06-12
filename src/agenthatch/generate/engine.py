@@ -29,6 +29,20 @@ TEMPLATE_MAP: dict[str, str] = {
 }
 
 
+def _json_type_to_python(json_type: str) -> str:
+    """Map JSON Schema type to Python type annotation."""
+    mapping = {
+        "string": "str",
+        "number": "int",
+        "float": "float",
+        "integer": "int",
+        "boolean": "bool",
+        "array": "list",
+        "object": "dict",
+    }
+    return mapping.get(json_type, "Any")
+
+
 class GenerateEngine:
     """Renders Jinja2 templates from AHSSPEC variables to produce an Agent directory."""
 
@@ -126,8 +140,23 @@ class GenerateEngine:
         # LLM provider/model: read from global config if available
         llm_provider, model, base_url = self._read_default_provider()
 
-        # Tools: list of provide capability names
+        # Tools: list of provide capability names (legacy) + full metadata
         tools = self._extract_tool_names(interface.get("provides", []))
+        mcp_servers = interface.get("mcp_servers", [])
+        api_templates = interface.get("api_templates", [])
+        instructions = ahspec.get("instructions", {})
+        resources = ahspec.get("resources", {})
+        script_map = self._resolve_script_map(
+            interface.get("provides", []),
+            instructions=instructions,
+            resources=resources,
+        )
+        tool_metadata = self._extract_tool_metadata(
+            interface.get("provides", []),
+            mcp_servers=mcp_servers,
+            script_map=script_map,
+            api_templates=api_templates,
+        )
 
         # v0.7: Brick manifest from skill classification
         brick_manifest = self._build_brick_manifest(ahspec, skill_dir=skill_dir)
@@ -148,6 +177,10 @@ class GenerateEngine:
             "model": model,
             "base_url": base_url,
             "tools": tools,
+            "tool_metadata": tool_metadata,
+            "mcp_servers": mcp_servers,
+            "api_templates": api_templates,
+            "script_map": script_map,
             "requires": requires,
             "brick_manifest": brick_manifest,
         }
@@ -358,6 +391,166 @@ class GenerateEngine:
                 result.append(cap)
         return result
 
+    @staticmethod
+    def _resolve_script_map(
+        provides: list[dict[str, Any]],
+        instructions: dict[str, Any],
+        resources: dict[str, Any],
+    ) -> dict[str, str]:
+        """Map capability names to script filenames.
+
+        Uses the same matching logic as agent.py's _build_cap_to_script:
+        1. Workflow steps that mention a capability + have a script
+        2. Resources.scripts entries with fuzzy name match
+        3. Direct filename match from scripts directory (runtime only, skipped here)
+        """
+        cap_to_script: dict[str, str] = {}
+        cap_names = {
+            c.get("capability", c.get("name", "")) for c in provides
+            if isinstance(c, dict)
+        }
+        cap_names.discard("")
+
+        # Approach 1: workflow steps
+        workflow = instructions.get("workflow", [])
+        if isinstance(workflow, list):
+            for step in workflow:
+                if not isinstance(step, dict):
+                    continue
+                script = step.get("script")
+                if not script:
+                    continue
+                desc = step.get("description", "").lower()
+                for cap_name in sorted(cap_names):
+                    if cap_name in cap_to_script:
+                        continue
+                    if cap_name.replace("_", " ") in desc or cap_name in desc:
+                        cap_to_script[cap_name] = script
+                        break
+
+        # Approach 2: resources.scripts
+        res_scripts = resources.get("scripts", [])
+        if isinstance(res_scripts, list):
+            for entry in res_scripts:
+                if not isinstance(entry, dict):
+                    continue
+                script_name = entry.get("name", "")
+                if not script_name:
+                    continue
+                script_stem = Path(script_name).stem
+                for cap_name in cap_names:
+                    if cap_name in cap_to_script:
+                        continue
+                    cap_flat = cap_name.replace("_", "")
+                    stem_flat = script_stem.replace("_", "").replace("-", "")
+                    if cap_flat in stem_flat or stem_flat in cap_flat:
+                        cap_to_script[cap_name] = script_name
+                        break
+
+        # Strip "skills/scripts/" prefix from script paths.
+        # The generated tools.py uses SKILLS_SCRIPTS_DIR (already skills/scripts/)
+        # so we need just the filename, not the full resource path.
+        for cap_name, script_path in list(cap_to_script.items()):
+            if script_path.startswith("skills/scripts/"):
+                cap_to_script[cap_name] = script_path[len("skills/scripts/"):]
+
+        return cap_to_script
+
+    @staticmethod
+    def _extract_tool_metadata(
+        provides: list[dict[str, Any]],
+        mcp_servers: list[dict[str, Any]] | None = None,
+        script_map: dict[str, str] | None = None,
+        api_templates: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Extract full tool metadata from interface.provides.
+
+        Returns list of dicts with:
+          - name: capability name
+          - func_name: Python-safe function name (snake_case)
+          - description: from capability description
+          - input_schema: dict of param_name → type string
+          - params: list of (name, type, default) tuples for signature
+          - is_mcp: whether this tool is backed by an MCP server
+          - mcp_server: MCP server name if applicable
+          - has_inputs: whether the tool accepts parameters
+          - script_name: mapped script filename (or "")
+          - has_backend: whether tool has any runtime backend
+          - backend_kind: "mcp" | "script" | "api_template" | "none"
+        """
+        result: list[dict[str, Any]] = []
+        mcp_names = {s.get("name", "") for s in (mcp_servers or [])}
+        script_map = script_map or {}
+        api_map: dict[str, dict[str, Any]] = {}
+        for tmpl in (api_templates or []):
+            if isinstance(tmpl, dict) and tmpl.get("name"):
+                api_map[tmpl["name"]] = tmpl
+
+        for cap in provides:
+            if not isinstance(cap, dict):
+                continue
+            name = cap.get("capability", cap.get("name", ""))
+            if not name:
+                continue
+
+            desc = cap.get("description", "")
+            input_schema = cap.get("input_schema", {})
+
+            # Normalize input_schema
+            if isinstance(input_schema, dict):
+                params: list[tuple[str, str, str]] = []
+                for param_name, param_type in input_schema.items():
+                    if param_name in ("type", "properties", "required"):
+                        continue
+                    if isinstance(param_type, str):
+                        py_type = _json_type_to_python(param_type)
+                        params.append((param_name, py_type, "None"))
+                    elif isinstance(param_type, dict) and "type" in param_type:
+                        py_type = _json_type_to_python(param_type["type"])
+                        default = param_type.get("default", "None")
+                        params.append((param_name, py_type, str(default)))
+                has_inputs = len(params) > 0
+            else:
+                params = []
+                has_inputs = False
+
+            # Determine if MCP-backed
+            is_mcp = name in mcp_names or cap.get("type") == "mcp"
+            mcp_server = ""
+            if is_mcp and mcp_names:
+                for s in (mcp_servers or []):
+                    if name in [t.get("name", "") for t in s.get("tools", [])]:
+                        mcp_server = s.get("name", "")
+                        break
+
+            # Determine backend kind
+            script_name = script_map.get(name, "")
+            api_tmpl = api_map.get(name)
+            if is_mcp and mcp_server:
+                backend_kind = "mcp"
+            elif script_name:
+                backend_kind = "script"
+            elif api_tmpl:
+                backend_kind = "api_template"
+            else:
+                backend_kind = "none"
+
+            result.append({
+                "name": name,
+                "func_name": name.replace("-", "_"),
+                "description": desc or f"Handle the '{name}' capability.",
+                "input_schema": input_schema,
+                "params": params,
+                "is_mcp": is_mcp,
+                "mcp_server": mcp_server,
+                "has_inputs": has_inputs,
+                "script_name": script_name,
+                "has_backend": backend_kind != "none",
+                "backend_kind": backend_kind,
+            })
+
+        return result
+
     # ── generation ────────────────────────────────────────────────────
 
     def generate(
@@ -422,7 +615,7 @@ class GenerateEngine:
 
         # Copy skills resources
         if copy_skills and skill_dir and not dry_run:
-            self._copy_skills(skill_dir, output_dir)
+            self._copy_skills(skill_dir, output_dir, variables["package_name"])
 
         # Create __init__.py in package
         if not dry_run:
@@ -553,33 +746,67 @@ class GenerateEngine:
         )
         yaml_path.write_text(yaml_str, encoding="utf-8")
 
-    def _copy_skills(self, skill_dir: Path, output_dir: Path) -> None:
-        """Copy SKILL.md and resource files from source skill directory."""
-        dest_skills = output_dir / "skills"
-        dest_skills.mkdir(parents=True, exist_ok=True)
+    def _copy_skills(self, skill_dir: Path, output_dir: Path, package_name: str) -> None:
+        """Copy the entire skill directory as a fallback bundle.
 
-        # Copy SKILL.md
-        for md_name in ("SKILL.md", "skill.md", "Skill.md"):
-            src_md = skill_dir / md_name
-            if src_md.exists():
-                shutil.copy2(src_md, dest_skills / md_name)
-                break
+        The agent carries a complete copy of its source skill so that
+        it can self-reference during runtime — reading its own SKILL.md
+        for guidance, executing scripts, and self-healing when necessary.
 
-        # Copy scripts/
-        src_scripts = skill_dir / "scripts"
-        if src_scripts.is_dir():
-            dest_scripts = dest_skills / "scripts"
-            if dest_scripts.exists():
-                shutil.rmtree(dest_scripts)
-            shutil.copytree(src_scripts, dest_scripts)
+        The source skill_dir typically contains:
+          - SKILL.md
+          - skills/scripts/... (executable scripts)
+          - skills/references/... (reference docs)
 
-        # Copy references/
-        src_refs = skill_dir / "references"
-        if src_refs.is_dir():
-            dest_refs = dest_skills / "references"
-            if dest_refs.exists():
-                shutil.rmtree(dest_refs)
-            shutil.copytree(src_refs, dest_refs)
+        We copy to two locations:
+        1. output_dir/ (top-level, for human reference)
+        2. output_dir/src/<package_name>/skills/ (for tools.py subprocess access)
+
+        Excludes VCS and build artifacts via ignore patterns.
+        """
+        import fnmatch
+
+        def ignore(src, names):
+            patterns = (
+                ".git", "__pycache__", "*.pyc", ".DS_Store",
+                "node_modules", ".venv", "venv", ".env",
+            )
+            ignored = []
+            for name in names:
+                for pat in patterns:
+                    if fnmatch.fnmatch(name, pat):
+                        ignored.append(name)
+                        break
+            return ignored
+
+        # Destination 1: top-level copy (full structure, for human reference)
+        dest_top = output_dir / "skills"
+        if dest_top.exists():
+            shutil.rmtree(dest_top)
+        dest_top.mkdir(parents=True, exist_ok=True)
+        for item in skill_dir.iterdir():
+            if ignore(str(skill_dir), [item.name]):
+                continue
+            dest = dest_top / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True, ignore=ignore)
+            else:
+                shutil.copy2(item, dest)
+
+        # Destination 2: for tools.py — scripts/ at the right level.
+        # tools.py has: SKILLS_SCRIPTS_DIR = Path(__file__).parent / "skills" / "scripts"
+        # So we need: src/<pkg>/skills/scripts/
+        dest_pkg = output_dir / "src" / package_name / "skills"
+        skill_subdir = skill_dir / "skills"
+        if skill_subdir.is_dir():
+            if dest_pkg.exists():
+                shutil.rmtree(dest_pkg)
+            shutil.copytree(skill_subdir, dest_pkg, dirs_exist_ok=True, ignore=ignore)
+        else:
+            # No skills/ subdirectory — copy whole skill_dir
+            if dest_pkg.exists():
+                shutil.rmtree(dest_pkg)
+            shutil.copytree(skill_dir, dest_pkg, dirs_exist_ok=True, ignore=ignore)
 
 
 def generate_agent(

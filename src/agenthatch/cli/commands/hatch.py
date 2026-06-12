@@ -23,13 +23,6 @@ from typing import Annotated, Any
 import typer
 import yaml
 from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
@@ -461,30 +454,19 @@ def hatch_command(
         "F": "infer_mcp_servers",
         "E": "assemble_and_validate",
     }
-    completed_harnesses: list[str] = []
 
     def _on_harness_done(key: str) -> None:
-        completed_harnesses.append(key)
         label = harness_labels.get(key, key)
-        progress.update(task, advance=1, description=f"[dim]Harness {key}: {label}[/dim]")
+        console.print(f"     [dim]Harness {key}: {label} ✓[/dim]")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("[dim]Initializing harnesses...[/dim]", total=6)
-
-        try:
-            ahs_spec, harness_outputs = build_ahspec(
-                context, config, large_model=large_model, small_model=small_model,
-                progress_callback=_on_harness_done,
-            )
-        except Exception as e:
-            console.print(f"[error]Inference error: {e}[/error]")
-            raise typer.Exit(code=4) from e
+    try:
+        ahs_spec, harness_outputs = build_ahspec(
+            context, config, large_model=large_model, small_model=small_model,
+            progress_callback=_on_harness_done,
+        )
+    except Exception as e:
+        console.print(f"[error]Inference error: {e}[/error]")
+        raise typer.Exit(code=4) from e
 
     elapsed2 = time.time() - t2
     harness_count = len(harness_outputs)

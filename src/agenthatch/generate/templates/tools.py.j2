@@ -1,25 +1,75 @@
-"""{{ agent_name }} domain tools.
+"""Local tool implementations for the {{ package_name }} agent.
 
-Tools registered in agenthatch.yaml's interface.provides
-are automatically wired by AHCoreAgent._build_runtime_tools().
-Add custom implementations below or register via agent.tools=[my_func].
+This file implements native Python wrappers for all capabilities declared
+in agenthatch.yaml. Each tool follows the same pattern:
+
+1. For script-backed capabilities: wrap subprocess invocation
+2. For MCP-backed capabilities: handled by MCP proxy (wrapper is placeholder)
+3. For API templates: follow the API template definition
+4. For native capabilities: direct implementation
+5. For description-only capabilities: clear placeholder implementation
 """
+import json
+import subprocess
+from pathlib import Path
+from typing import Any
 
-{%- if tools %}
-{% for tool in tools %}
+# Path to the skills/scripts directory
+SKILLS_SCRIPTS_DIR = Path(__file__).parent / "skills" / "scripts"
 
-def {{ tool }}(**kwargs) -> str:
-    """Handle the '{{ tool }}' capability.
-
-    Args are passed as keyword arguments matching the input_schema.
-    Return a string result.
-    """
-    return f"{{ tool }} executed with {kwargs}"
+__all__: list[str] = [
+{% for tool in tool_metadata %}
+    "{{ tool.func_name }}",
 {% endfor %}
+]
 
-{%- else %}
-# No provides capabilities defined in the spec.
-# Add custom tools here and pass them as tools=[my_func] to the Agent.
+{% for tool in tool_metadata %}
 
-__all__: list[str] = []
-{%- endif %}
+{% if tool.has_inputs %}
+def {{ tool.func_name }}({% for param_name, param_type, default in tool.params %}{{ param_name }}: {{ param_type }} = {{ default }}{% if not loop.last %}, {% endif %}{% endfor %}) -> Any:
+{% else %}
+def {{ tool.func_name }}() -> Any:
+{% endif %}
+    """{{ tool.description }}
+{% if tool.backend_kind == "script" %}
+    Script-backed capability from skills/scripts/{{ tool.script_name }}.
+    This wrapper executes the pre-existing script via subprocess.
+{% endif %}
+{% if tool.backend_kind == "mcp" %}
+    MCP-backed capability via {{ tool.mcp_server }} server.
+    This is a placeholder wrapper; the actual execution goes through MCP proxy.
+{% endif %}
+{% if tool.backend_kind == "api_template" %}
+    API template capability. Follows the API template definition from the spec.
+{% endif %}
+{% if tool.backend_kind == "none" %}
+    Description-only capability. You are the runtime - you have the context
+    to handle this capability directly.
+{% endif %}
+    """
+{% if tool.backend_kind == "script" %}
+    args = [str(SKILLS_SCRIPTS_DIR / "{{ tool.script_name }}")]
+    {% for param_name, _, _ in tool.params %}
+    args.append(str({{ param_name }}))
+    {% endfor %}
+    result = subprocess.run(
+        args, capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        return f"ERROR (exit {result.returncode}): {result.stderr.strip()}"
+    return result.stdout.strip()
+{% elif tool.backend_kind == "mcp" %}
+    # MCP tools are handled via CapBus with MCPProxyExecutor
+    # This function is not called directly
+    return f"[MCP tool: {{ tool.name }}] processed by MCP server '{{ tool.mcp_server }}'"
+{% elif tool.backend_kind == "api_template" %}
+    # API template will be injected by the API template loader
+    return f"[API template tool: {{ tool.name }}] - call this capability to execute"
+{% else %}
+    # Description-only - return the description for the runtime to handle
+    return f"[{{ tool.name }}]: {{ tool.description }}"
+{% endif %}
+{% endfor %}
+{% if not tool_metadata %}
+# No capabilities defined
+{% endif %}

@@ -293,21 +293,52 @@ def _probe_mcp_server(mcp: dict[str, str]) -> bool:
 def runtime_readiness_gate(
     dep_manifest: DependencyManifest,
     env_report: EnvironmentReport,
+    ahspec: dict[str, Any] | None = None,
 ) -> ReadinessVerdict:
     """Determine if the agent can actually function in this environment.
 
     Classification rules:
     - BLOCK: mcporter missing AND skill uses MCP
     - BLOCK: mandatory credential missing
+    - BLOCK: >50% of tools have no executor (broken agent)
     - WARN: optional MCP server unreachable
     - WARN: optional pip package not installed
+    - WARN: some tools have no executor (partial coverage)
     - READY: all mandatory satisfied
     """
     verdict = ReadinessVerdict(status="READY")
 
+    # ── Tool executor coverage check ─────────────────────────────────
+    # v0.9: Verify each capability has at least one executor path.
+    if ahspec:
+        tool_gaps = _check_tool_executor_coverage(ahspec)
+        bare_tools = [t for t, kind in tool_gaps if kind == "none"]
+        mcp_tools = [t for t, kind in tool_gaps if kind == "mcp"]
+        script_tools = [t for t, kind in tool_gaps if kind == "script"]
+
+        if bare_tools:
+            coverage = 1.0 - len(bare_tools) / max(len(tool_gaps), 1)
+            if coverage < 0.5:
+                verdict.status = "BLOCK"
+                verdict.missing_mandatory.append(
+                    f"{len(bare_tools)}/{len(tool_gaps)} tools have no executor "
+                    f"(no MCP, no script, no API template). "
+                    f"Bare tools: {', '.join(bare_tools[:5])}"
+                    + ("..." if len(bare_tools) > 5 else "")
+                )
+                verdict.fix_suggestions.append(
+                    "Add scripts or MCP servers for bare tools in agenthatch.yaml"
+                )
+            else:
+                verdict.missing_optional.append(
+                    f"{len(bare_tools)} tools are description-only: "
+                    f"{', '.join(bare_tools[:3])}"
+                    + ("..." if len(bare_tools) > 3 else "")
+                )
+
     # Mandatory checks
     if dep_manifest.mcp_servers and not env_report.mcporter:
-        verdict.status = "BLOCK"
+        verdict.status = "BLOCK" if verdict.status != "BLOCK" else "BLOCK"
         verdict.mcporter_installed = False
         verdict.missing_mandatory.append(
             "mcporter CLI not found. MCP tools will fail. "
@@ -332,7 +363,7 @@ def runtime_readiness_gate(
 
     # Optional checks (WARN only, not BLOCK)
     for tool, found in env_report.system_tools.items():
-        if not found and tool != "mcporter":  # Already checked as mandatory
+        if not found and tool != "mcporter":
             verdict.missing_optional.append(
                 f"System tool '{tool}' not found on PATH. "
                 f"Install with your package manager."
@@ -365,6 +396,74 @@ def runtime_readiness_gate(
     return verdict
 
 
+def _check_tool_executor_coverage(
+    ahspec: dict[str, Any],
+) -> list[tuple[str, str]]:
+    """Check each capability's executor coverage.
+
+    Returns list of (capability_name, executor_kind) tuples where
+    executor_kind is one of: "mcp", "script", "api_template", "none".
+    """
+    interface = ahspec.get("interface", {})
+    provides = interface.get("provides", [])
+    mcp_servers = interface.get("mcp_servers", [])
+    api_templates = interface.get("api_templates", [])
+
+    # Build tool name sets for MCP and API templates
+    mcp_tool_names: set[str] = set()
+    for s in mcp_servers:
+        if isinstance(s, dict):
+            for t in s.get("tools", []):
+                if isinstance(t, dict):
+                    mcp_tool_names.add(t.get("name", ""))
+
+    api_template_names: set[str] = set()
+    for t in api_templates:
+        if isinstance(t, dict):
+            api_template_names.add(t.get("name", ""))
+
+    # Build script map from resources + workflow
+    resources = ahspec.get("resources", {})
+    instructions = ahspec.get("instructions", {})
+    script_names: set[str] = set()
+    for entry in resources.get("scripts", []):
+        if isinstance(entry, dict) and entry.get("name"):
+            script_names.add(entry["name"])
+    for step in instructions.get("workflow", []):
+        if isinstance(step, dict) and step.get("script"):
+            script_names.add(step["script"])
+
+    result: list[tuple[str, str]] = []
+    for cap in provides:
+        if not isinstance(cap, dict):
+            continue
+        name = cap.get("capability", cap.get("name", ""))
+        if not name:
+            continue
+
+        if name in mcp_tool_names:
+            result.append((name, "mcp"))
+        elif name in script_names or _fuzzy_script_match(name, script_names):
+            result.append((name, "script"))
+        elif name in api_template_names:
+            result.append((name, "api_template"))
+        else:
+            result.append((name, "none"))
+
+    return result
+
+
+def _fuzzy_script_match(cap_name: str, script_names: set[str]) -> bool:
+    """Check if capability name fuzzy-matches any script name."""
+    cap_flat = cap_name.replace("_", "").replace("-", "").lower()
+    for script in script_names:
+        stem = Path(script).stem
+        stem_flat = stem.replace("_", "").replace("-", "").lower()
+        if cap_flat in stem_flat or stem_flat in cap_flat:
+            return True
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Step 4: Hatch report formatting
 # ─────────────────────────────────────────────────────────────────────────
@@ -386,6 +485,22 @@ def format_hatch_report(
     lines.append(f"  Agent:       {agent_name} ({agent_id})")
     lines.append(f"  Path:        {agent_path}")
     lines.append("")
+
+    # Tool coverage
+    if ahspec:
+        tool_gaps = _check_tool_executor_coverage(ahspec)
+        total = len(tool_gaps)
+        by_kind: dict[str, int] = {}
+        for _, kind in tool_gaps:
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+        lines.append(f"  Tools:       {total} total")
+        for kind in ("mcp", "script", "api_template", "none"):
+            count = by_kind.get(kind, 0)
+            if count > 0:
+                label = {"mcp": "MCP-backed", "script": "script-backed",
+                         "api_template": "API template", "none": "bare (no executor)"}[kind]
+                lines.append(f"    - {label}: {count}")
+        lines.append("")
 
     # Status
     status_icon = {"READY": "PASS", "WARN": "WARN", "BLOCK": "FAIL"}.get(
@@ -445,7 +560,7 @@ def run_readiness_phase(
     env_report = audit_environment(dep_manifest)
 
     # Step 3: Gate
-    verdict = runtime_readiness_gate(dep_manifest, env_report)
+    verdict = runtime_readiness_gate(dep_manifest, env_report, ahspec=ahspec)
 
     # Step 4: Report
     report = format_hatch_report(agent_path, verdict, ahspec)

@@ -205,11 +205,18 @@ class CapBus:
 
         Checks that the result is valid JSON and field types match the
         declared schema. Catches formatting errors before they confuse the LLM.
+
+        If output_schema.type is "string", the result is returned as-is
+        without JSON parsing (plain text output).
         """
         import json
 
         output_schema = self._output_schemas.get(tool_name)
         if output_schema is None:
+            return result
+
+        # If schema declares type: string, output is plain text — no JSON parsing
+        if isinstance(output_schema, dict) and output_schema.get("type") == "string":
             return result
 
         try:
@@ -271,6 +278,27 @@ def _normalize_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
             return {
                 "type": "object",
                 "properties": schema,
+                "required": list(schema.keys()),
+            }
+        # Handle flat key-value objects where values are type strings
+        # e.g. {"doc_id": "string", "query": "string"} →
+        #      {"type": "object", "properties": {"doc_id": {"type": "string"}, ...}, "required": [...]}
+        if schema and all(isinstance(v, str) for v in schema.values()):
+            return {
+                "type": "object",
+                "properties": {
+                    k: {"type": v} for k, v in schema.items()
+                },
+                "required": list(schema.keys()),
+            }
+        # Handle flat objects where values are arrays (e.g. {"daily": [{}]})
+        if schema and all(isinstance(v, list) for v in schema.values()):
+            return {
+                "type": "object",
+                "properties": {
+                    k: {"type": "array", "items": v[0] if v else {"type": "string"}}
+                    for k, v in schema.items()
+                },
                 "required": list(schema.keys()),
             }
 
