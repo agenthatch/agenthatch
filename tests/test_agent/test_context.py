@@ -25,7 +25,6 @@ def minimal_spec() -> AHSSpec:
             id="test-skill",
             display_name="Test Skill",
             version="1.0.0",
-            author="Tester",
         ),
         intent=Intent(
             triggers=["test", "verify"],
@@ -91,7 +90,6 @@ class TestBuildSystemPrompt:
         ctx = ContextManager(minimal_spec)
         prompt = ctx.build_system_prompt()
         assert "Test Skill" in prompt
-        assert "Tester" in prompt
 
     def test_minimal_prompt_contains_intent(self, minimal_spec):
         ctx = ContextManager(minimal_spec)

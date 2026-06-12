@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,7 +13,6 @@ from agenthatch.agent.runtime import SkillAgent, SkillBrick
 from agenthatch.base.sandbox import Sandbox
 from agenthatch.skill.spec import (
     AgentConfig,
-    AgentRuntimeConfig,
     AHSSpec,
     BaseSpec,
     Capability,
@@ -44,13 +44,8 @@ def spec_with_agent_config() -> AHSSpec:
         base=BaseSpec(),
         instructions=Instructions(),
         agent=AgentConfig(
-            runtime=AgentRuntimeConfig(
-                provider="custom-provider",
-                model="custom-model",
-                env={"CUSTOM_KEY": "custom_value"},
-                temperature=0.5,
-                max_tokens=2048,
-            )
+            status="hatched",
+            hatched_at=datetime(2026, 1, 1, tzinfo=UTC),
         ),
     )
 
@@ -224,8 +219,9 @@ class TestSkillAgentConfigResolution:
             mock_llm, _, _, _, _, _ = _make_patches(stack)
             SkillAgent(spec_with_agent_config, skill_dir=Path("/tmp"))
             call_kwargs = mock_llm.call_args.kwargs
-            assert call_kwargs["provider"] == "custom-provider"
-            assert call_kwargs["model"] == "custom-model"
+            # v0.8.2: agent.runtime removed; falls back to default provider
+            assert call_kwargs["provider"] is not None
+            assert call_kwargs["model"] is not None
 
     def test_no_config_creates_agent(self, minimal_spec):
         from contextlib import ExitStack

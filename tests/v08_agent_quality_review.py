@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "agenthatch-core" / "src")
 
 from agenthatch.agent.runtime import SkillAgent
 
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-d7c914da78a649608c3cc2a55e66135c")
+API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
 CONFIGS = {
     "skill-creator": Path("/tmp/agenthatch_v08_test/skill-creator/agenthatch.yaml"),

@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 
 import typer
+from rich.table import Table
 
 from agenthatch.cli import console
 from agenthatch.config import CONFIG_FILE
@@ -43,17 +44,22 @@ def doctor_command() -> None:
         _check_skillhouse,
     ]
 
+    table = Table(border_style="cyan")
+    table.add_column("Status", justify="center")
+    table.add_column("Check")
+    table.add_column("Detail")
+
     all_passed = True
     for check_fn in checks:
         result = check_fn()
-        if result.passed:
-            console.print(f"  [ok]OK[/ok]  {result.message}")
-        else:
+        status = "[ok]✓[/ok]" if result.passed else "[error]✗[/error]"
+        table.add_row(status, check_fn.__doc__ or check_fn.__name__, result.message)
+        if not result.passed:
             all_passed = False
-            console.print(f"  [red]FAIL[/red] {result.message}")
-            if result.fix:
-                console.print(f"        [yellow]Fix: {result.fix}[/yellow]")
+        if result.fix:
+            table.add_row("", "", f"[yellow]Fix: {result.fix}[/yellow]")
 
+    console.print(table)
     console.print()
     if all_passed:
         console.print("[bold green]All checks passed. You are ready to build.[/bold green]")

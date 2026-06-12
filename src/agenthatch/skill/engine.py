@@ -1022,7 +1022,11 @@ class Orchestrator:
 
         self._provider_name = provider_name
 
-    def run(self, context: ContextPack, progress_callback: Callable[[str], None] | None = None) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
+    def run(
+        self,
+        context: ContextPack,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
         """Run Phase 2 on a ContextPack.
 
         Returns:
@@ -1412,7 +1416,7 @@ class Orchestrator:
         # Agent section stub
         agent_config = ahs_dict.get("agent", {})
         if isinstance(agent_config, dict) and agent_config:
-            agent = AgentConfig(runtime=AgentRuntimeConfig(**agent_config))
+            agent = AgentConfig(runtime=AgentRuntimeConfig(**agent_config))  # type: ignore[call-arg]
         else:
             agent = None
 

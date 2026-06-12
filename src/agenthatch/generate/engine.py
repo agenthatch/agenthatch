@@ -160,8 +160,6 @@ class GenerateEngine:
         "pdf_tool" → "PDF Tool"
         Preserves already-human names like "Weather Reporter".
         """
-        import re
-
         # If the display_name is identical to the kebab-case ID, humanize it
         if display_name == agent_id:
             parts = re.split(r"[-_]", display_name)
@@ -186,8 +184,6 @@ class GenerateEngine:
         "HTTP Client Tool" → "HTTPClientTool"
         "3D Printer" → "ThreeDPrinter"
         """
-        import re
-
         # Split on whitespace/hyphens/underscores, strip non-alphanumeric
         parts = re.split(r"[\s\-_]+", display_name.strip())
         clean: list[str] = []
@@ -540,11 +536,11 @@ class GenerateEngine:
             ahspec_copy["agent"] = {}
         agent_cfg = ahspec_copy["agent"]
         if isinstance(agent_cfg, dict):
-            agent_cfg["status"] = "generated"
+            agent_cfg["status"] = "hatched"
             agent_cfg["generated_at"] = datetime.now(UTC).isoformat()
         else:
             ahspec_copy["agent"] = {
-                "status": "generated",
+                "status": "hatched",
                 "generated_at": datetime.now(UTC).isoformat(),
             }
 

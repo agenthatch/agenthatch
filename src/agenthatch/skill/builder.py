@@ -9,6 +9,7 @@ Ties together the complete agenthatch v0.3 flow:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from agenthatch.skill.engine import Orchestrator
@@ -23,6 +24,7 @@ def build_ahspec_from_path(
     config: dict[str, Any] | None = None,
     large_model: str = "",
     small_model: str = "",
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
     """Full pipeline: skill path → AHSSpec.
 
@@ -33,6 +35,7 @@ def build_ahspec_from_path(
         config: Optional config dict (loaded from Config.load() if None).
         large_model: Override for large model tier.
         small_model: Override for small model tier.
+        progress_callback: Called with harness key (A-F) after each completes.
 
     Returns:
         (validated AHSSpec, harness_outputs dict).
@@ -50,7 +53,10 @@ def build_ahspec_from_path(
     )
 
     # Phase 2
-    return build_ahspec(context, config, large_model=large_model, small_model=small_model)
+    return build_ahspec(
+        context, config, large_model=large_model, small_model=small_model,
+        progress_callback=progress_callback,
+    )
 
 
 def build_ahspec(
@@ -58,6 +64,7 @@ def build_ahspec(
     config: dict[str, Any],
     large_model: str = "",
     small_model: str = "",
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[AHSSpec, dict[str, HarnessOutput]]:
     """Run Phase 2 on a ContextPack.
 
@@ -66,6 +73,7 @@ def build_ahspec(
         config: Full config dict.
         large_model: Override for large model tier.
         small_model: Override for small model tier.
+        progress_callback: Called with harness key (A-F) after each completes.
 
     Returns:
         (validated AHSSpec, harness_outputs dict).
@@ -75,4 +83,4 @@ def build_ahspec(
         large_model=large_model,
         small_model=small_model,
     )
-    return orchestrator.run(context)
+    return orchestrator.run(context, progress_callback=progress_callback)

@@ -102,26 +102,29 @@ class LLMClient:
         self.last_usage: Any = None
 
         if self._features.requires_anthropic_adapter:
-            raise ProviderCapabilityError(
-                f"Provider '{provider}' requires an Anthropic API adapter."
+            from agenthatch_core.llm.anthropic_adapter import AnthropicAdapter
+
+            self._client = AnthropicAdapter(
+                api_key=api_key,
+                base_url=base_url or "https://api.anthropic.com",
             )
+        else:
+            import openai
 
-        import openai
+            if not base_url and provider != "openai":
+                logger.warning(
+                    "No base_url configured for provider '%s'; "
+                    "falling back to OpenAI endpoint. This is almost "
+                    "certainly wrong — set base_url in your config or "
+                    "pass it explicitly to LLMClient.",
+                    provider,
+                )
 
-        if not base_url and provider != "openai":
-            logger.warning(
-                "No base_url configured for provider '%s'; "
-                "falling back to OpenAI endpoint. This is almost "
-                "certainly wrong — set base_url in your config or "
-                "pass it explicitly to LLMClient.",
-                provider,
+            self._client = openai.OpenAI(
+                api_key=api_key,
+                base_url=base_url or "https://api.openai.com/v1",
+                timeout=kwargs.get("timeout", 120.0),
             )
-
-        self._client = openai.OpenAI(
-            api_key=api_key,
-            base_url=base_url or "https://api.openai.com/v1",
-            timeout=kwargs.get("timeout", 120.0),
-        )
 
     @property
     def provider_name(self) -> str:
@@ -157,11 +160,11 @@ class LLMClient:
         if not self._thinking:
             return None
         provider = self._provider_name.lower()
-        if "deepseek" in provider:
+        if provider == "deepseek":
             return {"thinking": {"type": "enabled"}}
-        elif "openai" in provider:
+        elif provider == "openai":
             return {"reasoning_effort": self._reasoning_effort}
-        elif "anthropic" in provider:
+        elif provider == "anthropic":
             return {"thinking": {"type": "enabled", "budget_tokens": 4000}}
         return None
 

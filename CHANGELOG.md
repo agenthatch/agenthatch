@@ -70,15 +70,15 @@ v0.6 marks a major architectural transformation from "configuration-driven" to "
 ## [v0.5.10] — 2026-05-XX
 
 ### Fixed
-- DD-09-01: `from_openai()` empty response handling
-- DD-09-02: CompactSummary checkpoint TypeError
-- DD-09-03: max_tokens 0.7x → 2.5x inflation
-- DD-09-04: MCP Server URL extraction
-- DD-09-05: reasoning_content JSON extraction
-- DD-09-06: chat_structured() reasoning fallback
-- DD-09-07: Harness E structured confidence
-- DD-09-08: Token adjustment log level
-- DD-09-09: _extract_content() multi-format awareness
+- Empty response handling in OpenAI-compatible providers
+- Checkpoint TypeError in context compaction
+- Token budget inflation during conversation loop
+- MCP server URL extraction from skill body
+- Reasoning content extraction from streaming responses
+- Structured chat reasoning fallback
+- Harness E assembly confidence scoring
+- Token adjustment log level verbosity
+- Multi-format content extraction in LLM responses
 
 ---
 

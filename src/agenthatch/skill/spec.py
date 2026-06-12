@@ -78,10 +78,7 @@ class Identity(BaseModel):
     """Skill identity."""
     id: str            # kebab-case, globally unique
     display_name: str
-    version: str       # semver
-    license: str | None = None
-    author: str | None = None
-    meta: dict[str, Any] = {}
+    version: str = ""  # v0.8.2: deprecated — use agent.hatched_at instead
 
     @field_validator("id")
     @classmethod
@@ -96,13 +93,6 @@ class Identity(BaseModel):
         if not v.strip():
             raise ValueError("display_name must not be empty")
         return v.strip()
-
-    @field_validator("version")
-    @classmethod
-    def validate_semver(cls, v: str) -> str:
-        if not re.match(r"^\d+\.\d+\.\d+$", v):
-            raise ValueError(f"version '{v}' is not valid semver")
-        return v
 
 
 class Intent(BaseModel):
@@ -377,10 +367,10 @@ class AgentRuntimeConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    """Agent metadata — pure spec info, runtime config moved to runtime.toml (v0.6)."""
-    status: Literal["generated", "not_generated"] = "not_generated"
-    generated_at: datetime | None = None
-    runtime: AgentRuntimeConfig | None = None  # DEPRECATED v0.6: kept for backward compat
+    """Agent lifecycle metadata (v0.8.2: status redesigned)."""
+    status: Literal["unhatched", "hatched"] = "unhatched"
+    hatched_at: datetime | None = None     # set when Phase 2 completes
+    generated_at: datetime | None = None   # set when Phase 3 completes
 
 
 class AHSSpec(BaseModel):

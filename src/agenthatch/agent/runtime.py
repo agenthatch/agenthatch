@@ -10,7 +10,6 @@ v0.5 additions:
 from __future__ import annotations
 
 import logging
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -307,7 +306,7 @@ class SkillAgent:
         model: str | None = None,
     ) -> dict[str, Any]:
         """Resolve runtime config with 3-level priority: CLI > environment > config.toml.
-        
+
         v0.8.2: agent.runtime removed from AgentConfig; provider/model resolution
         now uses CLI args > environment > config.toml defaults.
         """
@@ -386,7 +385,11 @@ class SkillAgent:
         # Reasoning models share a single max_tokens budget
         # between reasoning and content. The old 0.7x reduction was wrong —
         # it starved content tokens. Instead, INFLATE the budget.
-        agent_rt = getattr(self.spec.agent, "runtime", None) if self.spec.agent is not None else None
+        agent_rt = (
+            getattr(self.spec.agent, "runtime", None)
+            if self.spec.agent is not None
+            else None
+        )
         user_set_max_tokens = (
             agent_rt is not None
             and agent_rt.max_tokens != 4096  # 4096 is the default

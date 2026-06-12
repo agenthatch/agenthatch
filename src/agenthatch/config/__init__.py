@@ -46,7 +46,7 @@ default_model = "claude-sonnet-4-20250514"
 [providers.deepseek]
 api_key = ""
 base_url = "https://api.deepseek.com/v1"
-default_model = "deepseek-chat"
+default_model = "deepseek-v4-pro"
 
 # Ollama (local — no API key needed)
 [providers.ollama]
@@ -98,6 +98,10 @@ large_model = ""
 # Small model (for Harness A, B, E — identity, intent, assembly)
 # Leave empty to fall back to provider's default_model
 small_model = ""
+
+# Reasoning effort for OpenAI o-series models (low/medium/high)
+# Controls thinking depth — higher = deeper reasoning, slower response
+reasoning_effort = "medium"
 """
 
 

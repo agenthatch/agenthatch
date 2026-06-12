@@ -4,6 +4,8 @@
 This is NOT a pytest suite — it's a hands-on quality review tool.
 Runs real conversations and prints full responses for human review.
 """
+
+import os
 import sys
 from pathlib import Path
 
@@ -12,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "agenthatch-core" / "src")
 
 from agenthatch.agent.runtime import SkillAgent
 
-API_KEY = "sk-d7c914da78a649608c3cc2a55e66135c"
+API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 HATCHED = Path("/tmp/agenthatch_v08_test")
 
 

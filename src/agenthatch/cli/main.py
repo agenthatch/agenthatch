@@ -18,7 +18,7 @@ from agenthatch.cli.commands.hello import hello_command
 from agenthatch.cli.commands.init import init_command
 from agenthatch.cli.commands.run import run_command
 from agenthatch.cli.commands.search import search_command
-from agenthatch.cli.commands.skills import skills_command
+from agenthatch.cli.commands.skills import skill_app, skills_command
 from agenthatch.exceptions import AgentHatchError
 
 app = typer.Typer(
@@ -138,6 +138,7 @@ app.command(name="init")(init_command)
 app.command(name="hatch")(hatch_command)
 app.command(name="search")(search_command)
 app.command(name="skills")(skills_command)
+app.add_typer(skill_app, name="skill")  # v0.8.2: skill subcommand group
 app.command(name="run")(run_command)
 app.command(name="assemble")(assemble_command)
 
