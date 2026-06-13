@@ -22,7 +22,12 @@ from .tools import (
 {% for tool in tool_metadata %}
     {{ tool.func_name }},
 {% endfor %}
+{% if mcp_servers %}
+    configure_mcp_auth,
+{% endif %}
 )
+{% elif mcp_servers %}
+from .tools import configure_mcp_auth
 {% endif %}
 
 {% if workflow %}
@@ -78,6 +83,9 @@ class {{ agent_class }}(AHCoreAgent):
 {% for tool in tool_metadata %}
             {{ tool.func_name }},
 {% endfor %}
+{% if mcp_servers %}
+            configure_mcp_auth,
+{% endif %}
         ]
 {% else %}
         _local_tools = []
@@ -218,7 +226,9 @@ class {{ agent_class }}(AHCoreAgent):
                 if name and not os.environ.get(name) and not os.environ.get(name.upper()):
                     issues.append(
                         f"Credential '{name}' not set. "
-                        f"Provide it and I will configure it automatically."
+                        f"When the user provides a token, call "
+                        f"configure_mcp_auth(auth_token='the_token_they_give_you'). "
+                        f"I will configure it automatically."
                     )
 
         if issues:

@@ -728,10 +728,15 @@ class GenerateEngine:
             if isinstance(tools_data, dict):
                 for func_name, body in tools_data.items():
                     if func_name in tool_names and isinstance(body, str) and len(body) > 10:
-                        # Normalize indentation: ensure 4-space indent for template insertion
+                        # Normalize indentation: strip AI's own indentation, then add
+                        # consistent 4-space indent for template insertion.
+                        # v0.8.17: Use line.lstrip() to discard the AI's own
+                        # inconsistent indentation before adding our prefix.
+                        # (was: " " * 4 + line — double-indented when AI
+                        #  already added indentation, causing SyntaxErrors)
                         body_lines = body.strip().split("\n")
                         indented = "\n".join(
-                            " " * 4 + line if line.strip() else ""
+                            " " * 4 + line.lstrip() if line.strip() else ""
                             for line in body_lines
                         )
                         valid_tools[func_name] = indented
@@ -1018,14 +1023,11 @@ class GenerateEngine:
                 prev_line = fixed[idx - 1]
                 prev_indent = len(prev_line) - len(prev_line.lstrip(" "))
                 curr_indent = len(fixed[idx]) - len(fixed[idx].lstrip(" "))
-                # v0.8.12: If previous line doesn't end with ':' and current
+                # v0.8.16: If previous line doesn't end with ':' and current
                 # line has deeper indent, reduce to prev line's indent level.
-                # Also handle the case where indent jumps by more than 4 spaces
-                # without a colon on the previous line.
+                # (was: curr_indent > prev_indent + 4 — missed exact +4 jumps)
                 if not prev_line.rstrip().endswith(":") and curr_indent > prev_indent and fixed[idx].strip():
-                    if curr_indent > prev_indent + 4:
-                        # Reduce to prev_indent level (not +4, since no colon)
-                        fixed[idx] = " " * prev_indent + fixed[idx].lstrip(" ")
+                    fixed[idx] = " " * prev_indent + fixed[idx].lstrip(" ")
 
         return fixed
 

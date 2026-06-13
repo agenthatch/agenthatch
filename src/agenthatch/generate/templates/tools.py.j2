@@ -75,3 +75,40 @@ def {{ tool.func_name }}() -> Any:
 {% if not tool_metadata %}
 # No capabilities defined
 {% endif %}
+{% if mcp_servers %}
+# ── v0.8.16: Self-configure MCP auth ────────────────────────────────
+
+def configure_mcp_auth(server_name: str = "", auth_token: str = "") -> Any:
+    """Write MCP auth token to ~/config/mcporter.json.
+
+    Call this when the user provides credentials. The agent will
+    automatically configure the MCP server and can then execute tools.
+    """
+    import json
+    from pathlib import Path
+
+    if not auth_token:
+        return "Error: auth_token is required. Usage: configure_mcp_auth(auth_token='Bearer xxx')"
+
+    config_dir = Path.home() / "config"
+    config_file = config_dir / "mcporter.json"
+    name = server_name or "{{ mcp_servers[0].name if mcp_servers else '' }}"
+
+    # Read existing config or create
+    config = {}
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, Exception):
+            pass
+
+    # Ensure Bearer prefix
+    token = auth_token if auth_token.startswith("Bearer ") else f"Bearer {auth_token}"
+
+    config.setdefault("mcpServers", {}).setdefault(name, {}).setdefault("headers", {})["Authorization"] = token
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return f"MCP auth configured for '{name}'. Tools should now work."
+{% endif %}
