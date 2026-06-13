@@ -402,6 +402,10 @@ class MCPClient:
         self, server_name: str, tool_name: str, arguments: dict[str, Any],
         timeout: float | None = None,
     ) -> str:
+        """Call an MCP tool with retry for transient failures.
+
+        v0.8.12: claude-code pattern — retry with backoff for transient errors.
+        """
         if server_name in self._unavailable:
             return (
                 f"MCP server '{server_name}' is unavailable "
@@ -414,27 +418,47 @@ class MCPClient:
                 f"Available servers: {list(self._transports.keys())}"
             )
         effective_timeout = timeout or self._servers.get(server_name, MCPServerConfig()).timeout
-        resp = transport.send_request({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments},
-        }, timeout=effective_timeout)
-        if "error" in resp:
-            return (
-                f"MCP error from '{server_name}/{tool_name}': "
-                f"{resp['error'].get('message', str(resp['error']))}"
-            )
-        result = resp.get("result", {})
-        content = result.get("content", result)
-        if isinstance(content, list):
-            text_parts = [
-                item.get("text", "")
-                for item in content
-                if isinstance(item, dict) and item.get("type") == "text"
-            ]
-            return "\n".join(text_parts) if text_parts else json.dumps(content)
-        return json.dumps(content) if not isinstance(content, str) else content
+
+        # v0.8.12: Retry loop for transient failures
+        last_error: str | None = None
+        for attempt in range(3):
+            resp = transport.send_request({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            }, timeout=effective_timeout)
+
+            if not resp:
+                last_error = f"MCP server '{server_name}' returned empty response"
+                if attempt < 2:
+                    time.sleep(1.0 * (2 ** attempt))
+                    continue
+                return last_error
+
+            if "error" in resp:
+                err_msg = resp["error"].get("message", str(resp["error"]))
+                # Transient errors → retry
+                if "timeout" in str(err_msg).lower() or "connection" in str(err_msg).lower():
+                    if attempt < 2:
+                        time.sleep(1.0 * (2 ** attempt))
+                        continue
+                return (
+                    f"MCP error from '{server_name}/{tool_name}': {err_msg}"
+                )
+
+            result = resp.get("result", {})
+            content = result.get("content", result)
+            if isinstance(content, list):
+                text_parts = [
+                    item.get("text", "")
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                ]
+                return "\n".join(text_parts) if text_parts else json.dumps(content)
+            return json.dumps(content) if not isinstance(content, str) else content
+
+        return last_error or f"MCP call to '{server_name}/{tool_name}' failed"
 
     def list_tool_definitions(self) -> list[dict[str, Any]]:
         """Return tool definitions in OpenAI function-calling format."""

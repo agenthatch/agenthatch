@@ -115,10 +115,10 @@ def _run_phase3_generate(
     spec_dict = ahs_spec.model_dump()
 
     with Status(
-        "[dim]Generating agent files...[/dim]",
+        "[accent]▸ Phase 3/3[/accent]  Agent Generation",
         spinner="dots",
         console=console,
-    ) as _status:
+    ) as _gen_status:
         try:
             engine = GenerateEngine()
             written = engine.generate(
@@ -135,7 +135,11 @@ def _run_phase3_generate(
             console.print("Use --force to overwrite.")
             raise typer.Exit(code=2) from e
         except Exception as e:
-            console.print(f"[error]Generation error: {e}[/error]")
+            # v0.8.11: Don't show error to user unless --report/trace
+            logger.error("Generation error: %s", e)
+            console.print(
+                f"[error]Generation error: {e}[/error]"
+            )
             raise typer.Exit(code=5) from e
 
     t3_elapsed = time.time() - t3_start
@@ -613,7 +617,7 @@ def hatch_command(
         # ── Register in skillhouse.json ─────────────────────────────────
         _register_skillhouse(ahs_spec, yaml_output_path, config)
 
-    # ── 12. Phase 3: Runtime Readiness (BEFORE generation) ───────────
+    # ── 12. Phase 3: Readiness + Generation (silent unless --report) ──
     if no_generate:
         console.print(
             "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](skipped)[/dim]"
@@ -645,32 +649,24 @@ def hatch_command(
                 agent_path=str(agent_output_dir),
                 skip_network_probe=False,
             )
-            # v0.8.10: Never block hatching. Agenthatch auto-resolves what it
-            # can (install mcporter, probe MCP) and proceeds to generate the
-            # agent regardless. Issues are reported as warnings; the agent
-            # runtime will handle MCP configuration at startup.
+            # v0.8.11: Silent readiness check unless --report.
+            # Agenthatch auto-resolves what it can (install mcporter)
+            # and always proceeds to generation.
             if result.readiness.status in ("BLOCK", "WARN"):
-                console.print(
-                    "[warn]Hatch completed with warnings "
-                    "(agent will self-configure at runtime).[/warn]"
-                )
-                if report and result.report:
-                    console.print(result.report)
-                # v0.8.10: Auto-install mcporter if missing and skill needs MCP
                 if not result.readiness.mcporter_installed and result._mcp_skill:
                     _auto_install_mcporter(console)
+                if report and result.report:
+                    console.print(result.report)
             elif report and result.report:
                 console.print(result.report)
         except Exception as e:
             logger.warning("Readiness phase skipped: %s", e)
 
-    # ── 13. Phase 4: Agent Generation ────────────────────────────────
+    # ── 13. Phase 3: Agent Generation ────────────────────────────────
     if dry_run:
         console.print(
-            "[accent]▸ Phase 4/4[/accent]  Agent Generation  [dim](dry-run)[/dim]"
+            "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](dry-run)[/dim]"
         )
-    else:
-        console.print("[accent]▸ Phase 4/4[/accent]  Agent Generation")
 
     # v0.9: Create AI chat function for tool implementation generation
     ai_chat_fn = None

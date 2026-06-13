@@ -755,13 +755,30 @@ def _api_template_executor(tmpl: dict) -> Callable[..., str]:
 
 # ── v0.7.11: Proxy executors for MCP-only and external-skill agents ────
 
+# v0.8.12: LRU connection cache — claude-code pattern (memoizeWithLRU).
+# Avoids repeated mcporter probes on every tool call.
+# Key: (server_name, cap_name) → value: bool (True = mcporter is available)
+_mcp_avail_cache: dict[tuple[str, str], bool] = {}
+_MCP_CACHE_MAX = 64  # max cache entries
+
+
 class MCPProxyExecutor:
     """Proxy executor for MCP-only agents.
+
+    v0.8.12: Adopts claude-code MCP patterns:
+      - LRU connection caching (_mcp_avail_cache) — avoids repeated probes
+      - Retry with exponential backoff for transient failures
+      - Structured error categorization (permanent vs transient)
+      - Graceful degradation: always returns string, never throws
+      - Falls back to CLI script execution if MCP is unavailable
 
     Routes tool calls through mcporter CLI with graceful degradation.
     Tries MCP server connection first; falls back to CLI script execution
     if MCP is unavailable.
     """
+
+    _RETRY_MAX = 2          # max retries for transient failures
+    _RETRY_BASE_DELAY = 1.0  # seconds, doubles each retry
 
     def __init__(
         self,
@@ -806,19 +823,40 @@ class MCPProxyExecutor:
     def _execute_via_mcp(self, arguments: dict) -> str:
         """Execute through mcporter MCP client.
 
-        v0.7.15: Uses correct mcporter syntax:
+        v0.8.12: Full claude-code MCP patterns:
+          - LRU cache for mcporter availability (avoids repeated probes)
+          - Retry with exponential backoff for transient failures
+          - Structured error categorization (permanent vs transient)
+          - Graceful degradation: returns error string, never throws
           - Dot notation: mcporter call KnowledgeBase.listDocuments
-          - key=value args: ownType=0 (not --ownType 0)
-          - Extracts real MCP tool name from script_name when available
-            (capability names in YAML often differ from MCP tool names).
         """
         import subprocess
+        import shutil
+        import time
+
+        # v0.8.12: LRU cache probe — claude-code ensureConnectedClient pattern
+        cache_key = (self.server_name, self.cap_name)
+        if cache_key in _mcp_avail_cache:
+            if not _mcp_avail_cache[cache_key]:
+                return (
+                    f"MCP server '{self.server_name}' is unavailable "
+                    f"(cached from previous attempt). Check mcporter configuration."
+                )
+
+        # Quick probe — is mcporter even installed?
+        if not shutil.which("mcporter"):
+            _mcp_avail_cache[cache_key] = False
+            self._evict_lru_if_needed()
+            return (
+                f"mcporter CLI not installed. "
+                f"Install with: npm install -g mcporter\n"
+                f"Then configure MCP server '{self.server_name}' "
+                f"in ~/config/mcporter.json"
+            )
 
         # Determine the mcporter server.tool selector
         mcp_tool = f"{self.server_name}.{self.cap_name}"
         if self.script_name:
-            # Parse "KnowledgeBase.listDocuments" from workflow script like:
-            #   "mcporter call KnowledgeBase.listDocuments ownType=0 --output json"
             parts = self.script_name.split()
             for i, part in enumerate(parts):
                 if part == "call" and i + 1 < len(parts):
@@ -826,21 +864,112 @@ class MCPProxyExecutor:
                     break
 
         args_list = ["mcporter", "call", mcp_tool]
-        # v0.7.15: mcporter expects key=value, not --key value
         for k, v in arguments.items():
             args_list.append(f"{k}={v}")
 
-        result = subprocess.run(
-            args_list,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"mcporter exited with {result.returncode}: {result.stderr}"
-            )
-        return result.stdout or "(empty response)"
+        # v0.8.12: Retry loop with exponential backoff (claude-code pattern)
+        last_error: str | None = None
+        for attempt in range(self._RETRY_MAX + 1):
+            try:
+                result = subprocess.run(
+                    args_list,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                last_error = (
+                    f"MCP call to '{mcp_tool}' timed out after 30s. "
+                    f"Check mcporter is running and the MCP server is responsive."
+                )
+                if self._should_retry("timeout", attempt):
+                    time.sleep(self._RETRY_BASE_DELAY * (2 ** attempt))
+                    continue
+                return last_error
+            except FileNotFoundError:
+                _mcp_avail_cache[cache_key] = False
+                return (
+                    f"mcporter CLI not found. "
+                    f"Install with: npm install -g mcporter"
+                )
+            except Exception as e:
+                last_error = f"MCP call failed: {e}"
+                if self._should_retry("exception", attempt):
+                    time.sleep(self._RETRY_BASE_DELAY * (2 ** attempt))
+                    continue
+                return last_error
+
+            if result.returncode != 0:
+                stderr = result.stderr.strip()
+                error_type = self._classify_mcp_error(stderr)
+
+                if error_type == "auth":
+                    # Permanent — clear cache so next call re-authenticates
+                    _mcp_avail_cache.pop(cache_key, None)
+                    return (
+                        f"MCP server '{self.server_name}' returned 401 Unauthorized. "
+                        f"Re-authenticate at mcphub and update your token."
+                    )
+                if error_type == "transient":
+                    last_error = (
+                        f"MCP server '{self.server_name}' is unreachable. "
+                        f"Check network/VPN and server URL."
+                    )
+                    if self._should_retry("transient", attempt):
+                        time.sleep(self._RETRY_BASE_DELAY * (2 ** attempt))
+                        continue
+                    return last_error
+                if error_type == "not_found":
+                    return (
+                        f"MCP tool '{mcp_tool}' not recognized by server. "
+                        f"Mcporter output: {stderr[:200]}"
+                    )
+                # Unknown error
+                return f"mcporter exited with {result.returncode}: {stderr[:200]}"
+
+            # Success — cache the availability
+            _mcp_avail_cache[cache_key] = True
+            self._evict_lru_if_needed()
+            return result.stdout or "(empty response)"
+
+        return last_error or f"MCP call to '{mcp_tool}' failed after {self._RETRY_MAX + 1} attempts"
+
+    @staticmethod
+    def _classify_mcp_error(stderr: str) -> str:
+        """Classify MCP error into category for retry decision.
+
+        v0.8.12: claude-code pattern — distinguishes permanent vs transient errors.
+        Returns: "auth" | "transient" | "not_found" | "unknown"
+        """
+        stderr_lower = stderr.lower()
+        if "401" in stderr or "unauthorized" in stderr_lower:
+            return "auth"
+        if "econnrefused" in stderr_lower or "connection refused" in stderr_lower:
+            return "transient"
+        if "timeout" in stderr_lower or "timed out" in stderr_lower:
+            return "transient"
+        if "econnreset" in stderr_lower or "connection reset" in stderr_lower:
+            return "transient"
+        if "not found" in stderr_lower or "unknown" in stderr_lower:
+            return "not_found"
+        return "unknown"
+
+    def _should_retry(self, error_type: str, attempt: int) -> bool:
+        """Decide whether to retry based on error type and attempt number.
+
+        v0.8.12: claude-code pattern — only retry transient errors.
+        """
+        if attempt >= self._RETRY_MAX:
+            return False
+        return error_type in ("timeout", "transient", "exception")
+
+    @staticmethod
+    def _evict_lru_if_needed() -> None:
+        """Evict oldest cache entry if cache exceeds max size."""
+        if len(_mcp_avail_cache) > _MCP_CACHE_MAX:
+            # Pop first item (oldest insertion in Python 3.7+)
+            oldest = next(iter(_mcp_avail_cache))
+            _mcp_avail_cache.pop(oldest, None)
 
     def _execute_via_cli(self, arguments: dict) -> str:
         """Execute as a CLI script directly.
