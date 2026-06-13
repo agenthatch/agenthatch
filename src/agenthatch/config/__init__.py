@@ -142,8 +142,8 @@ class Config:
         """Override configuration with AGENTHATCH_* environment variables."""
         env_map: dict[str, tuple[str, str]] = {
             "AGENTHATCH_VERBOSE": ("core", "verbose"),
-            "AGENTHATCH_PROVIDER": ("providers", "default"),
-            "AGENTHATCH_LLM_PROVIDER": ("providers", "default"),
+            "AGENTHATCH_PROVIDER": ("agenthatch", "default"),
+            "AGENTHATCH_LLM_PROVIDER": ("agenthatch", "default"),
             # v0.3 extensions
             "AGENTHATCH_SKILLHOUSE_PATH": ("skillhouse", "path"),
             "AGENTHATCH_SKILL_DIRS": ("skills", "search_dirs"),

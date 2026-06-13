@@ -262,8 +262,13 @@ class GenerateEngine:
         except Exception:
             return ("openai", "gpt-4o", "https://api.openai.com/v1")
 
-        provider = cfg.get("providers", {}).get("default", "openai")
-        provider_cfg = cfg.get("providers", {}).get(provider, {})
+        provider = cfg.get("agenthatch", {}).get("default", "openai")
+        # Resolve custom.xxx nested key
+        if provider.startswith("custom."):
+            custom_key = provider.removeprefix("custom.")
+            provider_cfg = cfg.get("providers", {}).get("custom", {}).get(custom_key, {})
+        else:
+            provider_cfg = cfg.get("providers", {}).get(provider, {})
         model = provider_cfg.get("default_model", "gpt-4o")
         base_url = provider_cfg.get("base_url", "https://api.openai.com/v1")
         return (provider, model, base_url)

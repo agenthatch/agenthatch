@@ -153,7 +153,10 @@ def _check_api_key() -> _Check:
             fix=f"export {info.env_key}=<key>  or  agenthatch init",
         )
 
-    ok, detail = verify_api_key(provider_name, key, info.base_url)
+    ok, detail = verify_api_key(
+        provider_name, key, info.base_url,
+        requires_anthropic_headers=info.features.requires_anthropic_adapter,
+    )
     if ok:
         msg = f"Provider: {provider_name} — {detail}"
         if info.features.available_models:

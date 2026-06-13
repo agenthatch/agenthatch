@@ -220,8 +220,12 @@ def _resolve_key_source(
     global_config = Path.home() / ".agenthatch" / "config.toml"
     if global_config.exists():
         gcfg = tomllib.loads(global_config.read_text())
-        provider = gcfg.get("providers", {}).get("default", "")
-        provider_cfg = gcfg.get("providers", {}).get(provider, {})
+        provider = gcfg.get("agenthatch", {}).get("default", "")
+        if provider.startswith("custom."):
+            custom_key = provider.removeprefix("custom.")
+            provider_cfg = gcfg.get("providers", {}).get("custom", {}).get(custom_key, {})
+        else:
+            provider_cfg = gcfg.get("providers", {}).get(provider, {})
         global_key = provider_cfg.get("api_key", "")
         if global_key and global_key == active_key:
             return "agenthatch global config"
@@ -679,8 +683,12 @@ def _handle_key_source_command(agent: Any) -> str:
     if global_config.exists():
         try:
             gcfg = tomllib.loads(global_config.read_text())
-            provider = gcfg.get("providers", {}).get("default", "")
-            provider_cfg = gcfg.get("providers", {}).get(provider, {})
+            provider = gcfg.get("agenthatch", {}).get("default", "")
+            if provider.startswith("custom."):
+                custom_key = provider.removeprefix("custom.")
+                provider_cfg = gcfg.get("providers", {}).get("custom", {}).get(custom_key, {})
+            else:
+                provider_cfg = gcfg.get("providers", {}).get(provider, {})
             if provider_cfg.get("api_key"):
                 global_has_key = True
         except Exception:

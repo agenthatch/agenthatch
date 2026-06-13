@@ -248,8 +248,7 @@ def get_default_provider(config: dict[str, Any] | None = None) -> str:
     """Return the default provider name from config."""
     if config is None:
         config = _load_config_safe()
-    providers_section: dict[str, Any] = config.get("providers", {})
-    return str(providers_section.get("default", "openai"))
+    return str(config.get("agenthatch", {}).get("default", "openai"))
 
 
 # ---------------------------------------------------------------------------
@@ -375,13 +374,14 @@ def verify_api_key(
     api_key: str,
     base_url: str,
     timeout: float = 10.0,
+    requires_anthropic_headers: bool = False,
 ) -> tuple[bool, str]:
     """Verify an API key by making a lightweight HTTP request.
 
     Strategy:
     - GET {base_url}[/v1]/models with appropriate auth header
     - OpenAI-compatible providers: Bearer token auth
-    - Anthropic: x-api-key header auth
+    - Anthropic / custom Anthropic-format: x-api-key header auth
     - 200/2xx = key is valid
     - 401/403 = key is invalid
     - Timeout/connection error = cannot verify (treated as uncertain, not failure)
@@ -395,7 +395,7 @@ def verify_api_key(
         # Build auth headers: Anthropic uses x-api-key, others use Bearer
         auth_headers = (
             {"x-api-key": api_key}
-            if provider == "anthropic"
+            if provider == "anthropic" or requires_anthropic_headers
             else {"Authorization": f"Bearer {api_key}"}
         )
         # Build models endpoint: ensure /v1 prefix for providers that need it

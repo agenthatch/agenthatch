@@ -171,11 +171,11 @@ def _configure_builtin_provider(name: str, force: bool) -> None:
 def _configure_custom_provider(
     force: bool, preset_name: str | None = None
 ) -> None:
-    """Configure a custom OpenAI-compatible provider."""
+    """Configure a custom OpenAI-compatible or Anthropic-format provider."""
     console.print()
     console.print("[bold]Configure Custom Provider[/bold]")
     console.print()
-    console.print("Enter the details for your OpenAI-compatible endpoint.")
+    console.print("Enter the details for your custom LLM endpoint.")
     console.print()
 
     # Step 1 — Provider name
@@ -185,8 +185,8 @@ def _configure_custom_provider(
 
     # Step 2 — Base URL
     url = Prompt.ask(
-        "Base URL",
-        default="http://localhost:8000/v1",
+        "Base URL (without /v1 suffix)",
+        default="http://localhost:8000",
     )
     validate_base_url(url)
 
@@ -200,13 +200,27 @@ def _configure_custom_provider(
     # Step 4 — Default model
     model = Prompt.ask("Default model ID", default="").strip()
 
-    # Step 5 — Env var name (optional)
+    # Step 5 — API format: Anthropic vs OpenAI-compatible
+    console.print()
+    console.print("[bold]API Format[/bold]")
+    console.print("  [1] OpenAI-compatible  (/v1/chat/completions, Authorization: Bearer)")
+    console.print("  [2] Anthropic Messages  (/v1/messages, x-api-key)")
+    api_format = Prompt.ask(
+        "API format",
+        choices=["1", "2"],
+        default="1",
+    )
+    requires_anthropic = api_format == "2"
+
+    # Step 6 — Env var name (optional)
     env_key = Prompt.ask(
         "Environment variable for API Key (optional)",
         default="",
     ).strip()
 
-    _write_custom_provider_config(name, api_key or "", model, url, env_key, force)
+    _write_custom_provider_config(
+        name, api_key or "", model, url, env_key, requires_anthropic, force
+    )
 
     console.print()
     console.print(f"[ok]Custom provider '{name}' configured.[/ok]")
@@ -342,8 +356,10 @@ def _write_multi_provider_config(
         "[core]",
         "verbose = false",
         "",
-        "[providers]",
+        "[agenthatch]",
         f'default = "{default_provider}"',
+        "",
+        "[providers]",
         "",
     ]
 
@@ -399,6 +415,7 @@ def _write_custom_provider_config(
     model: str,
     base_url: str,
     env_key: str,
+    requires_anthropic: bool,
     force: bool,
 ) -> None:
     """Write config with a custom provider as default."""
@@ -411,8 +428,10 @@ def _write_custom_provider_config(
         "[core]",
         "verbose = false",
         "",
-        "[providers]",
+        "[agenthatch]",
         f'default = "custom.{name}"',
+        "",
+        "[providers]",
         "",
     ]
 
@@ -425,11 +444,14 @@ def _write_custom_provider_config(
         lines.append("")
 
     env_comment = f" (env: {env_key})" if env_key else ""
-    lines.append(f"# Custom provider: {name}{env_comment}")
+    fmt_comment = " (Anthropic Messages API)" if requires_anthropic else " (OpenAI-compatible)"
+    lines.append(f"# Custom provider: {name}{env_comment}{fmt_comment}")
     lines.append(f"[providers.custom.{name}]")
     lines.append(f'api_key = "{api_key}"')
     lines.append(f'base_url = "{base_url}"')
     lines.append(f'default_model = "{model}"')
+    if requires_anthropic:
+        lines.append("features = { requires_anthropic_adapter = true }")
     if env_key:
         lines.append(f'env_key = "{env_key}"')
     lines.append("")
@@ -488,7 +510,7 @@ def _init_non_interactive(force: bool) -> None:
     is_custom = provider.startswith("custom.")
     if is_custom:
         name = provider.removeprefix("custom.")
-        _write_custom_provider_config(name, "", model, base_url, "", force)
+        _write_custom_provider_config(name, "", model, base_url, "", False, force)
         console.print(f"[ok]Non-interactive setup: custom.{name}[/ok]")
     else:
         if provider not in BUILTIN_PROVIDER_NAMES:
