@@ -1046,7 +1046,7 @@ class GenerateEngine:
 
             if first_word in BLOCK_BREAKERS:
                 # Find the matching block without popping it yet.
-                target_kws = ("try",) if first_word in ("except", "finally") else ("if", "elif")
+                target_kws = ("try", "except", "finally") if first_word in ("except", "finally") else ("if", "elif", "else")
                 match_idx = len(indent_stack) - 1
                 while match_idx > 0:
                     if indent_stack[match_idx][1].rstrip(":") in target_kws:
