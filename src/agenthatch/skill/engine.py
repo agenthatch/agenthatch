@@ -968,14 +968,20 @@ class Orchestrator:
         """
         from agenthatch.providers import get_provider, resolve_api_key
 
-        provider_name = config.get("providers", {}).get("default", "openai")
-        provider_info = get_provider(provider_name)
+        # v0.8.17: Read default from [agenthatch].default, not [providers].default
+        provider_name = config.get("agenthatch", {}).get("default", "openai")
+        provider_info = get_provider(provider_name, config)
         default_model = provider_info.default_model
 
-        # Read timeout from provider config (default 180s to handle large models)
-        provider_cfg = config.get("providers", {}).get(provider_name, {})
-        if not isinstance(provider_cfg, dict):
+        # v0.8.17: Resolve provider cfg handling custom.xxx nested keys
+        providers_section = config.get("providers", {})
+        if not isinstance(providers_section, dict):
             provider_cfg = {}
+        elif provider_name.startswith("custom."):
+            custom_key = provider_name.removeprefix("custom.")
+            provider_cfg = providers_section.get("custom", {}).get(custom_key, {}) or {}
+        else:
+            provider_cfg = providers_section.get(provider_name, {}) or {}
 
         # H2 fix: try to read per-tier models from provider config,
         # falling back to the default_model for both tiers.

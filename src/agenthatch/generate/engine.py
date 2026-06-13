@@ -670,11 +670,18 @@ class GenerateEngine:
             "- Include proper error handling and return meaningful results\n"
             "- Import only from stdlib or packages mentioned in the skill context\n"
             "- Use SKILLS_SCRIPTS_DIR (a pathlib.Path) for all script paths,"
-            " never hardcode paths\n\n"
+            " never hardcode paths\n"
+            "- CRITICAL: Code MUST follow Python indentation rules. "
+            "Every block (try/except, if/else, for, with, def) "
+            "MUST be indented 4 spaces deeper than the parent line. "
+            "Flat indentation (all lines at same level) is INVALID.\n\n"
             "Output format: Return a JSON object mapping func_name → implementation body.\n"
             "The function body should be the code INSIDE the function"
             " (after the signature and docstring).\n"
-            'Example: {"fetch_url": "import subprocess\\n    ..."}'
+            'Example: {"fetch_url": "import subprocess\\n    try:\\n        result'
+            ' = subprocess.run([url], capture_output=True, text=True)\\n'
+            '        return result.stdout.strip()\\n'
+            '    except Exception as e:\\n        return str(e)"}'
         )
 
         # ── Step 4: User prompt ─────────────────────────────────────
@@ -735,9 +742,12 @@ class GenerateEngine:
                         # (was: " " * 4 + line — double-indented when AI
                         #  already added indentation, causing SyntaxErrors)
                         body_lines = body.strip().split("\n")
-                        indented = "\n".join(
-                            " " * 4 + line.lstrip() if line.strip() else ""
-                            for line in body_lines
+                        # v0.8.17: Reconstruct block indentation from flat AI code.
+                        # Many models (especially non-frontier) generate code with
+                        # all lines at the same indentation level, missing Python's
+                        # required block structure (try/if/for bodies).
+                        indented = GenerateEngine._reindent_flat_code(
+                            body_lines, base_indent=4
                         )
                         valid_tools[func_name] = indented
 
@@ -989,6 +999,85 @@ class GenerateEngine:
                 logger.warning("Auto-fix failed for %s: %s", path.name, e)
 
     @staticmethod
+    def _reindent_flat_code(
+        lines: list[str], base_indent: int = 4,
+    ) -> str:
+        """Reconstruct Python block indentation from flat AI-generated code.
+
+        Many models (especially non-frontier) generate code with all lines
+        at the same indentation level.  This function uses a simple
+        state-machine to reconstruct proper block structure:
+
+        - Lines ending with ':'  → push indent stack (start a block)
+        - Lines starting with except/finally/elif/else
+          → pop indent stack and immediately push new level
+        - All other lines → keep current indent
+
+        The input lines are *stripped* (no leading whitespace); the output
+        has base_indent added to every line and block indentation added
+        on top of that.
+        """
+        # v0.8.17: Reconstruct block indentation
+        BLOCK_BREAKERS = frozenset({
+            "except", "finally", "elif", "else",
+        })
+        # Control-flow statements that end a block: after these, the
+        # next line at the same level belongs to the parent block.
+        # Exception: if the block is a 'try', don't pop — let the
+        # matching except/finally handle it.
+        BLOCK_TERMINATORS = frozenset({
+            "return", "break", "continue", "raise",
+        })
+
+        # Stack of (body_indent, keyword) — each entry represents an
+        # open block.  body_indent is where the block's body should be
+        # indented; keyword is the block starter.
+        indent_stack: list[tuple[int, str]] = [(base_indent, "")]
+        result: list[str] = []
+
+        for raw_line in lines:
+            stripped = raw_line.strip()
+            if not stripped:
+                result.append("")
+                continue
+
+            first_word = stripped.split()[0] if stripped.split() else ""
+            first_word = first_word.rstrip(":")  # "else:" → "else"
+
+            if first_word in BLOCK_BREAKERS:
+                # Find the matching block without popping it yet.
+                target_kws = ("try",) if first_word in ("except", "finally") else ("if", "elif")
+                match_idx = len(indent_stack) - 1
+                while match_idx > 0:
+                    if indent_stack[match_idx][1].rstrip(":") in target_kws:
+                        break
+                    match_idx -= 1
+                if match_idx > 0:
+                    # Block body indent → keyword indent (4 less)
+                    current_indent = indent_stack[match_idx][0] - 4
+                    del indent_stack[match_idx + 1:]  # pop intermediate blocks
+                    indent_stack.pop()                 # pop the match itself
+                else:
+                    current_indent = indent_stack[-1][0]
+            else:
+                current_indent = indent_stack[-1][0]
+
+            result.append(" " * current_indent + stripped)
+
+            # Block starter: push body_indent = current + 4
+            if stripped.rstrip().endswith(":"):
+                kw = first_word
+                indent_stack.append((current_indent + 4, kw))
+            # Block terminator: pop current body level
+            # (but not try — let except/finally handle it).
+            elif (first_word in BLOCK_TERMINATORS
+                  and len(indent_stack) > 1
+                  and indent_stack[-1][1].rstrip(":") != "try"):
+                indent_stack.pop()
+
+        return "\n".join(result)
+
+    @staticmethod
     def _normalize_indentation(
         lines: list[str], error_lines: list[int],
     ) -> list[str]:
@@ -1009,13 +1098,19 @@ class GenerateEngine:
                 continue
             idx = lineno - 1  # 0-based
 
-            # Check preceding line for colon (indented block expected)
+            # v0.8.17: Handle lines that should be indented after a colon
+            # (e.g. try:/if:/for: with non-indented body).
+            # Previous code only fixed lines with 0 or <4 spaces of indent,
+            # missing the common case where AI-generated code has exactly
+            # the base indent (4 spaces) for every line.
             if idx > 0 and fixed[idx - 1].rstrip().endswith(":"):
-                # Previous line ends with : — this line should be indented
-                if not fixed[idx].startswith(" ") and not fixed[idx].startswith("\t"):
-                    fixed[idx] = "    " + fixed[idx]
-                elif len(fixed[idx]) - len(fixed[idx].lstrip(" ")) < 4:
-                    fixed[idx] = "    " + fixed[idx].lstrip(" ")
+                prev_line = fixed[idx - 1]
+                prev_indent = len(prev_line) - len(prev_line.lstrip(" "))
+                curr_indent = len(fixed[idx]) - len(fixed[idx].lstrip(" "))
+                # Fix: indent to prev_indent + 4 when current line is at
+                # same or lower indent than the colon line.
+                if curr_indent <= prev_indent and fixed[idx].strip():
+                    fixed[idx] = " " * (prev_indent + 4) + fixed[idx].lstrip(" ")
                 continue
 
             # Check if this line has more indent than context expects

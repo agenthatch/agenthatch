@@ -45,6 +45,24 @@ _MAX_DIRS_PER_ROOT = 500       # max dirs to visit per search root
 # ── Phase 3 agent generation ───────────────────────────────────────────────
 
 
+def _resolve_default_provider(config: dict[str, Any]) -> str:
+    """Resolve the default provider name from config."""
+    # v0.8.17: Read from [agenthatch].default, not [providers].default
+    return config.get("agenthatch", {}).get("default", "openai")
+
+
+def _resolve_provider_cfg(config: dict[str, Any], provider_name: str) -> dict[str, Any]:
+    """Resolve provider config, handling custom.xxx nested keys."""
+    providers = config.get("providers", {})
+    if not isinstance(providers, dict):
+        return {}
+    # v0.8.17: custom.xxx providers live at [providers.custom.xxx]
+    if provider_name.startswith("custom."):
+        custom_key = provider_name.removeprefix("custom.")
+        return providers.get("custom", {}).get(custom_key, {})
+    return providers.get(provider_name, {})
+
+
 def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
     """Create a simple chat function for AI-driven tool generation.
 
@@ -55,8 +73,8 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
 
     from agenthatch_core.llm.client import LLMClient
 
-    provider_name = config.get("providers", {}).get("default", "openai")
-    provider_cfg = config.get("providers", {}).get(provider_name, {})
+    provider_name = _resolve_default_provider(config)
+    provider_cfg = _resolve_provider_cfg(config, provider_name)
     if not isinstance(provider_cfg, dict):
         return None
 
@@ -422,8 +440,8 @@ def hatch_command(
         agent_output_dir_early = Path.cwd() / f"{skill_name}-agent"
 
     # ── 3. Provider info for overview ───────────────────────────────────
-    provider_name = config.get("providers", {}).get("default", "openai")
-    provider_cfg = config.get("providers", {}).get(provider_name, {})
+    provider_name = _resolve_default_provider(config)
+    provider_cfg = _resolve_provider_cfg(config, provider_name)
     if isinstance(provider_cfg, dict):
         model_display = provider_cfg.get("default_model", "unknown")
     else:

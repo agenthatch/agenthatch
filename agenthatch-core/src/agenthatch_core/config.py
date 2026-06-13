@@ -73,6 +73,21 @@ def _warn_plaintext_api_key(result: dict) -> None:
         )
 
 
+def _resolve_provider_from_config(config: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Resolve provider config handling custom.xxx nested keys.
+
+    v0.8.17: Previously used a flat .get() which failed for
+    'custom.hermes' because it's stored as providers.custom.hermes.
+    """
+    providers = config.get("providers", {})
+    if not isinstance(providers, dict):
+        return {}
+    if provider.startswith("custom."):
+        custom_key = provider.removeprefix("custom.")
+        return providers.get("custom", {}).get(custom_key, {})
+    return providers.get(provider, {})
+
+
 def inherit_api_key(config: dict[str, Any]) -> dict[str, Any]:
     """Fill missing API key and base_url from agenthatch global config.
 
@@ -98,7 +113,7 @@ def inherit_api_key(config: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         return config
 
-    provider_cfg = ah_cfg.get("providers", {}).get(provider, {})
+    provider_cfg = _resolve_provider_from_config(ah_cfg, provider)
     if not isinstance(provider_cfg, dict):
         return config
 
