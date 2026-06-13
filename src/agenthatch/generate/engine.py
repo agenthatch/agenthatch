@@ -186,6 +186,8 @@ class GenerateEngine:
             "brick_manifest": brick_manifest,
             "ai_tool_impls": {},  # populated by AI generation step
             "ai_references": {},  # populated by AI reference extraction
+            # v0.8.19: Pass dependencies for CLI tool fallback in template
+            "dependencies": base.get("dependencies", []) if base else [],
         }
 
     @staticmethod
@@ -549,6 +551,18 @@ class GenerateEngine:
             else:
                 backend_kind = "none"
 
+            # v0.8.19: If no backend was detected but MCP servers are
+            # configured, treat the tool as MCP-backed.  Harness F
+            # detects MCP servers but the MCPServerEntry schema has no
+            # "tools" field, so the tool→server mapping is empty.
+            # Without this fallback all MCP tools become stubs.
+            if backend_kind == "none" and mcp_servers:
+                first_mcp = mcp_servers[0]
+                if isinstance(first_mcp, dict) and first_mcp.get("name"):
+                    backend_kind = "mcp"
+                    mcp_server = first_mcp["name"]
+                    is_mcp = True
+
             result.append({
                 "name": name,
                 "func_name": name.replace("-", "_"),
@@ -669,7 +683,14 @@ class GenerateEngine:
             "to locate scripts, e.g. SKILLS_SCRIPTS_DIR / 'script_name'\n"
             "- For MCP-backed tools: return a placeholder (MCP handles execution)\n"
             "- For API template tools: generate HTTP requests based on the skill context\n"
-            "- For tools without backend: read SKILL.md code examples,"
+            "- For CLI-backed tools (backend=none but skill has CLI dependencies like "
+            "'agent-browser'): read the CLI commands from SKILL.md and generate "
+            "subprocess.run() calls. Use the exact CLI command syntax from the skill "
+            "context. Example: if SKILL.md shows 'agent-browser open <url>', generate "
+            "subprocess.run(['agent-browser', 'open', url], capture_output=True, "
+            "text=True, timeout=120). Return stdout.strip() on success, "
+            "str(stderr) or exception message on failure.\n"
+            "- For other tools without backend: read SKILL.md code examples,"
             " generate a real implementation\n"
             "- Do NOT use **kwargs — use the exact parameter names from the tool definition\n"
             "- Include proper error handling and return meaningful results\n"
@@ -818,13 +839,34 @@ class GenerateEngine:
                         logger.info(
                             "AI generated %d tool implementations", len(ai_tools)
                         )
+                    else:
+                        # v0.8.19: warn when AI generation produced no tools
+                        tool_count = len(variables["tool_metadata"])
+                        logger.warning(
+                            "AI tool generation returned no implementations "
+                            "for %d tools. Tools will be stubs. "
+                            "Check LLM provider configuration.",
+                            tool_count,
+                        )
                     if ai_refs:
                         variables["ai_references"] = ai_refs
                         logger.info(
                             "AI extracted %d reference structures", len(ai_refs)
                         )
+                else:
+                    # v0.8.19: warn when AI generation returned empty
+                    tool_count = len(variables["tool_metadata"])
+                    logger.warning(
+                        "AI tool generation failed for %d tools. "
+                        "Tools will be stubs. "
+                        "Check that the LLM provider supports the "
+                        "Anthropic Messages API format if using a custom provider.",
+                        tool_count,
+                    )
             except Exception as e:
-                logger.warning("AI tool generation failed, using template defaults: %s", e)
+                logger.warning(
+                    "AI tool generation failed, using template defaults: %s", e
+                )
 
         written: list[Path] = []
 
@@ -1051,7 +1093,10 @@ class GenerateEngine:
 
             if first_word in BLOCK_BREAKERS:
                 # Find the matching block without popping it yet.
-                target_kws = ("try", "except", "finally") if first_word in ("except", "finally") else ("if", "elif", "else")
+                if first_word in ("except", "finally"):
+                    target_kws = ("try", "except", "finally")
+                else:
+                    target_kws = ("if", "elif", "else")
                 match_idx = len(indent_stack) - 1
                 while match_idx > 0:
                     if indent_stack[match_idx][1].rstrip(":") in target_kws:
@@ -1126,7 +1171,9 @@ class GenerateEngine:
                 # v0.8.16: If previous line doesn't end with ':' and current
                 # line has deeper indent, reduce to prev line's indent level.
                 # (was: curr_indent > prev_indent + 4 — missed exact +4 jumps)
-                if not prev_line.rstrip().endswith(":") and curr_indent > prev_indent and fixed[idx].strip():
+                deeper = curr_indent > prev_indent
+                colon_ended = not prev_line.rstrip().endswith(":")
+                if colon_ended and deeper and fixed[idx].strip():
                     fixed[idx] = " " * prev_indent + fixed[idx].lstrip(" ")
 
         return fixed

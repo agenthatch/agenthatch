@@ -145,7 +145,7 @@ check("atexit registered _cleanup_locks", True)
 
 section("D8: No limits")
 
-from agenthatch_core.loop.agent_loop import ConversationLoop, _MAX_CONSECUTIVE_TEXT_ONLY
+from agenthatch_core.loop.agent_loop import _MAX_CONSECUTIVE_TEXT_ONLY
 
 check("_MAX_CONSECUTIVE_TEXT_ONLY exists", _MAX_CONSECUTIVE_TEXT_ONLY == 13)
 

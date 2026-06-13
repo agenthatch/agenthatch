@@ -68,8 +68,16 @@ def {{ tool.func_name }}() -> Any:
     # API template will be injected by the API template loader
     return f"[API template tool: {{ tool.name }}] - call this capability to execute"
 {% else %}
-    # Fallback: description-only stub
-    return f"[{{ tool.name }}]: {{ tool.description }}"
+    # v0.8.19: AI tool generation failed or was skipped.
+    # The tool is a non-functional stub — the agent will see an error
+    # message instead of hallucinating that the tool worked.
+    _msg = (
+        f"ERROR: Tool '{{ tool.name }}' is not implemented. "
+        "AI tool generation did not produce a valid implementation. "
+        "Re-run 'agenthatch hatch' with a working LLM provider, "
+        "or implement this function manually."
+    )
+    return _msg
 {% endif %}
 {% endfor %}
 {% if not tool_metadata %}

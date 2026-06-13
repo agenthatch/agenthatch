@@ -48,7 +48,7 @@ _MAX_DIRS_PER_ROOT = 500       # max dirs to visit per search root
 def _resolve_default_provider(config: dict[str, Any]) -> str:
     """Resolve the default provider name from config."""
     # v0.8.17: Read from [agenthatch].default, not [providers].default
-    return config.get("agenthatch", {}).get("default", "openai")
+    return str(config.get("agenthatch", {}).get("default", "openai"))
 
 
 def _resolve_provider_cfg(config: dict[str, Any], provider_name: str) -> dict[str, Any]:
@@ -59,8 +59,8 @@ def _resolve_provider_cfg(config: dict[str, Any], provider_name: str) -> dict[st
     # v0.8.17: custom.xxx providers live at [providers.custom.xxx]
     if provider_name.startswith("custom."):
         custom_key = provider_name.removeprefix("custom.")
-        return providers.get("custom", {}).get(custom_key, {})
-    return providers.get(provider_name, {})
+        return dict(providers.get("custom", {}).get(custom_key, {}))
+    return dict(providers.get(provider_name, {}))
 
 
 def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
@@ -68,19 +68,35 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
 
     Uses the same provider config as the harnesses but with a simpler
     interface: (system_prompt, user_prompt) -> response_text.
+
+    v0.8.19: Fix — pass provider features to LLMClient so that
+    AnthropicAdapter is enabled for custom providers with
+    requires_anthropic_adapter = true.  Without this the AI tool
+    generation LLM call fails silently and all tools become stubs.
     """
     import os
 
     from agenthatch_core.llm.client import LLMClient
+
+    from agenthatch.providers import get_provider, resolve_api_key
 
     provider_name = _resolve_default_provider(config)
     provider_cfg = _resolve_provider_cfg(config, provider_name)
     if not isinstance(provider_cfg, dict):
         return None
 
+    # v0.8.19: Use get_provider() to resolve ProviderInfo (including features)
+    # so that requires_anthropic_adapter is correctly set.
+    try:
+        provider_info = get_provider(provider_name, config)
+    except Exception:
+        provider_info = None
+
     api_key = provider_cfg.get("api_key") or os.environ.get(
         provider_cfg.get("api_key_env", ""), ""
     )
+    if not api_key:
+        api_key = resolve_api_key(provider_name, config=config, prompt=False)
     if not api_key:
         logger.warning("No API key configured for AI tool generation")
         return None
@@ -93,6 +109,7 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
         model=model,
         api_key=api_key,
         base_url=base_url or None,
+        features=provider_info.features if provider_info else None,  # type: ignore[arg-type]
     )
 
     def chat_fn(system_prompt: str, user_prompt: str) -> str:

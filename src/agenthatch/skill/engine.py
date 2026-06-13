@@ -975,8 +975,9 @@ class Orchestrator:
 
         # v0.8.17: Resolve provider cfg handling custom.xxx nested keys
         providers_section = config.get("providers", {})
+        provider_cfg: dict[str, Any] = {}
         if not isinstance(providers_section, dict):
-            provider_cfg = {}
+            pass
         elif provider_name.startswith("custom."):
             custom_key = provider_name.removeprefix("custom.")
             provider_cfg = providers_section.get("custom", {}).get(custom_key, {}) or {}

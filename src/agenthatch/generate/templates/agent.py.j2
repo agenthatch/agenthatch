@@ -138,7 +138,8 @@ class {{ agent_class }}(AHCoreAgent):
         if not spec:
             return
 
-        mcp_servers = spec.get("interface", {}).get("mcp_servers", [])
+        # v0.8.19: mcp_servers is at top level of AHSSpec, not under "interface"
+        mcp_servers = spec.get("mcp_servers", [])
         if not mcp_servers:
             return  # Not an MCP skill
 
