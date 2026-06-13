@@ -99,14 +99,17 @@ class TestRunSync:
         )
 
         # v0.6 auto-continuation: after tool + text, loop calls LLM once more per round.
-        # Need enough responses to fill MAX_TOOL_ROUNDS and trigger fallback summarization.
-        mock_llm.chat_with_tools.side_effect = [
-            ToolCallResponse(
-                text=None,
-                tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hello"})],
-            ),
-            ToolCallResponse(text="I echoed your message.", tool_calls=[]),
-        ] + [ToolCallResponse(text="I echoed your message.", tool_calls=[])] * 10
+        # v0.8.14: while True loop needs unlimited fallback responses for budget.
+        _call_count = [0]
+        def _mock_responses(*args, **kwargs):
+            _call_count[0] += 1
+            if _call_count[0] == 1:
+                return ToolCallResponse(
+                    text=None,
+                    tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hello"})],
+                )
+            return ToolCallResponse(text="I echoed your message.", tool_calls=[])
+        mock_llm.chat_with_tools.side_effect = _mock_responses
 
         result = loop.run("echo hello")
         assert "I echoed your message" in result
@@ -132,7 +135,7 @@ class TestRunSync:
             executor=MagicMock(execute=lambda **kw: "result_b"),
         )
 
-        # v0.6 auto-continuation: after tools + text, loop continues for MAX_TOOL_ROUNDS
+        # v0.6 auto-continuation: after tools + text, loop continues until budget exhausted
         mock_llm.chat_with_tools.side_effect = [
             ToolCallResponse(
                 text=None,

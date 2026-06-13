@@ -72,10 +72,19 @@ class RichToolCallEvent:
         self.result_preview = result_preview
 
 
-class ConversationLoop:
-    """Drives the User -> LLM -> Tool -> LLM -> Response cycle."""
+# v0.8.15: Minimal safety net — consecutive empty-text responses before breaking.
+# Prevents tight infinite loops where the LLM returns text without tool calls
+# repeatedly.  No token budget, no round limit.  The agent runs freely.
+_MAX_CONSECUTIVE_TEXT_ONLY = 13
 
-    MAX_TOOL_ROUNDS = 10
+
+class ConversationLoop:
+    """Drives the User -> LLM -> Tool -> LLM -> Response cycle.
+
+    v0.8.15: No artificial limits.  The agent runs until the task is
+    naturally complete.  The only guard is _MAX_CONSECUTIVE_TEXT_ONLY
+    to prevent tight infinite auto-continuation loops.
+    """
 
     def __init__(
         self,
@@ -187,10 +196,10 @@ class ConversationLoop:
             logger.error("LLM API call failed: %s", e)
             return f"I encountered an error communicating with the model provider: {e}"
 
-        task_completed = False
         has_executed_tools = False
         tool_stats: dict[str, int] = {}
-        for _ in range(self.MAX_TOOL_ROUNDS):
+        _consecutive_text_only = 0  # v0.8.15: prevent infinite auto-continuation
+        while True:
             # v0.6: detect task_complete signal, return summary
             if response.tool_calls:
                 tc_names = [tc.name for tc in response.tool_calls]
@@ -225,6 +234,11 @@ class ConversationLoop:
                 # v0.6: Auto-continuation only after tools executed
                 # (needsFollowUp pattern)
                 if not has_executed_tools:
+                    break
+                # v0.8.14: Limit consecutive text-only to prevent
+                # infinite auto-continuation loops.
+                _consecutive_text_only += 1
+                if _consecutive_text_only > _MAX_CONSECUTIVE_TEXT_ONLY:
                     break
                 messages.append({
                     "role": "assistant",
@@ -315,6 +329,7 @@ class ConversationLoop:
                         "elapsed": elapsed,
                     })
                 has_executed_tools = True
+                _consecutive_text_only = 0  # v0.8.14: reset on tool execution
 
             if not self._cb_allow():
                 break
@@ -330,32 +345,6 @@ class ConversationLoop:
                 logger.error("LLM API call failed in tool loop: %s", e)
                 response = ToolCallResponse(
                     text=f"Error communicating with model provider: {e}",
-                    tool_calls=[],
-                )
-        else:
-            # v0.8.1: Max rounds exhausted — diagnostic summary
-            stats_str = ", ".join(f"{k}×{v}" for k, v in tool_stats.items())
-            task_completed = True
-
-        # ── v0.8.1: Max-rounds fallback with diagnostic ──
-        if task_completed:
-            self.ctx.add_to_history("user", user_input)
-            messages.append({
-                "role": "user",
-                "content": "Summarize what you accomplished in 1-3 sentences.",
-            })
-            try:
-                response = self._call_with_retry(
-                    self.llm.chat_with_tools, messages, tools_for_api,
-                )
-                self._cb_record(True)
-                self._record_usage(response)
-            except Exception as e:
-                self._cb_record(False)
-                logger.error("Fallback summarization failed: %s", e)
-                response = ToolCallResponse(
-                    text=f"(Max rounds ({self.MAX_TOOL_ROUNDS}) reached. "
-                         f"Tools: {stats_str})",
                     tool_calls=[],
                 )
 
@@ -580,11 +569,11 @@ class ConversationLoop:
             return "Service temporarily unavailable."
 
         # ── v0.6: Autonomous task completion ──
-        task_completed = False
         has_executed_tools = False
         accumulated_text = ""
         tool_stats: dict[str, int] = {}
-        for _ in range(self.MAX_TOOL_ROUNDS):
+        _consecutive_text_only = 0  # v0.8.15
+        while True:
             has_yielded_tool_header = False
 
             try:
@@ -666,6 +655,11 @@ class ConversationLoop:
                 # v0.6: Auto-continuation only after tools executed
                 # (needsFollowUp pattern)
                 if not has_executed_tools:
+                    full_response_text = response.text or accumulated_text
+                    break
+                # v0.8.14: Limit consecutive text-only
+                _consecutive_text_only += 1
+                if _consecutive_text_only > _MAX_CONSECUTIVE_TEXT_ONLY:
                     full_response_text = response.text or accumulated_text
                     break
                 messages.append({
@@ -750,29 +744,7 @@ class ConversationLoop:
                         "elapsed": elapsed,
                     })
                 has_executed_tools = True
-        else:
-            task_completed = True
-
-        # ── v0.8.1: Max-rounds fallback with diagnostic ──
-        if task_completed:
-            stats_str = ", ".join(f"{k}×{v}" for k, v in tool_stats.items())
-            yield f"(Max rounds ({self.MAX_TOOL_ROUNDS}) reached. "
-            yield f"Tools called: {stats_str}. Summarizing...)"
-            messages.append({
-                "role": "user",
-                "content": "Summarize what you accomplished in 1-3 sentences.",
-            })
-            try:
-                response = self._call_with_retry(
-                    self.llm.chat_with_tools, messages, tools_for_api,
-                )
-                self._cb_record(True)
-                self._record_usage(response)
-                full_response_text = response.text or ""
-            except Exception as e:
-                self._cb_record(False)
-                logger.error("Fallback summarization failed: %s", e)
-                full_response_text = "(Task partially completed — max rounds reached)"
+                _consecutive_text_only = 0  # v0.8.14: reset on tool execution
 
         self.ctx.add_to_history("user", user_input)
         final_text = full_response_text or accumulated_text

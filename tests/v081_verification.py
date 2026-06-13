@@ -141,13 +141,13 @@ with tempfile.TemporaryDirectory() as d:
 check("atexit registered _cleanup_locks", True)
 
 
-# ── D8: MAX_TOOL_ROUNDS diagnostic ────────────────────────────────────
+# ── D8: No artificial limits (v0.8.15: removed TOKEN_BUDGET) ─────────
 
-section("D8: MAX_TOOL_ROUNDS diagnostic text")
+section("D8: No limits")
 
-from agenthatch_core.loop.agent_loop import ConversationLoop
+from agenthatch_core.loop.agent_loop import ConversationLoop, _MAX_CONSECUTIVE_TEXT_ONLY
 
-check("MAX_TOOL_ROUNDS is 10", ConversationLoop.MAX_TOOL_ROUNDS == 10)
+check("_MAX_CONSECUTIVE_TEXT_ONLY exists", _MAX_CONSECUTIVE_TEXT_ONLY == 13)
 
 
 # ── D7: Readiness phase integration ───────────────────────────────────
