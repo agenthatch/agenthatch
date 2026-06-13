@@ -554,6 +554,9 @@ class GenerateEngine:
                 "mcp_server": mcp_server,
                 "has_inputs": has_inputs,
                 "script_name": script_name,
+                # v0.8.13: repr() to safely embed script_name in Python strings
+                # (handles internal quotes like type="all")
+                "script_name_repr": repr(script_name),
                 "has_backend": backend_kind != "none",
                 "backend_kind": backend_kind,
             })

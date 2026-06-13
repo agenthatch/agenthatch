@@ -268,7 +268,21 @@ class AHCoreAgent:
                 # Sandbox (if also usable) is kept for warmup scripts but not
                 # used for tool execution — mcporter handles the transport.
                 server_name = mcp_servers[0].get("name", "")
-                mcp_cfg = mcp_servers[0].get("config", {})
+                # v0.8.13: Extract MCP config directly from server entry.
+                # Harness stores url/transport/command at top level, not
+                # inside a nested "config" key. Build config dict from entry.
+                mcp_cfg = {
+                    "url": mcp_servers[0].get("url", ""),
+                    "transport": mcp_servers[0].get("transport", "stdio"),
+                    "command": mcp_servers[0].get("command", ""),
+                    "headers": mcp_servers[0].get("headers", {}),
+                    "auth_token": mcp_servers[0].get("auth_token", ""),
+                    "timeout": mcp_servers[0].get("timeout", 30.0),
+                }
+                # Merge any nested config if present
+                nested = mcp_servers[0].get("config", {})
+                if isinstance(nested, dict) and nested:
+                    mcp_cfg.update(nested)
                 executor = MCPProxyExecutor(
                     cap_name=cap_name,
                     server_name=server_name,
@@ -369,8 +383,22 @@ class AHCoreAgent:
             )
 
     def _register_python_tool(self, tool: Callable) -> None:
-        """Register a plain Python function as a tool on the CapBus."""
+        """Register a plain Python function as a tool on the CapBus.
+
+        v0.8.13: Never overwrite an executor already registered from spec
+        (e.g. MCPProxyExecutor). Python tools are fallback only.
+        """
         import inspect
+
+        # v0.8.13: If a spec executor already exists (e.g. MCPProxyExecutor),
+        # skip — Python stub functions are fallback only.
+        existing = self.capbus.capabilities.get(tool.__name__)
+        if existing is not None and existing.executor is not None:
+            logger.debug(
+                "Tool '%s' already has executor from spec, skipping Python fallback",
+                tool.__name__,
+            )
+            return
 
         sig = inspect.signature(tool)
         params: dict[str, Any] = {

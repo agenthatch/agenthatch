@@ -50,7 +50,7 @@ def {{ tool.func_name }}() -> Any:
     # === AI-generated implementation ===
 {{ ai_tool_impls[tool.func_name] }}
 {% elif tool.backend_kind == "script" %}
-    args = [str(SKILLS_SCRIPTS_DIR / "{{ tool.script_name }}")]
+    args = str(SKILLS_SCRIPTS_DIR / {{ tool.script_name_repr }}).split()
     {% for param_name, _, _ in tool.params %}
     args.append(str({{ param_name }}))
     {% endfor %}
