@@ -38,7 +38,7 @@ from whatever metadata is available.
 Rules:
   - id MUST be kebab-case: only lowercase letters, digits, and hyphens
   - display_name MUST be non-empty, human-readable
-  - version: just use "0.1.0" as default (v0.8.2: version is deprecated, hatched_at is the canonical timestamp)
+  - version: omit this field (v0.8.9: version is deprecated, hatched_at is the canonical timestamp)
   - Never hallucinate fields — if unknown, set license/author to null
   - If frontmatter is missing, infer id from dir_name via slugify
   - meta SHOULD preserve any original metadata not mapped to standard fields
@@ -69,7 +69,7 @@ body (first 50 lines):
 A skill that fetches current weather conditions...
 ```
 Output:
-{""identity"": {""id"": ""weather-reporter"", ""display_name"": ""Weather Reporter"", ""version"": ""1.2.0"", ""license"": ""MIT"", ""author"": ""Alice"", ""meta"": {}}}  # noqa: E501
+{""identity"": {""id"": ""weather-reporter"", ""display_name"": ""Weather Reporter"", ""license"": ""MIT"", ""author"": ""Alice"", ""meta"": {}}}  # noqa: E501
 
 Example 2 — No frontmatter, no body title:
 ```
@@ -79,7 +79,7 @@ body (first 50 lines):
 This skill helps you edit PDF files using the pdf-editor tool...
 ```
 Output:
-{""identity"": {""id"": ""pdf-editor"", ""display_name"": ""Pdf Editor"", ""version"": ""0.1.0"", ""license"": null, ""author"": null, ""meta"": {}}}  # noqa: E501
+{""identity"": {""id"": ""pdf-editor"", ""display_name"": ""Pdf Editor"", ""license"": null, ""author"": null, ""meta"": {}}}  # noqa: E501
 """
 
 

@@ -410,7 +410,7 @@ class MetaReflectionLoop:
         if identity:
             parts.append(
                 f"Agent: {identity.get('display_name', 'Unknown')} "
-                f"({identity.get('id', 'unknown')}) v{identity.get('version', '0.1.0')}"
+                f"({identity.get('id', 'unknown')})"
             )
 
         intent = ahs_spec.get("intent", {})

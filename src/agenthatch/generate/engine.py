@@ -109,7 +109,7 @@ class GenerateEngine:
         display_name = self._humanize_display_name(
             identity.get("display_name", "Unknown Agent"), agent_name
         )
-        version = identity.get("version", "0.1.0")
+        version = identity.get("version", "")
 
         # Derive package_name: kebab-case → snake_case
         package_name = agent_name.replace("-", "_")

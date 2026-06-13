@@ -381,8 +381,6 @@ body (first 50 lines):
             return False, f"identity.id '{identity_id}' is not kebab-case"
         if not identity.get("display_name"):
             return False, "identity.display_name is empty"
-        if not identity.get("version"):
-            return False, "identity.version is empty"
         return True, ""
 
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
@@ -1187,6 +1185,10 @@ class Orchestrator:
         ahs_dict: dict[str, Any] = {}
         try:
             ahs_dict = outputs["E"].result.get("ahs_spec", {})
+
+            # v0.8.9: Strip deprecated version field from identity
+            if "identity" in ahs_dict and isinstance(ahs_dict["identity"], dict):
+                ahs_dict["identity"].pop("version", None)
 
             # Wire resources into ahs_dict
             ahs_dict["resources"] = resources

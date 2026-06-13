@@ -636,7 +636,6 @@ def hatch_command(
         agent_output_dir = Path.cwd() / f"{agent_id}-agent"
 
     if not dry_run:
-        _blocked = False
         try:
             from agenthatch.generate.readiness import run_readiness_phase
 
@@ -646,27 +645,20 @@ def hatch_command(
                 agent_path=str(agent_output_dir),
                 skip_network_probe=False,
             )
-            if result.readiness.status == "BLOCK":
-                _blocked = True
+            # v0.8.10: Never block hatching. Agenthatch auto-resolves what it
+            # can (install mcporter, probe MCP) and proceeds to generate the
+            # agent regardless. Issues are reported as warnings; the agent
+            # runtime will handle MCP configuration at startup.
+            if result.readiness.status in ("BLOCK", "WARN"):
                 console.print(
-                    "[error]Hatch blocked by missing mandatory dependencies.[/error]"
-                )
-                if result.report:
-                    console.print(result.report)
-                console.print(
-                    "[dim]Fix the issues above, then re-run "
-                    "[bold]agenthatch hatch[/bold].[/dim]"
-                )
-                console.print(
-                    "[dim]Use [bold]--report[/bold] for detailed diagnostics.[/dim]"
-                )
-                return
-            elif result.readiness.status == "WARN":
-                console.print(
-                    "[warn]Hatch completed with warnings.[/warn]"
+                    "[warn]Hatch completed with warnings "
+                    "(agent will self-configure at runtime).[/warn]"
                 )
                 if report and result.report:
                     console.print(result.report)
+                # v0.8.10: Auto-install mcporter if missing and skill needs MCP
+                if not result.readiness.mcporter_installed and result._mcp_skill:
+                    _auto_install_mcporter(console)
             elif report and result.report:
                 console.print(result.report)
         except Exception as e:
@@ -765,6 +757,46 @@ def _register_skillhouse(
             f"The agenthatch.yaml is valid and can be used."
         )
         console.print(f"[yellow]⚠ Skill indexing failed (non-fatal): {e}[/yellow]")
+
+
+def _auto_install_mcporter(console: Any) -> None:
+    """v0.8.10: Auto-install mcporter if skill requires MCP.
+
+    Tries to install mcporter via npm. If npm is not available,
+    provides clear instructions for manual installation.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("mcporter"):
+        return  # Already installed
+
+    npm = shutil.which("npm")
+    if not npm:
+        console.print(
+            "[dim]npm not found. Install Node.js then run: "
+            "npm install -g mcporter[/dim]"
+        )
+        return
+
+    console.print("[dim]Auto-installing mcporter (MCP proxy)...[/dim]")
+    try:
+        result = subprocess.run(
+            [npm, "install", "-g", "mcporter"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0:
+            console.print("[dim]✓ mcporter installed successfully[/dim]")
+        else:
+            console.print(
+                f"[dim]⚠ mcporter install failed: {result.stderr.strip()[:200]}[/dim]"
+            )
+            console.print(
+                "[dim]Try manually: npm install -g mcporter[/dim]"
+            )
+    except Exception as e:
+        console.print(f"[dim]⚠ mcporter auto-install error: {e}[/dim]")
+        console.print("[dim]Try manually: npm install -g mcporter[/dim]")
 
 
 def _update_skillhouse_agent_output(

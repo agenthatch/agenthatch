@@ -8,7 +8,7 @@ class AgentIdentity:
 
     Used by AHCoreAgent for independent agents.
     """
-    def __init__(self, id: str, display_name: str, version: str):
+    def __init__(self, id: str, display_name: str, version: str = ""):
         self.id = id
         self.display_name = display_name
         self.version = version

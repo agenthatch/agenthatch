@@ -541,7 +541,7 @@ class AHCoreAgent:
                     display_name=ident.get(
                         "display_name", ident.get("id", "Agent")
                     ),
-                    version=ident.get("version", "0.1.0"),
+                    version=ident.get("version", ""),
                 ),
                 runtime_config=runtime_config,
             )
@@ -553,7 +553,7 @@ class AHCoreAgent:
                     display_name=getattr(
                         ident, "display_name", getattr(ident, "id", "Agent")
                     ),
-                    version=getattr(ident, "version", "0.1.0"),
+                    version=getattr(ident, "version", ""),
                 ),
                 runtime_config=runtime_config,
             )

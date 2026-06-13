@@ -50,7 +50,6 @@ class {{ agent_class }}(AHCoreAgent):
         identity = AgentIdentity(
             id="{{ agent_name }}",
             display_name="{{ display_name }}",
-            version="{{ version }}",
         )
 {% if brick_manifest %}
         manifest = BrickManifest(
@@ -106,6 +105,97 @@ class {{ agent_class }}(AHCoreAgent):
 {% else %}
         self._workflow = None
 {% endif %}
+
+        # v0.8.10: Auto-configure MCP runtime dependencies
+        self._ensure_mcp_ready()
+
+        
+
+    # ── MCP auto-configuration (v0.8.10) ────────────────────────────
+
+    def _ensure_mcp_ready(self):
+        """Auto-configure MCP runtime dependencies at startup.
+
+        Checks mcporter installation and MCP server connectivity.
+        Provides clear guidance if any component is missing.
+        """
+        import shutil
+        import subprocess
+        import json
+        from pathlib import Path
+
+        spec = self._load_spec()
+        if not spec:
+            return
+
+        mcp_servers = spec.get("interface", {}).get("mcp_servers", [])
+        if not mcp_servers:
+            return  # Not an MCP skill
+
+        issues = []
+
+        # 1. Check mcporter installation
+        if not shutil.which("mcporter"):
+            npm = shutil.which("npm")
+            if npm:
+                try:
+                    subprocess.run(
+                        [npm, "install", "-g", "mcporter"],
+                        capture_output=True, timeout=30,
+                    )
+                except Exception:
+                    pass
+            if not shutil.which("mcporter"):
+                issues.append(
+                    "mcporter not installed. Run: npm install -g mcporter"
+                )
+
+        # 2. Check MCP server configuration
+        if shutil.which("mcporter"):
+            try:
+                result = subprocess.run(
+                    ["mcporter", "list"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                for mcp in mcp_servers:
+                    name = mcp.get("name", "")
+                    if name and name not in result.stdout:
+                        issues.append(
+                            f"MCP server '{name}' not configured in mcporter. "
+                            f"Add it to ~/config/mcporter.json with baseUrl: "
+                            f"{mcp.get('url', '')}"
+                        )
+            except Exception:
+                pass
+
+        # 3. Check environment credentials
+        env_vars = spec.get("base", {}).get("env", [])
+        import os
+        for ev in env_vars:
+            if isinstance(ev, dict):
+                name = ev.get("name", "")
+                if name and not os.environ.get(name) and not os.environ.get(name.upper()):
+                    issues.append(
+                        f"Credential '{name}' not set. "
+                        f"Export it or add to runtime.toml"
+                    )
+
+        if issues:
+            self.ctx.add_to_history(
+                "system",
+                "MCP configuration needed:\n" + "\n".join(f"- {i}" for i in issues),
+            )
+
+    def _load_spec(self):
+        """Load AHSSPEC from agenthatch.yaml."""
+        try:
+            spec_path = Path(__file__).parent.parent.parent / "agenthatch.yaml"
+            if spec_path.exists():
+                import yaml
+                return yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return None
 
         
 

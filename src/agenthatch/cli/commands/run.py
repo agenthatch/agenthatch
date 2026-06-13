@@ -319,7 +319,7 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     console.print(
         Panel(
             f"[bold bright_blue]{agent.identity.display_name}[/] "
-            f"({agent.identity.id} {agent.identity.version})",
+            f"({agent.identity.id})",
             title="Agent", border_style="bright_blue"
         )
     )
@@ -739,7 +739,7 @@ def _render_status(agent: Any) -> str:
     lines = [
         f"[bold]Provider:[/bold] {agent.llm.provider_name if agent.llm else 'N/A'}",
         f"[bold]Model:[/bold] {agent.llm.model if agent.llm else 'N/A'}",
-        f"[bold]Agent:[/bold] {agent.identity.id} v{agent.identity.version}",
+        f"[bold]Agent:[/bold] {agent.identity.id}",
     ]
     if agent.llm:
         features = agent.llm.features

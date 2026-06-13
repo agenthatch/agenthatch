@@ -83,6 +83,7 @@ class HatchResult:
     compilability: bool = True
     tool_count: int = 0
     fidelity_score: float = 0.0
+    _mcp_skill: bool = False  # v0.8.10: True if skill uses MCP (for auto-install)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -297,68 +298,59 @@ def runtime_readiness_gate(
 ) -> ReadinessVerdict:
     """Determine if the agent can actually function in this environment.
 
+    v0.8.10: agenthatch NEVER blocks hatching. All issues are advisory.
+    The agent runtime will self-configure MCP, credentials, and packages
+    at startup. This gate only classifies issues for the hatch report.
+
     Classification rules:
-    - BLOCK: mcporter missing AND skill uses MCP
-    - BLOCK: mandatory credential missing
-    - BLOCK: >50% of tools have no executor (broken agent)
+    - WARN: mcporter missing (agent will try to install at runtime)
+    - WARN: mandatory credential missing (agent will prompt at runtime)
+    - WARN: tools with no executor (agent will handle gracefully)
     - WARN: optional MCP server unreachable
     - WARN: optional pip package not installed
-    - WARN: some tools have no executor (partial coverage)
     - READY: all mandatory satisfied
     """
     verdict = ReadinessVerdict(status="READY")
 
     # ── Tool executor coverage check ─────────────────────────────────
-    # v0.9: Verify each capability has at least one executor path.
     if ahspec:
         tool_gaps = _check_tool_executor_coverage(ahspec)
         bare_tools = [t for t, kind in tool_gaps if kind == "none"]
-        _mcp_tools = [t for t, kind in tool_gaps if kind == "mcp"]
-        _script_tools = [t for t, kind in tool_gaps if kind == "script"]
 
         if bare_tools:
-            coverage = 1.0 - len(bare_tools) / max(len(tool_gaps), 1)
-            if coverage < 0.5:
-                verdict.status = "BLOCK"
-                verdict.missing_mandatory.append(
-                    f"{len(bare_tools)}/{len(tool_gaps)} tools have no executor "
-                    f"(no MCP, no script, no API template). "
-                    f"Bare tools: {', '.join(bare_tools[:5])}"
-                    + ("..." if len(bare_tools) > 5 else "")
-                )
-                verdict.fix_suggestions.append(
-                    "Add scripts or MCP servers for bare tools in agenthatch.yaml"
-                )
-            else:
-                verdict.missing_optional.append(
-                    f"{len(bare_tools)} tools are description-only: "
-                    f"{', '.join(bare_tools[:3])}"
-                    + ("..." if len(bare_tools) > 3 else "")
-                )
+            verdict.missing_optional.append(
+                f"{len(bare_tools)}/{len(tool_gaps)} tools are description-only "
+                f"(will be handled by agent runtime): "
+                f"{', '.join(bare_tools[:5])}"
+                + ("..." if len(bare_tools) > 5 else "")
+            )
+            verdict.fix_suggestions.append(
+                "agent runtime will self-configure MCP or provide fallback"
+            )
 
-    # Mandatory checks
+    # v0.8.10: mcporter missing → WARN, never BLOCK
     if dep_manifest.mcp_servers and not env_report.mcporter:
-        verdict.status = "BLOCK" if verdict.status != "BLOCK" else "BLOCK"
+        verdict.status = "WARN"
         verdict.mcporter_installed = False
-        verdict.missing_mandatory.append(
-            "mcporter CLI not found. MCP tools will fail. "
-            "Install with: npm install -g mcporter"
+        verdict.missing_optional.append(
+            "mcporter CLI not found. Agent will attempt auto-install at startup."
         )
         verdict.fix_suggestions.append(
-            "npm install -g mcporter && mcporter config set token YOUR_TOKEN"
+            "npm install -g mcporter (or agent will try to auto-install)"
         )
 
+    # v0.8.10: credentials missing → WARN, never BLOCK
     for key, present in env_report.credentials.items():
         if not present:
             verdict.all_credentials_present = False
-            verdict.missing_mandatory.append(
-                f"Credential '{key}' not configured in environment or runtime.toml. "
-                f"Add it to the [credentials] section."
+            verdict.missing_optional.append(
+                f"Credential '{key}' not configured. "
+                f"Agent will prompt for configuration at startup."
             )
             verdict.fix_suggestions.append(
                 f"Add '{key} = \"your-value\"' to runtime.toml [credentials] section"
             )
-            if verdict.status != "BLOCK":
+            if verdict.status != "WARN":
                 verdict.status = "WARN"
 
     # Optional checks (WARN only, not BLOCK)
@@ -385,11 +377,9 @@ def runtime_readiness_gate(
                 f"Check network, VPN, and server URL."
             )
 
-    # Check if all mandatory requirements are met
-    if not verdict.missing_mandatory and not verdict.missing_optional:
+    # v0.8.10: Never BLOCK. Only READY or WARN.
+    if not verdict.missing_optional:
         verdict.status = "READY"
-    elif verdict.missing_mandatory:
-        verdict.status = "BLOCK"
     else:
         verdict.status = "WARN"
 
@@ -503,11 +493,14 @@ def format_hatch_report(
         lines.append("")
 
     # Status
-    status_icon = {"READY": "PASS", "WARN": "WARN", "BLOCK": "FAIL"}.get(
+    status_icon = {"READY": "PASS", "WARN": "ADVISORY", "BLOCK": "ADVISORY"}.get(
         verdict.status, "UNKNOWN"
     )
     lines.append(f"  Status:      {status_icon} {verdict.status}")
     lines.append("")
+    if verdict.status == "WARN":
+        lines.append("  Note: agent will self-configure at runtime. No manual fix needed.")
+        lines.append("")
 
     # Missing mandatory
     if verdict.missing_mandatory:
@@ -569,4 +562,5 @@ def run_readiness_phase(
         agent_path=agent_path,
         readiness=verdict,
         report=report,
+        _mcp_skill=bool(dep_manifest.mcp_servers),
     )
