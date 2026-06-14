@@ -334,9 +334,10 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     # After EarlyInputReader modifies termios during streaming, prompt_toolkit
     # may fail the CPR (Cursor Position Request) probe and print a noisy
     # "WARNING: your terminal doesn't support cursor position requests (CPR)."
-    # Pre-marking CPR as not-supported skips the probe entirely.
+    # prompt_toolkit's Vt100_Output.responds_to_cpr checks self.enable_cpr
+    # first — setting it to False skips the probe + warning entirely.
     _pt_output = create_output()
-    _pt_output.ask_for_cpr = lambda: None  # no-op: skip CPR probe + warning
+    _pt_output.enable_cpr = False
 
     try:
         early_input: str | None = None
@@ -367,8 +368,21 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
             console.print()
             console.print(f"[bold bright_blue]{agent.identity.display_name}[/]")
 
+            # v0.9: Per-turn KeyboardInterrupt handling.
+            # Ctrl+C during a turn interrupts THAT turn only — agent stays alive.
+            # This covers the race window between EarlyInputReader.stop() and
+            # the next EarlyInputReader.start() where ISIG is re-enabled.
             try:
                 response_text, early_input = _stream_response(agent, user_input)
+            except KeyboardInterrupt:
+                # User pressed Ctrl+C outside of the EarlyInputReader window.
+                # Treat as mid-turn interrupt: reset agent flag, show message,
+                # and continue the conversation loop.
+                console.print("[bold yellow]⏸  Interrupted[/bold yellow]")
+                if hasattr(agent, '_interrupted'):
+                    agent._interrupted = True
+                response_text = "User pressed Ctrl+C. Stop what you are doing and ask what the user wants next."
+                early_input = None
             except Exception as e:
                 response_text = f"Agent error: {e}"
                 early_input = None
@@ -383,7 +397,7 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
             console.print(Markdown(response_text))
             console.print()
 
-    except (KeyboardInterrupt, SystemExit, EOFError):
+    except (SystemExit, EOFError):
         console.print()
 
 
