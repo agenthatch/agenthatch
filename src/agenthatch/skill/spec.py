@@ -194,6 +194,24 @@ class BaseSpec(BaseModel):
     env: list[EnvVar] = []
     dependencies: list[str] = []
 
+    @field_validator("timeout", mode="before")
+    @classmethod
+    def _coerce_timeout(cls, v: Any) -> str:
+        """Coerce int/float timeout values to string format."""
+        if isinstance(v, (int, float)):
+            return f"{int(v)}s"
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned:
+                return "60s"
+            normalized = cleaned.rstrip("s") + "s"
+            try:
+                int(normalized.rstrip("s"))
+                return normalized
+            except ValueError:
+                return "60s"
+        return "60s"
+
 
 def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
     """Coerce raw dict values to BaseSpec-compatible types.

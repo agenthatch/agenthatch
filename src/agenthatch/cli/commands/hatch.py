@@ -117,7 +117,7 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return client.chat(messages=messages, temperature=0.3, max_tokens=4096)
+        return client.chat(messages=messages, temperature=0.3, max_tokens=16384)
 
     return chat_fn
 

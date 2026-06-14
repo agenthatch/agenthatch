@@ -166,7 +166,7 @@ class {{ agent_class }}(AHCoreAgent):
             config_dir = Path.home() / "config"
             config_file = config_dir / "mcporter.json"
 
-            # Check if Cooper MCP server is already configured
+            # Check if MCP server is already configured
             mcp_name = mcp_servers[0].get("name", "")
             need_write = True
             if config_file.exists():

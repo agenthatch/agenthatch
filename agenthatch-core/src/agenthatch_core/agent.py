@@ -300,20 +300,46 @@ class AHCoreAgent:
                     source="spec",
                 )
             elif sandbox_usable:
-                executor = _provide_script_executor(
-                    cap_name, self.sandbox, self._agent_root,
-                    script_name=cap_to_script.get(cap_name),
-                )
-                self.capbus.register(
-                    name=cap_name,
-                    executor=executor,
-                    schema={
-                        "name": cap_name,
-                        "description": cap.get("description", cap_name),
-                        "parameters": schema.get("parameters", schema),
-                    },
-                    source="spec",
-                )
+                script_name = cap_to_script.get(cap_name)
+                # v0.8.21: Verify script exists before registering sandbox executor.
+                # If the script doesn't exist, register as description-only so that
+                # _register_python_tool() can provide the real Python implementation.
+                # This fixes the bug where non-existent sandbox scripts (e.g.,
+                # "python create_docx.py") shadow real Python tool implementations.
+                script_exists = False
+                if script_name and scripts_dir and (scripts_dir / script_name).exists():
+                    script_exists = True
+                elif scripts_dir and scripts_dir.is_dir():
+                    # Legacy fallback: check if {cap_name}.py exists
+                    script_exists = (scripts_dir / f"{cap_name}.py").exists()
+                if script_exists:
+                    executor = _provide_script_executor(
+                        cap_name, self.sandbox, self._agent_root,
+                        script_name=script_name,
+                    )
+                    self.capbus.register(
+                        name=cap_name,
+                        executor=executor,
+                        schema={
+                            "name": cap_name,
+                            "description": cap.get("description", cap_name),
+                            "parameters": schema.get("parameters", schema),
+                        },
+                        source="spec",
+                    )
+                else:
+                    # No valid script — register as description-only.
+                    # Python tools (registered later via _register_python_tool)
+                    # will provide the real executor.
+                    self.capbus.register(
+                        name=cap_name,
+                        schema={
+                            "name": cap_name,
+                            "description": cap.get("description", cap_name),
+                            "parameters": schema.get("parameters", schema),
+                        },
+                        source="spec",
+                    )
             else:
                 # v0.8: External skill agent (direct subprocess, no MCP)
                 # Use CLIExecutor for CLI-based capabilities
@@ -427,9 +453,13 @@ class AHCoreAgent:
                 "name": tool.__name__,
                 "description": (tool.__doc__ or "").strip().split("\n")[0],
                 "parameters": params,
+                "output_schema": {"type": "string"},
             },
             source="user",
         )
+        # v0.8.21: Also register output_schema in _output_schemas dict
+        # so _validate_output() knows this tool returns plain text, not JSON.
+        self.capbus._output_schemas[tool.__name__] = {"type": "string"}
 
     # ── conversation API ──────────────────────────────────────────────
 

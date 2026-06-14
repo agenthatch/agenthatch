@@ -115,6 +115,7 @@ def _anthropic_message_to_openai_choice(
     """Convert Anthropic message to OpenAI-compatible Choice."""
     content = ""
     tool_calls: list[_ToolCall] = []
+    thinking_content = ""
 
     raw_content = message.content if hasattr(message, "content") else message.get("content", [])
     for block in raw_content:
@@ -134,6 +135,13 @@ def _anthropic_message_to_openai_choice(
                 id=tc_id,
                 function={"name": tc_name, "arguments": json.dumps(tc_input)},
             ))
+        elif ctype == "thinking":
+            thinking = block.get("thinking", "") if isinstance(block, dict) else getattr(block, "thinking", "")
+            thinking_content += thinking
+
+    # Fallback: if no text content but thinking blocks exist, use thinking as content
+    if not content and thinking_content:
+        content = thinking_content
 
     finish_reason = "stop"
     if stop_reason == "tool_use":

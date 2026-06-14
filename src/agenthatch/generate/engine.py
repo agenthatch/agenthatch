@@ -615,35 +615,119 @@ class GenerateEngine:
                 "content": skill_md.read_text(encoding="utf-8"),
             })
 
-        # All reference files
-        refs_dir = skill_dir / "skills" / "references"
-        if refs_dir.is_dir():
-            for ref_file in sorted(refs_dir.glob("*")):
-                if ref_file.is_file() and ref_file.suffix in (".md", ".txt"):
-                    try:
-                        content = ref_file.read_text(encoding="utf-8")
-                        if len(content) > 0:
-                            context_files.append({
-                                "path": f"skills/references/{ref_file.name}",
-                                "content": content,
-                            })
-                    except Exception:
-                        pass
+        # All reference files (check both skills/references/ and root-level)
+        for refs_dir in (
+            skill_dir / "skills" / "references",
+            skill_dir,
+        ):
+            if refs_dir.is_dir():
+                for ref_file in sorted(refs_dir.glob("*")):
+                    if ref_file.is_file() and ref_file.suffix in (".md", ".txt"):
+                        # Skip SKILL.md (already added) and agenthatch.yaml
+                        if ref_file.name in ("SKILL.md", "agenthatch.yaml"):
+                            continue
+                        try:
+                            content = ref_file.read_text(encoding="utf-8")
+                            if len(content) > 0:
+                                rel = ref_file.relative_to(skill_dir)
+                                context_files.append({
+                                    "path": str(rel),
+                                    "content": content,
+                                })
+                        except Exception:
+                            pass
 
-        # All script files (as reference for implementation patterns)
-        scripts_dir = skill_dir / "skills" / "scripts"
-        if scripts_dir.is_dir():
-            for script_file in sorted(scripts_dir.glob("*")):
-                if script_file.is_file():
-                    try:
-                        content = script_file.read_text(encoding="utf-8")
-                        if len(content) > 0:
-                            context_files.append({
-                                "path": f"skills/scripts/{script_file.name}",
-                                "content": content,
-                            })
-                    except Exception:
-                        pass
+        # All script files (check both skills/scripts/ and root-level scripts/)
+        for scripts_dir in (
+            skill_dir / "skills" / "scripts",
+            skill_dir / "scripts",
+        ):
+            if scripts_dir.is_dir():
+                for script_file in sorted(scripts_dir.glob("*")):
+                    if script_file.is_file():
+                        try:
+                            content = script_file.read_text(encoding="utf-8")
+                            if len(content) > 0:
+                                rel = script_file.relative_to(skill_dir)
+                                context_files.append({
+                                    "path": str(rel),
+                                    "content": content,
+                                })
+                        except Exception:
+                            pass
+
+        # Template files (both skills/templates/ and root-level templates/)
+        for tmpl_dir in (
+            skill_dir / "skills" / "templates",
+            skill_dir / "templates",
+        ):
+            if tmpl_dir.is_dir():
+                for tmpl_file in sorted(tmpl_dir.glob("*")):
+                    if tmpl_file.is_file() and tmpl_file.suffix in (
+                        ".js", ".html", ".css", ".py", ".json", ".yaml", ".txt",
+                    ):
+                        try:
+                            content = tmpl_file.read_text(encoding="utf-8")
+                            if len(content) > 0:
+                                # Truncate large template files to 8KB
+                                if len(content) > 8192:
+                                    content = (
+                                        content[:4096]
+                                        + "\n... [truncated] ...\n"
+                                        + content[-4096:]
+                                    )
+                                rel = tmpl_file.relative_to(skill_dir)
+                                context_files.append({
+                                    "path": str(rel),
+                                    "content": content,
+                                })
+                        except Exception:
+                            pass
+
+        # ── Context size management ─────────────────────────────────
+        # Truncate individual large files (keep head + tail for context)
+        MAX_FILE_CHARS = 32768  # ~8K tokens
+        for cf in context_files:
+            if len(cf["content"]) > MAX_FILE_CHARS:
+                half = MAX_FILE_CHARS // 2
+                cf["content"] = (
+                    cf["content"][:half]
+                    + f"\n\n... [{len(cf['content']) - MAX_FILE_CHARS} chars truncated] ...\n\n"
+                    + cf["content"][-half:]
+                )
+
+        # Ensure total context doesn't exceed ~200K chars (~50K tokens)
+        TOTAL_MAX = 200000
+        total_size = sum(len(cf["content"]) for cf in context_files)
+        if total_size > TOTAL_MAX:
+            # Prioritize: SKILL.md first, then references, then scripts, then templates
+            priority_order = {"SKILL.md": 0}
+            for cf in context_files:
+                path = cf["path"]
+                if path not in priority_order:
+                    if path.endswith(".md") or path.endswith(".txt"):
+                        priority_order[path] = 1  # references
+                    elif "/scripts/" in path or path.startswith("scripts/"):
+                        priority_order[path] = 2  # scripts
+                    else:
+                        priority_order[path] = 3  # templates
+            context_files.sort(key=lambda cf: (priority_order.get(cf["path"], 3), cf["path"]))
+            # Drop lowest priority files until under limit
+            kept: list[dict[str, str]] = []
+            running = 0
+            for cf in context_files:
+                if running + len(cf["content"]) <= TOTAL_MAX:
+                    kept.append(cf)
+                    running += len(cf["content"])
+                else:
+                    logger.info(
+                        "Dropping %s from AI context (total would exceed %d chars)",
+                        cf["path"],
+                        TOTAL_MAX,
+                    )
+            context_files = kept
+            # Re-sort back to original path order
+            context_files.sort(key=lambda cf: cf["path"])
 
         # Build the file context block
         file_context = ""
@@ -678,36 +762,44 @@ class GenerateEngine:
             "1. A full skill directory context (SKILL.md, reference files, scripts)\n"
             "2. A list of tool definitions with their metadata\n\n"
             "Generate a complete Python function body for EACH tool. "
-            "Follow these rules:\n"
-            "- For script-backed tools: use the SKILLS_SCRIPTS_DIR constant (already defined) "
-            "to locate scripts, e.g. SKILLS_SCRIPTS_DIR / 'script_name'\n"
+            "Follow these rules:\n\n"
+            "INDENTATION RULES (CRITICAL — incorrect indentation causes SyntaxErrors):\n"
+            "- The code you generate will be inserted into a function body at indent 4.\n"
+            "- Start your code at indent 0 (no leading spaces).\n"
+            "- Each nested block (if/else/try/except/for/while/with) adds 4 spaces.\n"
+            "- Example of correct structure:\n"
+            "  if condition:\n"
+            "      do_something()\n"
+            "      try:\n"
+            "          result = inner_call()\n"
+            "          if result.ok:\n"
+            "              return result.data\n"
+            "          else:\n"
+            "              return f'Error: {result.msg}'\n"
+            "      except Exception as e:\n"
+            "          return str(e)\n"
+            "  else:\n"
+            "      return 'condition not met'\n\n"
+            "BACKEND RULES:\n"
+            "- For script-backed tools: use SKILLS_SCRIPTS_DIR / 'script_name'\n"
             "- For MCP-backed tools: return a placeholder (MCP handles execution)\n"
-            "- For API template tools: generate HTTP requests based on the skill context\n"
-            "- For CLI-backed tools (backend=none but skill has CLI dependencies like "
-            "'agent-browser'): read the CLI commands from SKILL.md and generate "
-            "subprocess.run() calls. Use the exact CLI command syntax from the skill "
-            "context. Example: if SKILL.md shows 'agent-browser open <url>', generate "
-            "subprocess.run(['agent-browser', 'open', url], capture_output=True, "
-            "text=True, timeout=120). Return stdout.strip() on success, "
-            "str(stderr) or exception message on failure.\n"
-            "- For other tools without backend: read SKILL.md code examples,"
-            " generate a real implementation\n"
-            "- Do NOT use **kwargs — use the exact parameter names from the tool definition\n"
+            "- For API template tools: generate HTTP requests from skill context\n"
+            "- For CLI-backed tools (backend=none, skill has CLI deps like 'agent-browser'):\n"
+            "  read CLI commands from SKILL.md and generate subprocess.run() calls.\n"
+            "  Example: subprocess.run(['agent-browser', 'open', url],\n"
+            "      capture_output=True, text=True, timeout=120)\n"
+            "- For other tools without backend: generate real implementation from context\n"
+            "- Do NOT use **kwargs — use exact parameter names from tool definition\n"
             "- Include proper error handling and return meaningful results\n"
-            "- Import only from stdlib or packages mentioned in the skill context\n"
-            "- Use SKILLS_SCRIPTS_DIR (a pathlib.Path) for all script paths,"
-            " never hardcode paths\n"
-            "- CRITICAL: Code MUST follow Python indentation rules. "
-            "Every block (try/except, if/else, for, with, def) "
-            "MUST be indented 4 spaces deeper than the parent line. "
-            "Flat indentation (all lines at same level) is INVALID.\n\n"
-            "Output format: Return a JSON object mapping func_name → implementation body.\n"
-            "The function body should be the code INSIDE the function"
-            " (after the signature and docstring).\n"
-            'Example: {"fetch_url": "import subprocess\\n    try:\\n        result'
-            ' = subprocess.run([url], capture_output=True, text=True)\\n'
-            '        return result.stdout.strip()\\n'
-            '    except Exception as e:\\n        return str(e)"}'
+            "- Import only stdlib or packages from the skill context\n\n"
+            "Output format: JSON object mapping func_name → implementation body.\n"
+            "The body is the code INSIDE the function (after signature and docstring).\n"
+            'Example: {"fetch_url": "import subprocess\\n'
+            'try:\\n'
+            '    result = subprocess.run([url], capture_output=True, text=True)\\n'
+            '    return result.stdout.strip()\\n'
+            'except Exception as e:\\n'
+            '    return str(e)"}'
         )
 
         # ── Step 4: User prompt ─────────────────────────────────────
@@ -734,11 +826,30 @@ class GenerateEngine:
         )
 
         # ── Step 5: Call LLM ────────────────────────────────────────
-        try:
-            response = chat_fn(system_prompt, user_prompt)
-        except Exception as e:
-            logger.error("AI tool generation LLM call failed: %s", e)
-            return {}
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = chat_fn(system_prompt, user_prompt)
+                if not response or not response.strip():
+                    logger.warning(
+                        "AI tool generation returned empty response "
+                        "(attempt %d/%d)",
+                        attempt + 1,
+                        max_retries + 1,
+                    )
+                    if attempt < max_retries:
+                        continue
+                    return {}
+                break
+            except Exception as e:
+                logger.error(
+                    "AI tool generation LLM call failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    max_retries + 1,
+                    e,
+                )
+                if attempt >= max_retries:
+                    return {}
 
         # ── Step 6: Parse response ──────────────────────────────────
         try:
@@ -763,19 +874,61 @@ class GenerateEngine:
                     if func_name in tool_names and isinstance(body, str) and len(body) > 10:
                         # Normalize indentation: strip AI's own indentation, then add
                         # consistent 4-space indent for template insertion.
-                        # v0.8.17: Use line.lstrip() to discard the AI's own
-                        # inconsistent indentation before adding our prefix.
-                        # (was: " " * 4 + line — double-indented when AI
-                        #  already added indentation, causing SyntaxErrors)
+                        # v0.8.19: Use the AI's original indentation (which is usually
+                        # mostly correct) rather than destroying it with
+                        # _reindent_flat_code.  Just add base_indent to
+                        # every line and validate the result.
                         body_lines = body.strip().split("\n")
-                        # v0.8.17: Reconstruct block indentation from flat AI code.
-                        # Many models (especially non-frontier) generate code with
-                        # all lines at the same indentation level, missing Python's
-                        # required block structure (try/if/for bodies).
-                        indented = GenerateEngine._reindent_flat_code(
-                            body_lines, base_indent=4
+                        indented_lines = [" " * 4 + line for line in body_lines]
+                        indented = "\n".join(indented_lines)
+
+                        # Validate: try to compile the generated code.
+                        # Wrap in a dummy function since the code is at
+                        # indent 4 (it will be inserted into a function body).
+                        wrapper = (
+                            "def _validate():\n"
+                            + indented
+                            + "\n"
                         )
-                        valid_tools[func_name] = indented
+                        valid = True
+                        error_lines: list[int] = []
+                        try:
+                            compile(wrapper, f"<tool:{func_name}>", "exec")
+                        except SyntaxError as se:
+                            valid = False
+                            if se.lineno:
+                                # Adjust: wrapper adds 1 line (def _validate),
+                                # so error line in indented code is lineno - 1
+                                code_lineno = se.lineno - 1
+                                error_lines.append(code_lineno)
+                                # v0.8.19: Also collect subsequent lines
+                                error_lines.append(code_lineno + 1)
+                                error_lines.append(code_lineno + 2)
+                            # Attempt normalization with error context
+                            try:
+                                fixed = GenerateEngine._normalize_indentation(
+                                    indented_lines, error_lines
+                                )
+                                fixed_str = "\n".join(fixed)
+                                fixed_wrapper = (
+                                    "def _validate():\n"
+                                    + fixed_str
+                                    + "\n"
+                                )
+                                compile(fixed_wrapper, f"<tool:{func_name}>", "exec")
+                                indented = fixed_str
+                                valid = True
+                            except SyntaxError:
+                                pass
+
+                        if valid:
+                            valid_tools[func_name] = indented
+                        else:
+                            logger.warning(
+                                "AI-generated code for tool '%s' has syntax errors, "
+                                "skipping. Tool will use template fallback.",
+                                func_name,
+                            )
 
             # Extract reference structures
             references = {}
@@ -1175,6 +1328,57 @@ class GenerateEngine:
                 colon_ended = not prev_line.rstrip().endswith(":")
                 if colon_ended and deeper and fixed[idx].strip():
                     fixed[idx] = " " * prev_indent + fixed[idx].lstrip(" ")
+
+            # v0.8.19: Fix block-breaker keywords (else/elif/except/finally)
+            # that are at the wrong indent level.  The AI sometimes places
+            # them at the parent block's body indent instead of the correct
+            # (deeper) indent.
+            #
+            # Heuristic: try increasing the indent of the breaker and any
+            # immediately following lines that belong to its body (indent
+            # >= curr_indent, but stop at another block keyword at the
+            # same indent level).
+            stripped_line = fixed[idx].lstrip()
+            if stripped_line.split():
+                first_tok = stripped_line.split()[0].rstrip(":")
+                if first_tok in ("else", "elif", "except", "finally"):
+                    curr_indent = len(fixed[idx]) - len(fixed[idx].lstrip(" "))
+                    bumped = list(fixed)
+                    # Bump this line
+                    bumped[idx] = " " * (curr_indent + 4) + stripped_line
+                    # Bump following lines that are at >= curr_indent,
+                    # but stop at another block keyword at curr_indent
+                    BLOCK_KWS = frozenset([
+                        "if", "elif", "else", "try", "except", "finally",
+                        "for", "while", "with", "def", "class",
+                    ])
+                    for bi in range(idx + 1, len(bumped)):
+                        bi_line = bumped[bi]
+                        bi_stripped = bi_line.lstrip()
+                        if not bi_stripped:
+                            bumped[bi] = " " * (curr_indent + 4) + bi_stripped
+                            continue
+                        bi_indent = len(bi_line) - len(bi_stripped)
+                        if bi_indent >= curr_indent:
+                            # Stop at another block keyword at same indent
+                            bi_first = bi_stripped.split()[0] if bi_stripped.split() else ""
+                            bi_tok = bi_first.rstrip(":")
+                            if bi_indent == curr_indent and bi_tok in BLOCK_KWS:
+                                break
+                            bumped[bi] = " " * (bi_indent + 4) + bi_stripped
+                        else:
+                            break  # indent went below — end of this block
+                    # Test if the bump fixes the issue
+                    try:
+                        bumped_wrapper = (
+                            "def _v():\n"
+                            + "\n".join(bumped)
+                            + "\n"
+                        )
+                        compile(bumped_wrapper, "<fix>", "exec")
+                        fixed = bumped
+                    except SyntaxError:
+                        pass
 
         return fixed
 

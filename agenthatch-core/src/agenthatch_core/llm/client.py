@@ -348,6 +348,47 @@ class LLMClient:
 
     # ── Structured output (Instructor pattern) ───────────────────────
 
+    def _chat_structured_raw(
+        self,
+        messages: list[dict[str, Any]],
+        response_model: type,
+        model: str | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+    ) -> Any:
+        """Raw JSON parsing fallback for structured output.
+
+        Used when instructor.from_openai() is unavailable (e.g. with
+        AnthropicAdapter for custom providers).  Calls the chat API
+        directly and parses the JSON response.
+        """
+        response = self._retry(
+            self._client.chat.completions.create,
+            model=model or self._model,
+            messages=messages,  # type: ignore[arg-type]
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        self.last_usage = getattr(response, "usage", None)
+        msg = response.choices[0].message
+        content = self._extract_content(msg)
+        if not content:
+            raise ValueError(
+                "chat_structured: model returned empty content"
+            )
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            from agenthatch_core.context.manager import _extract_balanced_json
+            json_strs = _extract_balanced_json(content)
+            if json_strs:
+                parsed = json.loads(json_strs[0])
+            else:
+                raise ValueError(
+                    "chat_structured: no valid JSON found in response"
+                )
+        return response_model.model_validate(parsed)
+
     def chat_structured(
         self,
         messages: list[dict[str, Any]],
@@ -362,12 +403,27 @@ class LLMClient:
 
         Passes extra_body for thinking when enabled. Falls back gracefully
         if Instructor + thinking are incompatible.
-        """
-        import instructor
 
+        v0.8.19: When requires_anthropic_adapter is True, skip instructor
+        entirely — AnthropicAdapter is not an openai.OpenAI instance and
+        instructor.from_openai() will fail with a warning + no valid JSON.
+        """
         extra = self._build_thinking_body() if (
             thinking if thinking is not None else self._thinking
         ) else None
+
+        # v0.8.19: Skip instructor for AnthropicAdapter — it is not an
+        # OpenAI client and instructor.from_openai() will fail.
+        if self._features.requires_anthropic_adapter:
+            return self._chat_structured_raw(
+                messages=messages,
+                response_model=response_model,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
+        import instructor
 
         client = instructor.from_openai(self._client, mode=instructor.Mode.JSON)
         call_kwargs: dict[str, Any] = dict(
@@ -391,32 +447,13 @@ class LLMClient:
                 except Exception:
                     pass
             # Fallback: raw JSON parsing (pre-v0.8 behavior)
-            response = self._retry(
-                self._client.chat.completions.create,
-                model=model or self._model,
-                messages=messages,  # type: ignore[arg-type]
+            return self._chat_structured_raw(
+                messages=messages,
+                response_model=response_model,
+                model=model,
                 temperature=0.0,
                 max_tokens=4096,
             )
-            self.last_usage = getattr(response, "usage", None)
-            msg = response.choices[0].message
-            content = self._extract_content(msg)
-            if not content:
-                raise ValueError(
-                    "chat_structured: model returned empty content"
-                ) from e
-            try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError as e2:
-                from agenthatch_core.context.manager import _extract_balanced_json
-                json_strs = _extract_balanced_json(content)
-                if json_strs:
-                    parsed = json.loads(json_strs[0])
-                else:
-                    raise ValueError(
-                        "chat_structured: no valid JSON found in response"
-                    ) from e2
-            return response_model.model_validate(parsed)
 
     # ── Tool Calling ─────────────────────────────────────────────────
 
