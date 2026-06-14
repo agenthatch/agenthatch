@@ -67,6 +67,21 @@ def {{ tool.func_name }}() -> Any:
 {% elif tool.backend_kind == "api_template" %}
     # API template will be injected by the API template loader
     return f"[API template tool: {{ tool.name }}] - call this capability to execute"
+{% elif tool.backend_kind == "cli_tool" %}
+    # v0.9: CLI tool wrapper — the skill declares base.dependencies
+    # containing this binary.  Pass tool params as CLI arguments.
+    _binary = "{{ dependencies[0] }}"
+    _args = [_binary]
+    {% for param_name, _, _ in tool.params %}
+    if {{ param_name }} is not None:
+        _args.append(str({{ param_name }}))
+    {% endfor %}
+    _result = subprocess.run(
+        _args, capture_output=True, text=True, timeout=120,
+    )
+    if _result.returncode != 0:
+        return f"ERROR (exit {_result.returncode}): {_result.stderr.strip()}"
+    return _result.stdout.strip()
 {% else %}
     # v0.8.19: AI tool generation failed or was skipped.
     # The tool is a non-functional stub — the agent will see an error

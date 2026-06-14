@@ -103,6 +103,20 @@ class GenerateEngine:
         intent = ahspec.get("intent", {})
         interface = ahspec.get("interface", {})
         base = ahspec.get("base", {})
+
+        # v0.9: Harness LLM may drop base.dependencies declared in SKILL.md
+        # YAML frontmatter.  Merge them back so cli_tool backends are preserved.
+        if skill_dir and (not base.get("dependencies") or base["dependencies"] == []):
+            try:
+                from agenthatch.skill.parser import _best_effort_parse_yaml
+                fm, _, _ = _best_effort_parse_yaml(Path(skill_dir))
+                if isinstance(fm, dict):
+                    fm_deps = fm.get("base", {}).get("dependencies", [])
+                    if fm_deps:
+                        base["dependencies"] = fm_deps
+            except Exception:
+                pass
+
         instructions = ahspec.get("instructions", {})
 
         agent_name = identity.get("id", "unknown-agent")
@@ -157,6 +171,7 @@ class GenerateEngine:
             mcp_servers=mcp_servers,
             script_map=script_map,
             api_templates=api_templates,
+            dependencies=base.get("dependencies", []) if base else [],
         )
 
         # v0.7: Brick manifest from skill classification
@@ -433,14 +448,29 @@ class GenerateEngine:
                     stem_flat = script_stem.replace("_", "").replace("-", "")
                     if cap_flat in stem_flat or stem_flat in cap_flat:
                         cap_to_script[cap_name] = script_name
-                        break
 
-        # Strip "skills/scripts/" prefix from script paths.
-        # The generated tools.py uses SKILLS_SCRIPTS_DIR (already skills/scripts/)
+        # Approach 3: Fallback — any remaining unmatched capabilities
+        # that share a workflow step with a script also get that script.
+        # This handles multi-tool skills backed by a single script
+        # (e.g. calc_add/calc_subtract/calc_multiply/calc_divide → calc.py).
+        unmatched = cap_names - set(cap_to_script.keys())
+        if unmatched and len(cap_to_script) > 0:
+            # Use the most common script from already-matched caps
+            script_counts: dict[str, int] = {}
+            for cap_name, script_name in cap_to_script.items():
+                script_counts[script_name] = script_counts.get(script_name, 0) + 1
+            main_script = max(script_counts, key=script_counts.get)  # type: ignore[arg-type]
+            for cap_name in unmatched:
+                cap_to_script[cap_name] = main_script
+
+        # Strip "skills/scripts/" or "scripts/" prefix from script paths.
+        # The generated tools.py uses SKILLS_SCRIPTS_DIR (already .../skills/scripts/)
         # so we need just the filename, not the full resource path.
         for cap_name, script_path in list(cap_to_script.items()):
             if script_path.startswith("skills/scripts/"):
                 cap_to_script[cap_name] = script_path[len("skills/scripts/"):]
+            elif script_path.startswith("scripts/"):
+                cap_to_script[cap_name] = script_path[len("scripts/"):]
 
         return cap_to_script
 
@@ -450,6 +480,7 @@ class GenerateEngine:
         mcp_servers: list[dict[str, Any]] | None = None,
         script_map: dict[str, str] | None = None,
         api_templates: list[dict[str, Any]] | None = None,
+        dependencies: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Extract full tool metadata from interface.provides.
 
@@ -539,6 +570,13 @@ class GenerateEngine:
                     backend_kind = "mcp"
                     mcp_server = first_mcp["name"]
                     is_mcp = True
+
+            # v0.9: If no backend was detected but base.dependencies declares
+            # CLI tools, treat the tool as a CLI wrapper.  This handles skills
+            # where all capabilities are backed by one CLI binary
+            # (e.g. agent-browser → browser_navigate, browser_snapshot, etc.).
+            if backend_kind == "none" and dependencies:
+                backend_kind = "cli_tool"
 
             result.append({
                 "name": name,
