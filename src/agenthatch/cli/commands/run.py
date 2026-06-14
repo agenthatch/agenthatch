@@ -24,6 +24,7 @@ from agenthatch_core.config import (
 from agenthatch_core.loop.agent_loop import RichToolCallEvent
 from agenthatch_core.loop.token_counter import ThinkingDelta
 from prompt_toolkit import prompt as pt_prompt
+from prompt_toolkit.output.defaults import create_output
 from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
 from rich.markdown import Markdown
@@ -329,6 +330,14 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     )
     console.print()
 
+    # v0.9: Shared prompt_toolkit output with CPR pre-disabled.
+    # After EarlyInputReader modifies termios during streaming, prompt_toolkit
+    # may fail the CPR (Cursor Position Request) probe and print a noisy
+    # "WARNING: your terminal doesn't support cursor position requests (CPR)."
+    # Pre-marking CPR as not-supported skips the probe entirely.
+    _pt_output = create_output()
+    _pt_output.ask_for_cpr = lambda: None  # no-op: skip CPR probe + warning
+
     try:
         early_input: str | None = None
         while True:
@@ -343,6 +352,7 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
                     user_input = pt_prompt(
                         [("class:prompt", "You: ")],
                         style=PT_STYLE,
+                        output=_pt_output,
                     )
                 except EOFError:
                     raise

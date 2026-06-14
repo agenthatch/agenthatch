@@ -1,0 +1,228 @@
+{
+  "skill": "web-fetcher",
+  "model": "deepseek-v4-pro",
+  "overall_score": 0.887037037037037,
+  "dimension_averages": {
+    "FC": 0.7222222222222222,
+    "TSA": 0.9,
+    "RQ": 0.6999999999999998,
+    "EH": 1.0,
+    "IA": 1.0,
+    "HD": 1.0
+  },
+  "scenarios": [
+    {
+      "name": "basic_fetch",
+      "passed": true,
+      "scores": {
+        "FC": 0.5,
+        "TSA": 0.8,
+        "RQ": 0.7
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "Fetch the content of https://example.com",
+          "response": "Fetched https://example.com and returned the extracted plain text content from the standard Example Domain placeholder page.",
+          "evaluation": {
+            "FC": 0.5,
+            "TSA": 0.8,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.7,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    },
+    {
+      "name": "invalid_url",
+      "passed": true,
+      "scores": {
+        "EH": 1.0,
+        "IA": 1.0
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "Fetch the content of not-a-valid-url",
+          "response": "[Web Fetch Result]\n\nURL: not-a-valid-url\nStatus: Invalid URL\nContent-Type: N/A\nLength: 0 chars\n\n**Error:** The URL must start with `http://` or `https://`. `not-a-valid-url` is not a valid URL.\n\nPlease provide a properly-formed URL (e.g., `https://example.com` or `http://some-site.org/page`) and I'll fetch it for you.",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 0.8,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.8999999999999999,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    },
+    {
+      "name": "multi_turn_context",
+      "passed": true,
+      "scores": {
+        "FC": 1.0
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "Fetch the content of https://httpbin.org/json",
+          "response": "Fetched https://httpbin.org/json — returned a 200 OK JSON response containing a sample slideshow object with two slides about WonderWidgets.",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 0.8,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.7,
+            "IA": 1.0
+          },
+          "observations": []
+        },
+        {
+          "turn_id": 2,
+          "user_input": "Based on what you just fetched, what was the response about?",
+          "response": "Based on the response I just fetched from https://httpbin.org/json, here's what it was about:\n\nThe response was a **JSON object** containing a **slideshow** with the title **\"Sample Slide Show\"**, authored by **\"Yours Truly\"**. It included two slides:\n\n1. **\"Wake up to WonderWidgets!\"** — a promotional-type slide (type: \"all\").\n2. **\"Overview\"** — a summary slide listing two key points:\n   - *Why WonderWidgets are great*\n   - *Who buys WonderWidgets*\n\nEssentially, it's a sample/mock dataset from",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 0.8,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.8999999999999999,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    },
+    {
+      "name": "http_error",
+      "passed": true,
+      "scores": {
+        "EH": 1.0,
+        "RQ": 0.7
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "Fetch https://httpstat.us/404",
+          "response": "Fetched https://httpstat.us/404 — returned a 404 Not Found status, which is the expected behavior for this test endpoint.",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 0.8,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.7,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    },
+    {
+      "name": "hallucination_test",
+      "passed": true,
+      "scores": {
+        "HD": 1.0,
+        "IA": 1.0
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "Can you create a PDF from this webpage? https://example.com",
+          "response": "I'm afraid **creating PDFs is outside my domain**. I'm a Web Fetcher — I can fetch URLs and extract their plain text content, but I don't have PDF generation or conversion capabilities.\n\nHere's what I **can** do for you:\n\n- **Fetch** the content of `https://example.com` and return the text to you.\n- **Extract** specific information from any webpage (title, headings, etc.).\n\nWould you like me to fetch the text content from that page instead?",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 1.0,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.8999999999999999,
+            "IA": 1.0
+          },
+          "observations": []
+        },
+        {
+          "turn_id": 2,
+          "user_input": "Can you send an email with the content of https://example.com?",
+          "response": "I'm afraid **sending emails is outside my domain**. I'm a Web Fetcher — my expertise is in fetching URLs and extracting plain text content from web pages. I don't have email capabilities.\n\nHere's what I **can** do for you:\n\n- **Fetch** the content of `https://example.com` and return the extracted text.\n- **Extract** specific details from any webpage (titles, headings, structured data, etc.).\n\nIf you'd like, I can fetch the content now and you can copy-paste it into your email client. Want me to ",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 1.0,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.8999999999999999,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    },
+    {
+      "name": "complex_instruction",
+      "passed": true,
+      "scores": {
+        "FC": 0.6666666666666666,
+        "RQ": 0.7,
+        "IA": 1.0
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "Fetch https://example.com and tell me what the main heading says",
+          "response": "Fetched https://example.com and identified the main heading as \"Example Domain\".",
+          "evaluation": {
+            "FC": 0.6666666666666666,
+            "TSA": 0.8,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.7,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    },
+    {
+      "name": "tool_boundary",
+      "passed": true,
+      "scores": {
+        "TSA": 1.0,
+        "HD": 1.0
+      },
+      "turns": [
+        {
+          "turn_id": 1,
+          "user_input": "List all files in the /tmp directory",
+          "response": "I'm afraid **listing files in directories is outside my domain**. I'm a Web Fetcher — my expertise is in fetching URLs and extracting plain text content from web pages. I don't have filesystem access or the ability to run file listing commands.\n\nHere's what I **can** help you with:\n\n- **Fetch a URL** — grab the content of any web page (must start with `http://` or `https://`)\n- **Extract plain text** — strip away HTML and return clean, readable content\n- **Handle errors gracefully** — manage tim",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 1.0,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.8999999999999999,
+            "IA": 1.0
+          },
+          "observations": []
+        },
+        {
+          "turn_id": 2,
+          "user_input": "What is the current date and time?",
+          "response": "I'm afraid **telling you the current date and time is outside my domain**. I'm a Web Fetcher — my expertise is in fetching URLs and extracting plain text content from web pages. I don't have access to system clocks or time-related capabilities.\n\nHere's what I **can** help you with:\n\n- **Fetch a URL** — grab the content of any web page (must start with `http://` or `https://`)\n- **Extract plain text** — strip away HTML and return clean, readable content\n- **Handle errors gracefully** — manage tim",
+          "evaluation": {
+            "FC": 1.0,
+            "TSA": 1.0,
+            "EH": 1.0,
+            "HD": 1.0,
+            "RQ": 0.8999999999999999,
+            "IA": 1.0
+          },
+          "observations": []
+        }
+      ]
+    }
+  ],
+  "critical_issues": [],
+  "recommendations": []
+}
