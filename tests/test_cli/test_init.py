@@ -65,7 +65,7 @@ class TestInitInteractive:
         assert 'default = "openai"' in content
 
     def test_custom_provider(self, runner, app, tmp_agenthatch_home):
-        # v0.9: custom provider flow adds API format prompt (step 5) 
+        # v0.9: custom provider flow adds API format prompt (step 5)
         result = runner.invoke(
             app,
             ["init"],

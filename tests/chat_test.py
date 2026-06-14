@@ -21,26 +21,26 @@ def main() -> None:
     ahs_path = Path(f"{output_dir}/{name}/agenthatch.yaml")
 
     print(f"Testing: {name} at {ahs_path}", flush=True)
-    
+
     # Load config to get provider and default model
     config = Config.load()
     provider = config.get("agenthatch", {}).get("default", "openai")
-    
+
     # Resolve API key from config or env
     provider_config = config.get("providers", {}).get(provider, {})
     if "." in provider:
         # custom.glm -> providers.custom.glm
         parts = provider.split(".", 1)
         provider_config = config.get("providers", {}).get(parts[0], {}).get(parts[1], {})
-    
+
     model = provider_config.get("default_model", "glm-5.1-external")
     api_key = os.environ.get("AGENTHATCH_LLM_API_KEY", "") or provider_config.get("api_key", "")
-    
+
     # Fallback: try provider-specific env var
     if not api_key:
         env_var = f"{provider.upper().replace('.', '_')}_API_KEY"
         api_key = os.environ.get(env_var, "")
-    
+
     print(f"Provider: {provider}, Model: {model}, API key: {'SET' if api_key else 'NOT SET'}", flush=True)
 
     if not api_key:

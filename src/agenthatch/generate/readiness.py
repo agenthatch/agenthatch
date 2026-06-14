@@ -134,6 +134,13 @@ def extract_dependencies(
     if scripts_dir.exists():
         deps.pip_packages = _detect_import_dependencies(scripts_dir)
 
+    # v0.9: Also check base.dependencies declared in agenthatch.yaml.
+    # These are CLI tools required at runtime (e.g., agent-browser, jq, curl).
+    base_deps = base.get("dependencies", [])
+    for dep in base_deps:
+        if isinstance(dep, str) and dep.strip() and dep not in deps.system_tools:
+            deps.system_tools.append(dep)
+
     # System tools: mcporter is mandatory for MCP skills
     if deps.mcp_servers:
         if "mcporter" not in deps.system_tools:
@@ -563,4 +570,5 @@ def run_readiness_phase(
         readiness=verdict,
         report=report,
         _mcp_skill=bool(dep_manifest.mcp_servers),
+        _env_report=env_report,
     )

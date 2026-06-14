@@ -25,6 +25,7 @@ from agenthatch_core.loop.agent_loop import RichToolCallEvent
 from agenthatch_core.loop.token_counter import ThinkingDelta
 from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.output.defaults import create_output
+from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
 from rich.markdown import Markdown
@@ -336,8 +337,11 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     # "WARNING: your terminal doesn't support cursor position requests (CPR)."
     # prompt_toolkit's Vt100_Output.responds_to_cpr checks self.enable_cpr
     # first — setting it to False skips the probe + warning entirely.
+    # prompt_toolkit >=3.0.50 removed `output` kwarg from prompt();
+    # use PromptSession (which still accepts output) instead.
     _pt_output = create_output()
     _pt_output.enable_cpr = False  # type: ignore[attr-defined]
+    _pt_session = PromptSession(style=PT_STYLE, output=_pt_output)
 
     try:
         early_input: str | None = None
@@ -350,10 +354,8 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
                 # prompt_toolkit replaces Rich.Prompt for CJK input correctness
                 # (macOS libedit bug: backspace drifts on multi-byte characters)
                 try:
-                    user_input = pt_prompt(
+                    user_input = _pt_session.prompt(
                         [("class:prompt", "You: ")],
-                        style=PT_STYLE,
-                        output=_pt_output,  # type: ignore[call-arg]
                     )
                 except EOFError:
                     raise

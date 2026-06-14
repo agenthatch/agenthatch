@@ -688,8 +688,15 @@ def hatch_command(
             # Agenthatch auto-resolves what it can (install mcporter)
             # and always proceeds to generation.
             if result.readiness.status in ("BLOCK", "WARN"):
+                # v0.9: Auto-install missing system dependencies.
+                # For each CLI tool declared in base.dependencies,
+                # try npm/pip/brew before asking the user.
+                if env_report := getattr(result, "_env_report", None):
+                    for tool, found in getattr(env_report, "system_tools", {}).items():
+                        if not found:
+                            _auto_install_dependency(console, tool)
                 if not result.readiness.mcporter_installed and result._mcp_skill:
-                    _auto_install_mcporter(console)
+                    _auto_install_dependency(console, "mcporter")
                 if report and result.report:
                     console.print(result.report)
             elif report and result.report:
@@ -790,44 +797,50 @@ def _register_skillhouse(
         console.print(f"[yellow]⚠ Skill indexing failed (non-fatal): {e}[/yellow]")
 
 
-def _auto_install_mcporter(console: Any) -> None:
-    """v0.8.10: Auto-install mcporter if skill requires MCP.
+def _auto_install_dependency(console: Any, tool: str) -> None:
+    """v0.9: Auto-install a CLI dependency using known package managers.
 
-    Tries to install mcporter via npm. If npm is not available,
-    provides clear instructions for manual installation.
+    Tries (in order): npm, pip, brew (macOS), apt-get (Linux).
+    Each manager gets one shot with a 60s timeout.
+    Does NOT fail if all attempts fail — the agent runtime health check
+    will detect the missing tool and inform the LLM.
     """
     import shutil
     import subprocess
+    import platform
 
-    if shutil.which("mcporter"):
+    if shutil.which(tool):
         return  # Already installed
 
-    npm = shutil.which("npm")
-    if not npm:
-        console.print(
-            "[dim]npm not found. Install Node.js then run: "
-            "npm install -g mcporter[/dim]"
-        )
-        return
+    managers = [
+        ("npm", ["npm", "install", "-g", tool]),
+        ("pip", ["pip3", "install", tool]),
+    ]
 
-    console.print("[dim]Auto-installing mcporter (MCP proxy)...[/dim]")
-    try:
-        result = subprocess.run(
-            [npm, "install", "-g", "mcporter"],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            console.print("[dim]✓ mcporter installed successfully[/dim]")
-        else:
-            console.print(
-                f"[dim]⚠ mcporter install failed: {result.stderr.strip()[:200]}[/dim]"
+    system = platform.system()
+    if system == "Darwin":
+        managers.append(("brew", ["brew", "install", tool]))
+    elif system == "Linux":
+        managers.append(("apt", ["sudo", "apt-get", "install", "-y", tool]))
+
+    for mgr_name, cmd in managers:
+        if not shutil.which(cmd[0]):
+            continue
+        console.print(f"[dim]Auto-installing {tool} via {mgr_name}...[/dim]")
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60,
             )
-            console.print(
-                "[dim]Try manually: npm install -g mcporter[/dim]"
-            )
-    except Exception as e:
-        console.print(f"[dim]⚠ mcporter auto-install error: {e}[/dim]")
-        console.print("[dim]Try manually: npm install -g mcporter[/dim]")
+            if result.returncode == 0:
+                console.print(f"[dim]  ✓ {tool} installed[/dim]")
+                return
+        except Exception:
+            pass
+
+    console.print(
+        f"[dim]  ⚠ Could not auto-install {tool}. "
+        f"Agent will detect this at runtime.[/dim]"
+    )
 
 
 def _update_skillhouse_agent_output(
