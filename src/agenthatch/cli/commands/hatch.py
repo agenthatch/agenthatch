@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
+import sys
 import time
 from collections import deque
 from pathlib import Path
@@ -695,6 +697,22 @@ def hatch_command(
                     for tool, found in getattr(env_report, "system_tools", {}).items():
                         if not found:
                             _auto_install_dependency(console, tool)
+                    # v0.9: Also auto-install missing pip packages
+                    missing_pkgs = [
+                        pkg for pkg, found in env_report.pip_packages.items()
+                        if not found
+                    ]
+                    if missing_pkgs:
+                        console.print(
+                            f"[dim]Auto-installing {len(missing_pkgs)} "
+                            f"Python package(s): {', '.join(missing_pkgs)}[/dim]"
+                        )
+                        for pkg in missing_pkgs:
+                            subprocess.run(
+                                [sys.executable, "-m", "pip", "install", pkg],
+                                capture_output=True,
+                                timeout=60,
+                            )
                 if not result.readiness.mcporter_installed and result._mcp_skill:
                     _auto_install_dependency(console, "mcporter")
                 if report and result.report:
@@ -714,6 +732,14 @@ def hatch_command(
     ai_chat_fn = None
     if not no_ai_tools:
         ai_chat_fn = _create_ai_chat_fn(config)
+        if ai_chat_fn is None:
+                # v0.9: Visible warning — user must know tools may be stubs
+                console.print(
+                    "[yellow]⚠ No API key configured.[/yellow] "
+                    "[dim]AI tool generation will be skipped — "
+                    "some tools may be non-functional stubs. "
+                    "Run [bold]agenthatch init[/bold] to configure.[/dim]"
+                )
 
     file_count, agent_output_dir, elapsed3 = _run_phase3_generate(
         ahs_spec=ahs_spec,
@@ -814,7 +840,7 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
 
     managers = [
         ("npm", ["npm", "install", "-g", tool]),
-        ("pip", ["pip3", "install", tool]),
+        ("pip", [sys.executable, "-m", "pip", "install", tool]),
     ]
 
     system = platform.system()
