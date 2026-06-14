@@ -197,5 +197,6 @@ class TestGetDefaultProvider:
         assert get_default_provider({}) == "openai"
 
     def test_from_config(self):
-        config = {"providers": {"default": "anthropic"}}
+        # v0.9: default provider moved from [providers].default to [agenthatch].default
+        config = {"agenthatch": {"default": "anthropic"}}
         assert get_default_provider(config) == "anthropic"

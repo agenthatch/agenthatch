@@ -18,7 +18,8 @@ from agenthatch.skill.engine import Orchestrator
 @pytest.fixture
 def minimal_config() -> dict:
     """Minimal config with a default provider."""
-    return {"providers": {"default": "deepseek"}}
+    # v0.9: default provider moved from [providers].default to [agenthatch].default
+    return {"agenthatch": {"default": "deepseek"}}
 
 
 def test_orchestrator_passes_api_key_to_llm_client(minimal_config):

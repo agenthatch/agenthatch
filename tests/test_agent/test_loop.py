@@ -136,6 +136,7 @@ class TestRunSync:
         )
 
         # v0.6 auto-continuation: after tools + text, loop continues until budget exhausted
+        # v0.9: _MAX_CONSECUTIVE_TEXT_ONLY = 13, need >= 14 items to avoid StopIteration
         mock_llm.chat_with_tools.side_effect = [
             ToolCallResponse(
                 text=None,
@@ -145,7 +146,7 @@ class TestRunSync:
                 ],
             ),
             ToolCallResponse(text="Done.", tool_calls=[]),
-        ] + [ToolCallResponse(text="Done.", tool_calls=[])] * 10
+        ] + [ToolCallResponse(text="Done.", tool_calls=[])] * 14
 
         result = loop.run("both")
         assert "Done." in result

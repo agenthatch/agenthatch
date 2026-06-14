@@ -45,19 +45,20 @@ class TestConfigApplyEnvOverrides:
     def test_provider_env(self, monkeypatch):
         monkeypatch.setenv("AGENTHATCH_PROVIDER", "anthropic")
         result = Config._apply_env_overrides({})
-        assert result["providers"]["default"] == "anthropic"
+        # v0.9: provider default moved from [providers].default to [agenthatch].default
+        assert result["agenthatch"]["default"] == "anthropic"
 
     def test_llm_provider_env(self, monkeypatch):
         monkeypatch.setenv("AGENTHATCH_LLM_PROVIDER", "deepseek")
         result = Config._apply_env_overrides({})
-        assert result["providers"]["default"] == "deepseek"
+        assert result["agenthatch"]["default"] == "deepseek"
 
     def test_provider_env_priority(self, monkeypatch):
         monkeypatch.setenv("AGENTHATCH_PROVIDER", "openai")
         monkeypatch.setenv("AGENTHATCH_LLM_PROVIDER", "anthropic")
         result = Config._apply_env_overrides({})
         # AGENTHATCH_PROVIDER is processed first, AGENTHATCH_LLM_PROVIDER overwrites
-        assert result["providers"]["default"] == "anthropic"
+        assert result["agenthatch"]["default"] == "anthropic"
 
     def test_no_env_returns_unchanged(self):
         result = Config._apply_env_overrides({"core": {"verbose": True}})

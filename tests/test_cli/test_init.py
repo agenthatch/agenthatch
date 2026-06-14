@@ -65,10 +65,11 @@ class TestInitInteractive:
         assert 'default = "openai"' in content
 
     def test_custom_provider(self, runner, app, tmp_agenthatch_home):
+        # v0.9: custom provider flow adds API format prompt (step 5) 
         result = runner.invoke(
             app,
             ["init"],
-            input="5\nmy-llm\nhttp://localhost:8000/v1\nmy-key\nmixtral-8x7b\nMY_LLM_KEY\n",
+            input="5\nmy-llm\nhttp://localhost:8000/v1\nmy-key\nmixtral-8x7b\n1\nMY_LLM_KEY\n",
         )
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()

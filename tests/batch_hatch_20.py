@@ -91,7 +91,7 @@ def run_chat(name: str) -> dict:
     chat_script = str(PROJECT / "tests" / "chat_test.py")
     try:
         result = subprocess.run(
-            [PYTHON, chat_script, name],
+            [PYTHON, chat_script, name, str(OUTPUT_DIR)],
             capture_output=True,
             text=True,
             timeout=60,

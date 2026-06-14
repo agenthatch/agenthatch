@@ -61,11 +61,12 @@ class TestDoctor:
 
 def _write_minimal_config(tmp_path, provider: str = "openai"):
     """Write a minimal config.toml for doctor tests."""
+    # v0.9: default provider moved from [providers].default to [agenthatch].default
     config_content = f"""\
 [core]
 verbose = false
 
-[providers]
+[agenthatch]
 default = "{provider}"
 
 [providers.openai]
