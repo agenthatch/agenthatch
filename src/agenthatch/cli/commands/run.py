@@ -23,7 +23,6 @@ from agenthatch_core.config import (
 )
 from agenthatch_core.loop.agent_loop import RichToolCallEvent
 from agenthatch_core.loop.token_counter import ThinkingDelta
-from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.output.defaults import create_output
 from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.styles import Style as PTStyle
@@ -341,7 +340,7 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     # use PromptSession (which still accepts output) instead.
     _pt_output = create_output()
     _pt_output.enable_cpr = False  # type: ignore[attr-defined]
-    _pt_session = PromptSession(style=PT_STYLE, output=_pt_output)
+    _pt_session: PromptSession[str] = PromptSession(style=PT_STYLE, output=_pt_output)
 
     try:
         early_input: str | None = None

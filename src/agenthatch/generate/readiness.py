@@ -84,6 +84,7 @@ class HatchResult:
     tool_count: int = 0
     fidelity_score: float = 0.0
     _mcp_skill: bool = False  # v0.8.10: True if skill uses MCP (for auto-install)
+    _env_report: EnvironmentReport = field(default_factory=EnvironmentReport)  # v0.9.4: env audit
 
 
 # ─────────────────────────────────────────────────────────────────────────

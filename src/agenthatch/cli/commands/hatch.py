@@ -831,9 +831,9 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
     Does NOT fail if all attempts fail — the agent runtime health check
     will detect the missing tool and inform the LLM.
     """
+    import platform
     import shutil
     import subprocess
-    import platform
 
     if shutil.which(tool):
         return  # Already installed
