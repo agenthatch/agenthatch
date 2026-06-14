@@ -457,7 +457,7 @@ class GenerateEngine:
         if unmatched and len(cap_to_script) > 0:
             # Use the most common script from already-matched caps
             script_counts: dict[str, int] = {}
-            for cap_name, script_name in cap_to_script.items():
+            for _cap_name, script_name in cap_to_script.items():
                 script_counts[script_name] = script_counts.get(script_name, 0) + 1
             main_script = max(script_counts, key=script_counts.get)  # type: ignore[arg-type]
             for cap_name in unmatched:
