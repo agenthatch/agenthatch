@@ -54,6 +54,9 @@ class AHCoreAgent:
         self._agent_root: Path | None = spec_path.parent if spec_path else None
         self._knowledge = knowledge
 
+        # v0.9: Interruptable execution — set by EarlyInputReader on Ctrl+C
+        self._interrupted: bool = False
+
         # v0.7: BrickManifest drives chassis decomposition
         self._manifest = brick_manifest or BrickManifest()
 
@@ -508,6 +511,8 @@ class AHCoreAgent:
                 memory_brick=self._memory,
                 checkpoint_mgr=self._checkpoint_mgr,
             )
+            # v0.9: Propagate interrupt flag
+            loop._interrupted = self._interrupted
             result = loop.run(user_input)
         else:
             loop = ConversationLoop(
@@ -517,6 +522,8 @@ class AHCoreAgent:
                 memory_brick=self._memory,  # v0.7.12: wire memory brick
                 checkpoint_mgr=self._checkpoint_mgr,  # v0.7.12: wire checkpointing
             )
+            # v0.9: Propagate interrupt flag
+            loop._interrupted = self._interrupted
             result = loop.run(user_input)
 
         # v0.7: OutputGuard validation
@@ -558,6 +565,8 @@ class AHCoreAgent:
                 memory_brick=self._memory,
                 checkpoint_mgr=self._checkpoint_mgr,
             )
+            # v0.9: Propagate interrupt flag
+            loop._interrupted = self._interrupted
             result = yield from loop.stream(user_input)
         else:
             loop = ConversationLoop(
@@ -567,6 +576,8 @@ class AHCoreAgent:
                 memory_brick=self._memory,  # v0.7.12: wire memory brick
                 checkpoint_mgr=self._checkpoint_mgr,  # v0.7.12: wire checkpointing
             )
+            # v0.9: Propagate interrupt flag
+            loop._interrupted = self._interrupted
             result = yield from loop.stream(user_input)
 
         # v0.7: OutputGuard validation (on final result only)

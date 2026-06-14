@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_RESULT_CHARS = 10000
 
+# v0.9: Interrupt message injected when user interrupts agent mid-execution.
+_INTERRUPT_MESSAGE = (
+    "User interrupted. Stop what you are doing, ask the user what they "
+    "want next, and wait for their response. Do not continue executing "
+    "tools or auto-continuing."
+)
+
 # ── v0.6 Autonomous task completion ──────────────────────────────────
 _TASK_COMPLETE_TOOL = "task_complete"
 _CONTINUE_NUDGE = (
@@ -106,6 +113,9 @@ class ConversationLoop:
         self._memory_brick = memory_brick  # v0.7.11
         self._checkpoint_mgr = checkpoint_mgr  # v0.7.12: FROM PARAMETER
 
+        # v0.9: Interruptable execution — set by EarlyInputReader on Ctrl+C
+        self._interrupted = False
+
         self._max_retries: int = 3
         self._retry_base_delay: float = 1.0
         self._retry_max_delay: float = 30.0
@@ -116,6 +126,21 @@ class ConversationLoop:
         self._cb_failures: int = 0
         self._cb_state: str = "closed"
         self._cb_opened_at: float = 0.0
+
+    # ── v0.9: Interrupt check ─────────────────────────────────────────
+
+    def _check_interrupted(self) -> bool:
+        """Check if user interrupted execution (Ctrl+C during streaming).
+
+        Also checks ctx._interrupted which may be set via signal handler.
+        Returns True if execution should stop immediately.
+        """
+        if self._interrupted:
+            return True
+        if getattr(self.ctx, "_interrupted", False):
+            self._interrupted = True
+            return True
+        return False
 
     def _record_usage(self, response: Any) -> None:
         """Record token usage from LLM response into token counter."""
@@ -247,6 +272,11 @@ class ConversationLoop:
                 self.ctx.add_to_history("assistant", response.text)
                 messages.append({"role": "user", "content": _CONTINUE_NUDGE})
 
+                # v0.9: Check interrupt before auto-continuation
+                if self._check_interrupted():
+                    self.ctx.add_to_history("user", user_input)
+                    return _INTERRUPT_MESSAGE
+
                 if not self._cb_allow():
                     break
                 try:
@@ -295,6 +325,11 @@ class ConversationLoop:
                         for tc in response.tool_calls
                     ],
                 })
+
+            # v0.9: Check interrupt before executing tools
+            if self._check_interrupted():
+                self.ctx.add_to_history("user", user_input)
+                return _INTERRUPT_MESSAGE
 
             parallel = (
                 self.llm.features.supports_parallel_tool_calls
@@ -669,6 +704,11 @@ class ConversationLoop:
                 self.ctx.add_to_history("assistant", response.text or accumulated_text)
                 messages.append({"role": "user", "content": _CONTINUE_NUDGE})
 
+                # v0.9: Check interrupt before auto-continuation (streaming)
+                if self._check_interrupted():
+                    self.ctx.add_to_history("user", user_input)
+                    return _INTERRUPT_MESSAGE
+
                 if not self._cb_allow():
                     break
                 continue
@@ -701,6 +741,11 @@ class ConversationLoop:
                         for tc in response.tool_calls
                     ],
                 })
+
+            # v0.9: Check interrupt before executing tools (streaming)
+            if self._check_interrupted():
+                self.ctx.add_to_history("user", user_input)
+                return _INTERRUPT_MESSAGE
 
             parallel = (
                 self.llm.features.supports_parallel_tool_calls

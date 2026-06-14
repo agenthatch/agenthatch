@@ -32,6 +32,7 @@ from rich.prompt import Prompt
 
 from agenthatch.cli import console
 from agenthatch.cli.commands._completion import _complete_skill_name
+from agenthatch.cli.interrupt import EarlyInputReader
 
 PT_STYLE = PTStyle.from_dict({
     "prompt": "bold green",
@@ -326,18 +327,24 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     console.print()
 
     try:
+        early_input: str | None = None
         while True:
-            # prompt_toolkit replaces Rich.Prompt for CJK input correctness
-            # (macOS libedit bug: backspace drifts on multi-byte characters)
-            try:
-                user_input = pt_prompt(
-                    [("class:prompt", "You: ")],
-                    style=PT_STYLE,
-                )
-            except EOFError:
-                raise
-            if not user_input.strip():
-                continue
+            # v0.9: If user typed during previous streaming, use that input
+            if early_input:
+                user_input = early_input
+                early_input = None
+            else:
+                # prompt_toolkit replaces Rich.Prompt for CJK input correctness
+                # (macOS libedit bug: backspace drifts on multi-byte characters)
+                try:
+                    user_input = pt_prompt(
+                        [("class:prompt", "You: ")],
+                        style=PT_STYLE,
+                    )
+                except EOFError:
+                    raise
+                if not user_input.strip():
+                    continue
 
             cmd_result = _handle_command(user_input, agent)
             if cmd_result is not None:
@@ -348,31 +355,48 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
             console.print(f"[bold bright_blue]{agent.identity.display_name}[/]")
 
             try:
-                response_text = _stream_response(agent, user_input)
+                response_text, early_input = _stream_response(agent, user_input)
             except Exception as e:
                 response_text = f"Agent error: {e}"
+                early_input = None
                 console.print(f"[error]{response_text}[/error]")
                 continue
 
+            if early_input:
+                console.print(
+                    f"[dim]Captured:[/dim] [bold green]{early_input}[/bold green]"
+                )
+
             console.print(Markdown(response_text))
-            # v0.7.12: Observability rendered in Done panel + Session footer.
-            # No separate console.print needed.
             console.print()
 
     except (KeyboardInterrupt, SystemExit, EOFError):
         console.print()
 
 
-def _stream_response(agent: Any, user_input: str) -> str:
-    """v0.7.14 Unified streaming renderer.
+def _stream_response(agent: Any, user_input: str) -> tuple[str, str]:
+    """v0.9: Streaming with early-input capture and interrupt support.
 
-    Single-panel Live layout with inline thinking.  Done panel is the
-    sole observability surface — no redundant Session footer.
+    Returns (response_text, early_input) where early_input is any text
+    the user typed during streaming (may be empty).
 
-    v0.7.14 fixes:
-      - Thinking chars joined before line-split (was: per-char = per-line).
-      - Removed _build_observability_footer (redundant with Done panel).
+    Based on Claude Code's earlyInput.ts pattern:
+    - Background thread captures stdin while agent is streaming
+    - Ctrl+C interrupts the current turn
+    - Text typed during execution is buffered and returned
     """
+    reader = EarlyInputReader(agent)
+    reader.start()
+    try:
+        response = _stream_response_inner(agent, user_input, reader)
+        early = reader.consume()
+        return response, early
+    finally:
+        reader.stop()
+
+
+def _stream_response_inner(agent: Any, user_input: str, reader: EarlyInputReader) -> str:
+    """Core streaming logic with interrupt-awareness."""
     full_text: list[str] = []
     reasoning_chars: list[str] = []
     tool_status: dict[str, str] = {}
@@ -383,6 +407,8 @@ def _stream_response(agent: Any, user_input: str) -> str:
         lines = [f"[bold bright_blue]{agent.identity.display_name}[/]"]
         for name, status in tool_status.items():
             lines.append(f"  [cyan]{name}[/] {status}")
+        if reader.interrupted:
+            lines.append("  [bold yellow]⏸ Interrupted — waiting for your input...[/]")
         if full_text:
             lines.append("".join(full_text)[-500:])
         if not full_text and not tool_status:
