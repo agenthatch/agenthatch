@@ -76,7 +76,16 @@ class EarlyInputReader:
     def start(self) -> None:
         """Start capturing stdin in a background thread.
 
-        Sets terminal to raw mode so we can read individual keystrokes.
+        Puts the terminal into a mode that allows reading individual
+        keystrokes WITHOUT breaking output post-processing (OPOST).
+        This is critical for Rich Live compatibility on macOS/Linux:
+        tty.setraw() disables OPOST globally, which breaks \n→\r\n
+        translation and causes Rich panels to duplicate instead of
+        refreshing in-place.
+
+        Disables:  ICANON (no line buffering), ECHO (no keystroke echo),
+                   ISIG   (Ctrl+C handled manually)
+        Preserves: OPOST (output processing for Rich)
         """
         if not sys.stdin.isatty():
             return
@@ -89,9 +98,17 @@ class EarlyInputReader:
 
         try:
             import termios
-            import tty
-            self._original_stdin_settings = termios.tcgetattr(sys.stdin.fileno())
-            tty.setraw(sys.stdin.fileno())
+            fd = sys.stdin.fileno()
+            self._original_stdin_settings = termios.tcgetattr(fd)
+            new = termios.tcgetattr(fd)
+            # Disable canonical mode, echo, and signal generation.
+            # Preserve OPOST (output processing) — critical for Rich Live.
+            new[termios.LFLAG] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)  # type: ignore[attr-defined]
+            # Minimum characters to read: 1
+            new[termios.CC][termios.VMIN] = 1  # type: ignore[attr-defined]
+            # Timeout: 0 (non-blocking after first char)
+            new[termios.CC][termios.VTIME] = 0  # type: ignore[attr-defined]
+            termios.tcsetattr(fd, termios.TCSAFLUSH, new)
         except Exception:
             self._original_stdin_settings = None
 

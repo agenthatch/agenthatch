@@ -323,7 +323,10 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     )
     if key_source:
         console.print(f"[dim]API key: {key_source}[/dim]")
-    console.print("[dim]Type /help for commands, /quit or Ctrl+D to exit[/dim]")
+    console.print(
+        "[dim]Type /help for commands. "
+        "Ctrl+C to interrupt agent, /quit or Ctrl+D to exit[/dim]"
+    )
     console.print()
 
     try:
@@ -754,10 +757,14 @@ def _render_help(agent: Any) -> str:
         "  [bold cyan]/status[/]     Show provider/model info",
         "  [bold cyan]/config[/]     Configure API key, provider, or model",
         "  [bold cyan]/key-source[/] Show API key resolution chain",
-        "[bold cyan]/compact[/]    Trigger context compaction",
+        "  [bold cyan]/compact[/]    Trigger context compaction",
         "  [bold cyan]/thinking[/]   Toggle reasoning display for debugging",
         "  [bold cyan]/attach[/] <path>  Attach a file to the conversation",
         "  [bold cyan]/quit[/]       Exit (or Ctrl+D)",
+        "",
+        "[bold]Keyboard shortcuts:[/bold]",
+        "  [bold]Ctrl+C[/]   Interrupt agent mid-execution and input your response",
+        "  [bold]Ctrl+D[/]   Exit (same as /quit)",
     ]
     return "\n".join(lines)
 
