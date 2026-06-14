@@ -337,7 +337,7 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
     # prompt_toolkit's Vt100_Output.responds_to_cpr checks self.enable_cpr
     # first — setting it to False skips the probe + warning entirely.
     _pt_output = create_output()
-    _pt_output.enable_cpr = False
+    _pt_output.enable_cpr = False  # type: ignore[attr-defined]
 
     try:
         early_input: str | None = None
@@ -353,7 +353,7 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
                     user_input = pt_prompt(
                         [("class:prompt", "You: ")],
                         style=PT_STYLE,
-                        output=_pt_output,
+                        output=_pt_output,  # type: ignore[call-arg]
                     )
                 except EOFError:
                     raise
@@ -381,7 +381,10 @@ def _run_interactive_tui(agent: Any, key_source: str = "") -> None:
                 console.print("[bold yellow]⏸  Interrupted[/bold yellow]")
                 if hasattr(agent, '_interrupted'):
                     agent._interrupted = True
-                response_text = "User pressed Ctrl+C. Stop what you are doing and ask what the user wants next."
+                response_text = (
+                    "User pressed Ctrl+C. "
+                    "Stop what you are doing and ask what the user wants next."
+                )
                 early_input = None
             except Exception as e:
                 response_text = f"Agent error: {e}"

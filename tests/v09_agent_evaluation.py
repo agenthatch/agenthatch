@@ -1,19 +1,19 @@
 # ruff: noqa: E501
 """Industrial-grade Agent Evaluation Framework — v0.9
 
-基于 AgentBench、DeepEval、RAGAS 等智能体评估最佳实践，构建多维度评估框架。
+Built on best practices from AgentBench, DeepEval, RAGAS, and other agent evaluation frameworks.
 
-评估维度:
-  1. Functional Correctness (FC): 功能正确性
-  2. Tool Selection Accuracy (TSA): 工具选择准确性
-  3. Multi-turn Coherence (MTC): 多轮对话连贯性
-  4. Error Handling (EH): 错误处理能力
-  5. Instruction Adherence (IA): 指令遵循度
-  6. Hallucination Detection (HD): 幻觉检测
-  7. Response Quality (RQ): 响应质量
-  8. Latency & Token Efficiency (LTE): 性能指标
+Evaluation Dimensions:
+  1. Functional Correctness (FC): Does the agent produce correct results?
+  2. Tool Selection Accuracy (TSA): Does the agent choose the right tools?
+  3. Multi-turn Coherence (MTC): Does the agent maintain context across turns?
+  4. Error Handling (EH): Does the agent handle errors gracefully?
+  5. Instruction Adherence (IA): Does the agent follow instructions?
+  6. Hallucination Detection (HD): Does the agent avoid fabricating capabilities?
+  7. Response Quality (RQ): Is the response well-structured and actionable?
+  8. Latency & Token Efficiency (LTE): Performance metrics
 
-使用方法:
+Usage:
     python tests/v09_agent_evaluation.py --skill web-fetcher
     python tests/v09_agent_evaluation.py --skill pdf
     python tests/v09_agent_evaluation.py --all
