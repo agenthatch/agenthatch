@@ -703,16 +703,8 @@ def hatch_command(
                         if not found
                     ]
                     if missing_pkgs:
-                        console.print(
-                            f"[dim]Auto-installing {len(missing_pkgs)} "
-                            f"Python package(s): {', '.join(missing_pkgs)}[/dim]"
-                        )
                         for pkg in missing_pkgs:
-                            subprocess.run(
-                                [sys.executable, "-m", "pip", "install", pkg],
-                                capture_output=True,
-                                timeout=60,
-                            )
+                            _auto_install_dependency(console, pkg)
                 if not result.readiness.mcporter_installed and result._mcp_skill:
                     _auto_install_dependency(console, "mcporter")
                 if report and result.report:
@@ -827,16 +819,19 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
     """v0.9: Auto-install a CLI dependency using known package managers.
 
     Tries (in order): npm, pip, brew (macOS), apt-get (Linux).
-    Each manager gets one shot with a 60s timeout.
+    Uses smart timeout: kills process if no output for 15s (hung),
+    waits up to 120s if output is being produced.
     Does NOT fail if all attempts fail — the agent runtime health check
     will detect the missing tool and inform the LLM.
     """
     import platform
+    import select
     import shutil
     import subprocess
+    import threading
 
     if shutil.which(tool):
-        return  # Already installed
+        return
 
     managers = [
         ("npm", ["npm", "install", "-g", tool]),
@@ -854,10 +849,46 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
             continue
         console.print(f"[dim]Auto-installing {tool} via {mgr_name}...[/dim]")
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
-            if result.returncode == 0:
+            last_output = [time.time()]
+            output_lines = []
+
+            def _drain():
+                while True:
+                    line = proc.stdout.readline()
+                    if not line and proc.poll() is not None:
+                        break
+                    if line:
+                        last_output[0] = time.time()
+                        output_lines.append(line)
+
+            reader = threading.Thread(target=_drain, daemon=True)
+            reader.start()
+
+            # Wait up to 120s, but kill if no output for 15s
+            deadline = time.time() + 120
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    break
+                if time.time() - last_output[0] > 15:
+                    # No output for 15s — process is hung
+                    proc.kill()
+                    proc.wait()
+                    break
+                time.sleep(0.5)
+
+            reader.join(timeout=2)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+                continue
+
+            if proc.returncode == 0:
                 console.print(f"[dim]  ✓ {tool} installed[/dim]")
                 return
         except Exception:

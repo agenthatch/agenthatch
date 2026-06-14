@@ -384,11 +384,10 @@ body (first 50 lines):
         return True, ""
 
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
-        # v0.8: Align correction round context to initial round (was: [:500], now matches 2500)
         return {
             "frontmatter": inputs["frontmatter"],
             "dir_name": inputs["dir_name"],
-            "body_first_50_lines": str(inputs["body_first_50_lines"])[:2500],
+            "body_first_50_lines": str(inputs["body_first_50_lines"]),
         }
 
     def _get_correction_response_model(self) -> Any:
@@ -415,7 +414,7 @@ class InferIntentHarness(AgentHarness):
         file_contents = inputs.get("file_contents", [])
         desc = description or "(not provided)"
         name = frontmatter_name or "(not provided)"
-        body_preview = str(body)[:3000]
+        body_preview = str(body)
         files_str = _format_file_contents_for_harness(
             file_contents if isinstance(file_contents, list) else []
         )
@@ -456,7 +455,7 @@ body:
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
         return {
             "description": inputs["description"],
-            "body": str(inputs["body"])[:2000],
+            "body": str(inputs["body"]),
             "frontmatter_name": inputs["frontmatter_name"],
         }
 
@@ -504,7 +503,7 @@ class InferInterfaceHarness(AgentHarness):
 
 frontmatter_allowed_tools: {tools}
 body:
-{str(body)[:4000]}
+{str(body)}
 {script_section}
 {files_text}"""
 
@@ -546,7 +545,7 @@ body:
 
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
         return {
-            "body": str(inputs["body"])[:2000],
+            "body": str(inputs["body"]),
             "file_contents": inputs["file_contents"],
             "frontmatter_allowed_tools": inputs["frontmatter_allowed_tools"],
         }
@@ -569,21 +568,23 @@ class DetectBaseHarness(AgentHarness):
         return BASE_HARNESS_PERSONA + "\n\n" + BASE_FEW_SHOT
 
     def build_user_message(self, **inputs: object) -> str:
+        import json as _json
         body = inputs["body"]
         file_contents = inputs["file_contents"]
-        frontmatter_compatibility = inputs["frontmatter_compatibility"]
-        frontmatter_allowed_tools = inputs["frontmatter_allowed_tools"]
+        frontmatter = inputs.get("frontmatter", {})
         files_text = _format_file_contents_for_harness(
             file_contents if isinstance(file_contents, list) else []
         )
-        compat = frontmatter_compatibility or "(not provided)"
-        tools = frontmatter_allowed_tools if isinstance(frontmatter_allowed_tools, list) else []
+        fm_str = "(none)"
+        if isinstance(frontmatter, dict) and frontmatter:
+            fm_str = _json.dumps(frontmatter, indent=2, default=str)
         return f"""Detect base and instructions for this skill:
 
-frontmatter_compatibility: {compat}
-frontmatter_allowed_tools: {tools}
+Full YAML frontmatter from SKILL.md:
+{fm_str}
+
 body:
-{str(body)[:4000]}
+{str(body)}
 
 {files_text}"""
 
@@ -611,12 +612,10 @@ body:
         return True, ""
 
     def _prepare_correction_inputs(self, **inputs: object) -> dict[str, Any]:
-        # v0.8: Align correction round context to initial round (was: [:2000], now matches 4000)
         return {
-            "body": str(inputs["body"])[:4000],
+            "body": str(inputs["body"]),
             "file_contents": inputs["file_contents"],
-            "frontmatter_compatibility": inputs["frontmatter_compatibility"],
-            "frontmatter_allowed_tools": inputs["frontmatter_allowed_tools"],
+            "frontmatter": inputs.get("frontmatter", {}),
         }
 
     def _get_correction_response_model(self) -> Any:
@@ -1071,7 +1070,7 @@ class Orchestrator:
             outputs["A"] = harnesses["A"].run(
                 frontmatter=context.frontmatter,
                 dir_name=context.dir_name,
-                body_first_50_lines=context.body[:2500],
+                body_first_50_lines=context.body,
                 file_contents=file_contents,
             )
             if progress_callback:
@@ -1115,8 +1114,7 @@ class Orchestrator:
             outputs["D"] = harnesses["D"].run(
                 body=context.body,
                 file_contents=file_contents,
-                frontmatter_compatibility=frontmatter.get("compatibility"),
-                frontmatter_allowed_tools=frontmatter.get("allowed_tools"),
+                frontmatter=frontmatter,
             )
             if progress_callback:
                 progress_callback("D")

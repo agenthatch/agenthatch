@@ -29,7 +29,6 @@ import yaml
 from agenthatch.skill.spec import ContextPack, FileEntry, FileManifest
 
 # ── File reading constants ──────────────────────────────────────────────────
-_MAX_FILE_CHARS = 10000
 _MAX_FILE_BYTES = 1_000_000      # skip files > 1MB
 _BINARY_HEAD_CHECK = 512
 
@@ -188,16 +187,12 @@ def _try_read_text(filepath: Path) -> str | None:
         try:
             with open(filepath, "rb") as f:
                 f.seek(_BINARY_HEAD_CHECK)
-                rest = f.read(min(remaining, _MAX_FILE_CHARS)).decode(
+                rest = f.read(remaining).decode(
                     "utf-8", errors="replace"
                 )
                 text += rest
         except (UnicodeDecodeError, OSError):
             pass
-
-    # Stage 4: Truncate per-file
-    if len(text) > _MAX_FILE_CHARS:
-        text = text[:_MAX_FILE_CHARS] + "\n... (truncated)"
 
     return text
 

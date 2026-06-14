@@ -104,19 +104,6 @@ class GenerateEngine:
         interface = ahspec.get("interface", {})
         base = ahspec.get("base", {})
 
-        # v0.9: Harness LLM may drop base.dependencies declared in SKILL.md
-        # YAML frontmatter.  Merge them back so cli_tool backends are preserved.
-        if skill_dir and (not base.get("dependencies") or base["dependencies"] == []):
-            try:
-                from agenthatch.skill.parser import _best_effort_parse_yaml
-                fm, _, _ = _best_effort_parse_yaml(Path(skill_dir))
-                if isinstance(fm, dict):
-                    fm_deps = fm.get("base", {}).get("dependencies", [])
-                    if fm_deps:
-                        base["dependencies"] = fm_deps
-            except Exception:
-                pass
-
         instructions = ahspec.get("instructions", {})
 
         agent_name = identity.get("id", "unknown-agent")
@@ -698,51 +685,6 @@ class GenerateEngine:
                                 })
                         except Exception:
                             pass
-
-        # ── Context size management ─────────────────────────────────
-        # Truncate individual large files (keep head + tail for context)
-        MAX_FILE_CHARS = 32768  # ~8K tokens
-        for cf in context_files:
-            if len(cf["content"]) > MAX_FILE_CHARS:
-                half = MAX_FILE_CHARS // 2
-                cf["content"] = (
-                    cf["content"][:half]
-                    + f"\n\n... [{len(cf['content']) - MAX_FILE_CHARS} chars truncated] ...\n\n"
-                    + cf["content"][-half:]
-                )
-
-        # Ensure total context doesn't exceed ~200K chars (~50K tokens)
-        TOTAL_MAX = 200000
-        total_size = sum(len(cf["content"]) for cf in context_files)
-        if total_size > TOTAL_MAX:
-            # Prioritize: SKILL.md first, then references, then scripts, then templates
-            priority_order = {"SKILL.md": 0}
-            for cf in context_files:
-                path = cf["path"]
-                if path not in priority_order:
-                    if path.endswith(".md") or path.endswith(".txt"):
-                        priority_order[path] = 1  # references
-                    elif "/scripts/" in path or path.startswith("scripts/"):
-                        priority_order[path] = 2  # scripts
-                    else:
-                        priority_order[path] = 3  # templates
-            context_files.sort(key=lambda cf: (priority_order.get(cf["path"], 3), cf["path"]))
-            # Drop lowest priority files until under limit
-            kept: list[dict[str, str]] = []
-            running = 0
-            for cf in context_files:
-                if running + len(cf["content"]) <= TOTAL_MAX:
-                    kept.append(cf)
-                    running += len(cf["content"])
-                else:
-                    logger.info(
-                        "Dropping %s from AI context (total would exceed %d chars)",
-                        cf["path"],
-                        TOTAL_MAX,
-                    )
-            context_files = kept
-            # Re-sort back to original path order
-            context_files.sort(key=lambda cf: cf["path"])
 
         # Build the file context block
         file_context = ""

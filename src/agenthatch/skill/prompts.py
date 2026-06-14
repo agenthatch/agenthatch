@@ -245,7 +245,9 @@ Rules:
   - runtime: python3.11 (.py), bash (.sh), node20 (.js), or null (no scripts)
   - timeout: "30s" (simple), "120s" (API calls), "600s" (heavy processing)
   - env: UPPERCASE named variables, especially with _API_KEY, _TOKEN, _SECRET suffixes
-  - dependencies: "pip install X" → X, "npm install X" → X
+  - dependencies: Read from frontmatter.base.dependencies FIRST (if present).
+    If not in frontmatter, scan body for "pip install X" → X, "npm install X" → X.
+    Never drop dependencies that are declared in the YAML frontmatter.
   - workflow: numbered/commented steps in body, 3-10 steps expected
   - rules: "always/never/ensure/must" patterns
 
@@ -265,28 +267,41 @@ Example 1 — Weather Reporter (script-driven):
 ```
 body: (2KB markdown with weather API calls, .sh script reference, numbered steps)
 script_paths: ["scripts/query_weather.sh"]
-frontmatter_compatibility: null
-frontmatter_allowed_tools: null
+Full YAML frontmatter from SKILL.md:
+{
+  "name": "weather-reporter",
+  "description": "...",
+  "base": {
+    "runtime": "bash",
+    "dependencies": ["curl", "jq"]
+  }
+}
 ```
 Output:
 {""base"": {""runtime"": ""bash"", ""timeout"": ""120s"", ""env"": [{""name"": ""OPENWEATHER_API_KEY"", ""required"": true, ""description"": ""OpenWeather API key for authentication""}], ""dependencies"": [""curl"", ""jq""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Validate environment variables"", ""script"": null}, {""step"": 2, ""description"": ""Call OpenWeather API"", ""script"": ""scripts/query_weather.sh""}, {""step"": 3, ""description"": ""Format JSON response"", ""script"": null}], ""rules"": [""Always include source attribution to OpenWeather"", ""Never expose API key in output""], ""safety"": {""confirmation_required_for"": [], ""plan_required"": false, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
 
-Example 2 — Coding Style Guide (pure instruction):
+Example 2 — Coding Style Guide (pure instruction, no frontmatter):
 ```
 body: (Markdown style guide with rules for naming, formatting, commit messages)
 script_paths: []
-frontmatter_compatibility: null
-frontmatter_allowed_tools: null
+Full YAML frontmatter from SKILL.md:
+(none)
 ```
 Output:
 {""base"": {""runtime"": null, ""timeout"": null, ""env"": [], ""dependencies"": []}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""Review code against style rules"", ""script"": null}], ""rules"": [""Always use camelCase for variables"", ""Never commit directly to main"", ""Ensure all functions have docstrings""], ""safety"": {""confirmation_required_for"": [""committing code""], ""plan_required"": true, ""max_rows_default"": null, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
 
-Example 3 — Mixed Script + Instruction (MCP connector with documents):
+Example 3 — Notion API (python with frontmatter dependencies):
 ```
 body: (1.5KB markdown with mcp__notion__search and mcp__notion__read_document patterns, numbered workflow steps)
 script_paths: []
-frontmatter_compatibility: null
-frontmatter_allowed_tools: null
+Full YAML frontmatter from SKILL.md:
+{
+  "name": "notion-api",
+  "base": {
+    "runtime": "python3.11",
+    "dependencies": ["requests"]
+  }
+}
 ```
 Output:
 {""base"": {""runtime"": ""python3.11"", ""timeout"": ""120s"", ""env"": [{""name"": ""NOTION_TOKEN"", ""required"": true, ""description"": ""Notion API bearer token for authentication""}], ""dependencies"": [""requests""]}, ""instructions"": {""workflow"": [{""step"": 1, ""description"": ""List available knowledge bases"", ""script"": null}, {""step"": 2, ""description"": ""Search for relevant documents"", ""script"": null}, {""step"": 3, ""description"": ""Read selected document"", ""script"": null}, {""step"": 4, ""description"": ""Format and present results"", ""script"": null}], ""rules"": [""Always verify document exists before reading"", ""Never expose bearer token in output"", ""Ensure results are formatted as markdown tables""], ""safety"": {""confirmation_required_for"": [""create_document"", ""delete_document""], ""plan_required"": false, ""max_rows_default"": 50, ""parameterized_only"": false}, ""output_template"": null}}  # noqa: E501
