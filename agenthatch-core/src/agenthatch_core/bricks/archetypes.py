@@ -21,16 +21,6 @@ class SkillArchetype(str, Enum):
     EXTERNAL_TOOL = "external-tool"     # wraps external CLI/binary
 
 
-# Approximate distribution observed across agenthatch skills
-ARCHETYPE_DISTRIBUTION: dict[str, float] = {
-    "prompt-only": 0.30,
-    "tool-wrapper": 0.32,
-    "multi-step": 0.13,
-    "mcp-connector": 0.15,
-    "external-tool": 0.08,
-}
-
-
 @dataclass
 class ClassificationResult:
     """Result of classify_skill()."""
@@ -151,3 +141,39 @@ def _get_resources(spec: dict[str, Any] | Any) -> dict[str, Any]:
             return res.dict()
         return res
     return {}
+
+
+def archetype_to_brick_config(
+    archetype: SkillArchetype,
+    api_templates: list[Any] | None = None,
+    rules: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Map a SkillArchetype to BrickManifest configuration flags.
+
+    v0.8.22: Extracted from duplicated logic in generate/engine.py and
+    agent/runtime.py.  Single source of truth for archetype → brick mapping.
+
+    Returns dict with keys:
+        loop_engine, capbus, hooks, credential_vault,
+        file_processor, guard_active
+    """
+    from agenthatch_core.bricks.manifest import LoopKind  # deferred import
+
+    api_templates = api_templates or []
+    rules = rules or []
+
+    return {
+        "loop_engine": (
+            LoopKind.DIRECT if archetype == SkillArchetype.PROMPT_ONLY
+            else LoopKind.CONVERSATION
+        ),
+        "capbus": archetype != SkillArchetype.PROMPT_ONLY,
+        "hooks": archetype not in (
+            SkillArchetype.PROMPT_ONLY, SkillArchetype.EXTERNAL_TOOL
+        ),
+        "credential_vault": bool(api_templates),
+        "file_processor": archetype in (
+            SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
+        ),
+        "guard_active": bool(rules) and archetype != SkillArchetype.PROMPT_ONLY,
+    }

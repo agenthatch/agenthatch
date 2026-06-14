@@ -294,7 +294,6 @@ class GenerateEngine:
                 SkillArchetype,
                 classify_skill,
             )
-            from agenthatch_core.bricks.manifest import LoopKind
         except ImportError:
             return None
 
@@ -320,43 +319,21 @@ class GenerateEngine:
                         ],
                     )
 
-        # Map archetype → loop engine
-        if archetype == SkillArchetype.PROMPT_ONLY:
-            loop_engine = LoopKind.DIRECT
-        else:
-            loop_engine = LoopKind.CONVERSATION
+        # Map archetype → brick configuration (single source of truth)
+        from agenthatch_core.bricks.archetypes import archetype_to_brick_config
 
-        # Map archetype → capbus
-        capbus = archetype != SkillArchetype.PROMPT_ONLY
-
-        # Map archetype → hooks (only for multi-step)
-        hooks = archetype not in (
-            SkillArchetype.PROMPT_ONLY, SkillArchetype.EXTERNAL_TOOL
+        cfg = archetype_to_brick_config(
+            archetype=archetype,
+            api_templates=ahspec.get("interface", {}).get("api_templates", []),
+            rules=ahspec.get("instructions", {}).get("rules", []),
         )
-
-        # CredentialVault only if api_templates are present
-        api_templates = ahspec.get("interface", {}).get("api_templates", [])
-        credential_vault = bool(api_templates)
-
-        # FileProcessor only for tool-wrapper and multi-step
-        file_processor = archetype in (
-            SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
-        )
-
-        # Guard active only if ANCHOR_RULES exist and not prompt-only
-        rules = ahspec.get("instructions", {}).get("rules", [])
-        guard_active = bool(rules) and archetype != SkillArchetype.PROMPT_ONLY
 
         return {
-            "loop_engine": loop_engine.value,
-            "capbus": capbus,
-            "hooks": hooks,
-            "guard_active": guard_active,
-            "credential_vault": credential_vault,
-            "file_processor": file_processor,
-            "memory": True,  # v0.7.6: default-on, opt-out via memory: false
+            **cfg,
+            "memory": True,
             "archetype": archetype.value,
             "archetype_confidence": result.confidence,
+            "loop_engine": cfg["loop_engine"].value,  # engine.py uses string value
         }
 
     @staticmethod

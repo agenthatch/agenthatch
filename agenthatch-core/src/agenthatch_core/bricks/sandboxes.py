@@ -52,25 +52,12 @@ class SandboxWhitelist:
         return set(STANDARD_COMMANDS)
 
     @classmethod
-    def from_tier(cls, tier: SandboxTier) -> SandboxWhitelist:
-        """Create whitelist from tier level (backward compat — v0.8: all tiers equivalent)."""
-        return cls.default()
-
-    @classmethod
     def default(cls) -> SandboxWhitelist:
         """v0.8: Maximum capability whitelist — all agents execute as direct subprocess."""
         return cls(
             tier=SandboxTier.NONE,
             commands=STANDARD_COMMANDS | EXTENDED_COMMANDS,
         )
-
-    @staticmethod
-    def _tier_commands_static(tier: SandboxTier) -> set[str]:
-        if tier == SandboxTier.NONE:
-            return set()
-        if tier == SandboxTier.EXTENDED:
-            return STANDARD_COMMANDS | EXTENDED_COMMANDS
-        return set(STANDARD_COMMANDS)
 
     def extend(self, *commands: str) -> None:
         """Add extra commands to the whitelist."""

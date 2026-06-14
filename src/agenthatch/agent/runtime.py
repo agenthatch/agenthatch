@@ -148,7 +148,6 @@ class SkillAgent:
     def _build_manifest(spec: AHSSpec) -> BrickManifest:
         """Build a BrickManifest from skill classification."""
         from agenthatch_core.bricks.archetypes import (
-            SkillArchetype,
             classify_skill,
         )
         from agenthatch_core.bricks.guards import OutputGuard
@@ -158,43 +157,32 @@ class SkillAgent:
         classification = classify_skill(spec_dict)
         archetype = classification.archetype
 
-        # Map archetype → loop engine
-        if archetype == SkillArchetype.PROMPT_ONLY:
-            loop_engine = LoopKind.DIRECT
-        else:
-            loop_engine = LoopKind.CONVERSATION
-
-        # v0.8: All archetypes use direct subprocess execution.
-        # No sandbox tier selection — Sandbox is always enabled.
-
-        capbus = archetype != SkillArchetype.PROMPT_ONLY
-        hooks = archetype not in (
-            SkillArchetype.PROMPT_ONLY, SkillArchetype.EXTERNAL_TOOL
-        )
+        # v0.8.22: Single source of truth for archetype → brick mapping
+        from agenthatch_core.bricks.archetypes import archetype_to_brick_config
 
         api_templates = (
-            spec.interface.api_templates
+            list(spec.interface.api_templates)
             if hasattr(spec.interface, "api_templates")
             else []
         )
-        credential_vault = bool(api_templates)
+        rules = list(spec.instructions.rules) if hasattr(spec.instructions, "rules") else []
 
-        file_processor = archetype in (
-            SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
+        cfg = archetype_to_brick_config(
+            archetype=archetype,
+            api_templates=api_templates,
+            rules=rules,
         )
 
-        rules = list(spec.instructions.rules) if hasattr(spec.instructions, "rules") else []
-        guard_active = bool(rules) and archetype != SkillArchetype.PROMPT_ONLY
-        guard = OutputGuard.from_rules(rules) if guard_active else None  # type: ignore[arg-type]
+        guard = OutputGuard.from_rules(rules) if cfg["guard_active"] else None  # type: ignore[arg-type]
 
         return BrickManifest(
-            loop_engine=loop_engine,
-            capbus=capbus,
-            hooks=hooks,
+            loop_engine=cfg["loop_engine"],
+            capbus=cfg["capbus"],
+            hooks=cfg["hooks"],
             guard=guard,
-            guard_active=guard_active,
-            credential_vault=credential_vault,
-            file_processor=file_processor,
+            guard_active=cfg["guard_active"],
+            credential_vault=cfg["credential_vault"],
+            file_processor=cfg["file_processor"],
             archetype=archetype.value,
             archetype_confidence=classification.confidence,
         )
