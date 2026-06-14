@@ -118,6 +118,9 @@ class {{ agent_class }}(AHCoreAgent):
         # Writes ~/config/mcporter.json and exports env vars if needed.
         self._ensure_mcp_ready()
 
+        # v0.9: Tool health check — verify tools are functional and deps are available.
+        self._check_tool_health()
+
         
 
     # ── MCP auto-configuration (v0.8.10, v0.8.13: self-writing) ────
@@ -248,6 +251,58 @@ class {{ agent_class }}(AHCoreAgent):
         except Exception:
             pass
         return None
+
+    # ── Tool health check (v0.9) ─────────────────────────────────────
+
+    def _check_tool_health(self):
+        """Verify tooling is functional at startup.
+
+        Checks required CLI dependencies from spec base.dependencies.
+        Stores issues as instance attributes — does NOT inject into
+        conversation context. Issues are surfaced only when a tool
+        invocation actually fails, avoiding context bloat.
+        """
+        import shutil as _shutil
+        import ast as _ast
+
+        self._tool_health_issues: list[str] = []
+
+        # Check CLI dependency availability
+        spec = self._load_spec() or {}
+        dependencies = spec.get("base", {}).get("dependencies", [])
+        for dep in dependencies:
+            if not _shutil.which(dep):
+                self._tool_health_issues.append(
+                    f"CLI dependency '{dep}' not found on PATH. "
+                    f"Install it or run: agenthatch hatch"
+                )
+
+        # Check for stub tools (AI generation failures left unresolved)
+        try:
+            tools_path = Path(__file__).parent / "tools.py"
+            if tools_path.exists():
+                content = tools_path.read_text(encoding="utf-8")
+                stub_sig = "AI tool generation did not produce a valid implementation"
+                if stub_sig in content:
+                    tree = _ast.parse(content)
+                    stubs = [
+                        node.name for node in _ast.walk(tree)
+                        if isinstance(node, _ast.FunctionDef)
+                        and _ast.get_source_segment(content, node)
+                        and stub_sig in (_ast.get_source_segment(content, node) or "")
+                    ]
+                    if stubs:
+                        self._tool_health_issues.append(
+                            f"{len(stubs)} tools are non-functional stubs: "
+                            f"{', '.join(stubs)}. "
+                            f"Re-run 'agenthatch hatch' to regenerate, "
+                            f"or implement them manually in tools.py."
+                        )
+        except Exception:
+            pass
+
+        # Do NOT inject into history — only surface on actual tool failure.
+        # Runtime can check self._tool_health_issues when a tool returns an error.
 
         
 

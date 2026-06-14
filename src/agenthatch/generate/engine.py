@@ -1070,6 +1070,19 @@ class GenerateEngine:
                     for err in validation_errors:
                         logger.warning("Validation issue (agent will self-heal): %s", err)
 
+            # v0.9: Tool stub detection — warn if any tools are non-functional stubs
+            stub_tools = self._check_tool_stubs(output_dir)
+            if stub_tools:
+                logger.warning(
+                    "CRITICAL: %d/%d tools are STUBS (non-functional): %s. "
+                    "AI tool generation failed for these tools. "
+                    "The agent will not work correctly. "
+                    "Re-run 'agenthatch hatch' or implement tools manually.",
+                    len(stub_tools),
+                    len(variables.get("tool_metadata", [])),
+                    ", ".join(stub_tools),
+                )
+
         return written
 
     # ── Generation validation ──────────────────────────────────────────
@@ -1137,6 +1150,42 @@ class GenerateEngine:
                 )
 
         return errors
+
+    # ── Tool stub detection (v0.9) ──────────────────────────────────────
+
+    @staticmethod
+    def _check_tool_stubs(output_dir: Path) -> list[str]:
+        """Detect non-functional STUB tools in generated tools.py.
+
+        A stub tool is a function body that only contains the error message:
+          "AI tool generation did not produce a valid implementation"
+
+        Returns list of tool function names that are stubs.
+        """
+        stub_tools: list[str] = []
+        stub_signature = "AI tool generation did not produce a valid implementation"
+
+        # Find tools.py in the generated output
+        for tools_py in output_dir.rglob("tools.py"):
+            content = tools_py.read_text(encoding="utf-8")
+            if stub_signature not in content:
+                continue
+
+            # Parse with AST to find which functions are stubs
+            try:
+                import ast as _ast
+                tree = _ast.parse(content)
+            except SyntaxError:
+                continue
+
+            for node in _ast.walk(tree):
+                if isinstance(node, _ast.FunctionDef):
+                    # Check if the function body contains the stub message
+                    body_text = _ast.get_source_segment(content, node)
+                    if body_text and stub_signature in body_text:
+                        stub_tools.append(node.name)
+
+        return stub_tools
 
     # ── Syntax auto-fix (v0.8.11) ────────────────────────────────────
 
