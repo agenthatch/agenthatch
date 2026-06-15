@@ -1061,7 +1061,7 @@ class MCPProxyExecutor:
 class CLIExecutor:
     """Execute capabilities as CLI commands for direct-execution agents.
 
-    Used by external skill agents (e.g., agent-browser) that provide
+    Used by external skill agents that provide
     capabilities via CLI tools rather than direct subprocess scripts or MCP servers.
     """
 

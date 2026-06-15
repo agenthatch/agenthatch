@@ -180,9 +180,8 @@ class CapBus:
                 ))
 
         # v0.9.7: Only inject task_complete if the agent wants it.
-        # Interactive REPL agents (e.g. agent-browser) set
-        # task_complete_enabled=False so the user controls when
-        # the session ends, not the LLM.
+        # Interactive REPL agents set task_complete_enabled=False
+        # so the user controls when the session ends, not the LLM.
         if self.task_complete_enabled:
             tools.append(ToolDefinition(
                 function={

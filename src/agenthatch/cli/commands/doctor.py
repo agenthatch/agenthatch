@@ -139,7 +139,7 @@ def _check_api_key() -> _Check:
             fix="agenthatch init",
         )
 
-    if not info.env_key and info.kind == "builtin" and info.name == "ollama":
+    if not info.env_key and info.kind == "builtin":
         return _Check(
             passed=True,
             message=f"Provider: {provider_name} (local, no key needed)",

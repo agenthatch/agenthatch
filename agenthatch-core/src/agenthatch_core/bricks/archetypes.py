@@ -67,7 +67,7 @@ def classify_skill(spec: dict[str, Any] | Any) -> ClassificationResult:
             reasons=[f"{len(mcp_servers)} MCP server(s) detected"],
         )
 
-    # Rule 2: External tool requires (commands like "browser", "git", ...)
+    # Rule 2: External tool requires (CLI commands / binaries)
     external_requires = [
         r for r in requires
         if isinstance(r, dict) and r.get("type") in ("external", "binary", "cli")

@@ -540,35 +540,6 @@ def _build_done_panel_content(agent: Any, start_time: float) -> str:
     return "\n".join(lines)
 
 
-def _build_observability_footer(
-    agent: Any, start_time: float, reasoning_count: int = 0
-) -> Panel | str:
-    """v0.7.13: Build Session footer with status summary (not duplicate data).
-
-    Shows session state info instead of repeating Done panel observability.
-    """
-    elapsed = time.monotonic() - start_time
-    parts: list[str] = []
-
-    # Status summary
-    if reasoning_count > 0:
-        parts.append(f"Thinking complete ({reasoning_count} chunks)")
-    parts.append(f"⏱ {elapsed:.1f}s")
-
-    # Turn count
-    if hasattr(agent, "ctx"):
-        turn_count = getattr(agent.ctx, "_turn_count", 0)
-        if turn_count:
-            parts.append(f"Turn #{turn_count}")
-
-    return Panel(
-        " │ ".join(f"[dim]{p}[/dim]" for p in parts),
-        title="Session",
-        border_style="dim green",
-        padding=(0, 1),
-    )
-
-
 # ── /commands ───────────────────────────────────────────────────────────────
 
 def _handle_command(user_input: str, agent: Any) -> str | None:

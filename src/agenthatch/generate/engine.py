@@ -198,7 +198,7 @@ class GenerateEngine:
     def _humanize_display_name(display_name: str, agent_id: str) -> str:
         """Convert kebab-case or snake_case display_name to human-readable form.
 
-        "agent-browser" → "Agent Browser"
+        "interactive-tool" → "Interactive Tool"
         "pdf_tool" → "PDF Tool"
         Preserves already-human names like "Weather Reporter".
         """
@@ -572,8 +572,7 @@ class GenerateEngine:
 
             # v0.9: If no backend was detected but base.dependencies declares
             # CLI tools, treat the tool as a CLI wrapper.  This handles skills
-            # where all capabilities are backed by one CLI binary
-            # (e.g. agent-browser → browser_navigate, browser_snapshot, etc.).
+            # where all capabilities are backed by one CLI binary.
             if backend_kind == "none" and dependencies:
                 backend_kind = "cli_tool"
 
@@ -753,9 +752,9 @@ class GenerateEngine:
             "- For script-backed tools: use SKILLS_SCRIPTS_DIR / 'script_name'\n"
             "- For MCP-backed tools: return a placeholder (MCP handles execution)\n"
             "- For API template tools: generate HTTP requests from skill context\n"
-            "- For CLI-backed tools (backend=none, skill has CLI deps like 'agent-browser'):\n"
+            "- For CLI-backed tools (backend=none, skill has CLI dependencies):\n"
             "  read CLI commands from SKILL.md and generate subprocess.run() calls.\n"
-            "  Example: subprocess.run(['agent-browser', 'open', url],\n"
+            "  Example: subprocess.run(['tool-name', 'action', arg],\n"
             "      capture_output=True, text=True, timeout=120)\n"
             "- For other tools without backend: generate real implementation from context\n"
             "- Do NOT use **kwargs — use exact parameter names from tool definition\n"
@@ -843,9 +842,8 @@ class GenerateEngine:
                     if func_name in tool_names and isinstance(body, str) and len(body) > 10:
                         # Normalize indentation: strip AI's own indentation, then add
                         # consistent 4-space indent for template insertion.
-                        # v0.8.19: Use the AI's original indentation (which is usually
-                        # mostly correct) rather than destroying it with
-                        # _reindent_flat_code.  Just add base_indent to
+                        # Use the AI's original indentation (which is usually
+                        # mostly correct) and add base_indent to
                         # every line and validate the result.
                         body_lines = body.strip().split("\n")
                         indented_lines = [" " * 4 + line for line in body_lines]
@@ -1217,88 +1215,6 @@ class GenerateEngine:
                 logger.warning("Auto-fix failed for %s: %s", path.name, e)
 
     @staticmethod
-    def _reindent_flat_code(
-        lines: list[str], base_indent: int = 4,
-    ) -> str:
-        """Reconstruct Python block indentation from flat AI-generated code.
-
-        Many models (especially non-frontier) generate code with all lines
-        at the same indentation level.  This function uses a simple
-        state-machine to reconstruct proper block structure:
-
-        - Lines ending with ':'  → push indent stack (start a block)
-        - Lines starting with except/finally/elif/else
-          → pop indent stack and immediately push new level
-        - All other lines → keep current indent
-
-        The input lines are *stripped* (no leading whitespace); the output
-        has base_indent added to every line and block indentation added
-        on top of that.
-        """
-        # v0.8.17: Reconstruct block indentation
-        BLOCK_BREAKERS = frozenset({
-            "except", "finally", "elif", "else",
-        })
-        # Control-flow statements that end a block: after these, the
-        # next line at the same level belongs to the parent block.
-        # Exception: if the block is a 'try', don't pop — let the
-        # matching except/finally handle it.
-        BLOCK_TERMINATORS = frozenset({
-            "return", "break", "continue", "raise",
-        })
-
-        # Stack of (body_indent, keyword) — each entry represents an
-        # open block.  body_indent is where the block's body should be
-        # indented; keyword is the block starter.
-        indent_stack: list[tuple[int, str]] = [(base_indent, "")]
-        result: list[str] = []
-
-        for raw_line in lines:
-            stripped = raw_line.strip()
-            if not stripped:
-                result.append("")
-                continue
-
-            first_word = stripped.split()[0] if stripped.split() else ""
-            first_word = first_word.rstrip(":")  # "else:" → "else"
-
-            if first_word in BLOCK_BREAKERS:
-                # Find the matching block without popping it yet.
-                if first_word in ("except", "finally"):
-                    target_kws = ("try", "except", "finally")
-                else:
-                    target_kws = ("if", "elif", "else")
-                match_idx = len(indent_stack) - 1
-                while match_idx > 0:
-                    if indent_stack[match_idx][1].rstrip(":") in target_kws:
-                        break
-                    match_idx -= 1
-                if match_idx > 0:
-                    # Block body indent → keyword indent (4 less)
-                    current_indent = indent_stack[match_idx][0] - 4
-                    del indent_stack[match_idx + 1:]  # pop intermediate blocks
-                    indent_stack.pop()                 # pop the match itself
-                else:
-                    current_indent = indent_stack[-1][0]
-            else:
-                current_indent = indent_stack[-1][0]
-
-            result.append(" " * current_indent + stripped)
-
-            # Block starter: push body_indent = current + 4
-            if stripped.rstrip().endswith(":"):
-                kw = first_word
-                indent_stack.append((current_indent + 4, kw))
-            # Block terminator: pop current body level
-            # (but not try — let except/finally handle it).
-            elif (first_word in BLOCK_TERMINATORS
-                  and len(indent_stack) > 1
-                  and indent_stack[-1][1].rstrip(":") != "try"):
-                indent_stack.pop()
-
-        return "\n".join(result)
-
-    @staticmethod
     def _normalize_indentation(
         lines: list[str], error_lines: list[int],
     ) -> list[str]:
@@ -1503,38 +1419,3 @@ class GenerateEngine:
             if dest_pkg.exists():
                 shutil.rmtree(dest_pkg)
             shutil.copytree(skill_dir, dest_pkg, dirs_exist_ok=True, ignore=ignore)
-
-
-def generate_agent(
-    ahspec: dict[str, Any],
-    output_dir: Path,
-    *,
-    dry_run: bool = False,
-    force: bool = False,
-    copy_skills: bool = True,
-    skill_dir: Path | None = None,
-    template_dir: Path | None = None,
-) -> list[Path]:
-    """Convenience function: generate an Agent directory from AHSSPEC.
-
-    Args:
-        ahspec: AHSSPEC dict.
-        output_dir: Target directory path.
-        dry_run: Print without writing.
-        force: Overwrite existing directory.
-        copy_skills: Copy SKILL.md and resources.
-        skill_dir: Source skill directory.
-        template_dir: Custom template directory.
-
-    Returns:
-        List of written file paths.
-    """
-    engine = GenerateEngine(template_dir=template_dir)
-    return engine.generate(
-        ahspec,
-        output_dir,
-        dry_run=dry_run,
-        force=force,
-        copy_skills=copy_skills,
-        skill_dir=skill_dir,
-    )
