@@ -128,7 +128,8 @@ class Config:
     @classmethod
     def _load_file(cls, config_path: Path | None = None) -> dict[str, Any]:
         """Load configuration from a TOML file."""
-        path = config_path or CONFIG_FILE
+        env_path = os.environ.get("AGENTHATCH_CONFIG", "")
+        path = config_path or (Path(env_path) if env_path else None) or CONFIG_FILE
         if not path.exists():
             return {}
         try:

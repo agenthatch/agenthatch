@@ -1,7 +1,6 @@
 """agenthatch run — launch an independent Agent in interactive TUI mode.
 
-v0.6: Rewritten as Agent-direct launcher.  Finds the hatched Agent
-directory, confirms dependencies, and launches in-process with Rich Live TUI.
+v0.9.8: Agent-direct launcher with PlanLayer, Micro-Compaction, reasoning_content support for DeepSeek/GLM models.
 
 Old config-driven SkillAgent.from_ahspec() path has been removed.
 """
@@ -52,7 +51,7 @@ def run_command(
 ) -> None:
     """Launch an independent Agent in interactive TUI mode.
 
-    v0.6: Finds the hatched Agent directory (from agenthatch hatch),
+    v0.9.8: Finds the hatched Agent directory (from agenthatch hatch),
     confirms dependencies, and launches in-process.
 
     Examples:

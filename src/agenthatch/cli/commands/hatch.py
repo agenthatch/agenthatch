@@ -1,7 +1,7 @@
 """agenthatch hatch — Standardize a SKILL.md into AHSSPEC middleware.
 
-Core v0.3 command: runs Phase 1 (deterministic context assembly) +
-Phase 2 (5 AgentHarnesses inference) and outputs:
+v0.9.8: Phase 1 (deterministic context assembly) +
+Phase 2 (AgentHarnesses inference + PlanLayer + Micro-Compaction) and outputs:
   1. agenthatch.yaml (AHSSPEC v1.1) at <skill_dir>/agenthatch.yaml
   2. skillhouse.json entry (registered in .agenthatch/skillhouse.json)
 
@@ -417,7 +417,7 @@ def hatch_command(
 ) -> None:
     """Standardize a SKILL.md into AHSSPEC middleware and generate an independent Agent.
 
-    v0.6: hatch now runs the full three-phase pipeline by default:
+    v0.9.8: hatch now runs the full three-phase pipeline by default:
       Phase 1: Deterministic context assembly (no AI)
       Phase 2: 6 AgentHarnesses inference (LLM-driven)
       Phase 3: Agent generation via Jinja2 templates (default on)
