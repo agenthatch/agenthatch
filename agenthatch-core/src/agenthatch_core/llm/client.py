@@ -43,6 +43,7 @@ class ToolCallResponse:
     text: str | None
     tool_calls: list[ToolCall] = dc_field(default_factory=list)
     finish_reason: str | None = None
+    reasoning_content: str | None = None  # v0.9.8: DeepSeek thinking mode
 
     @classmethod
     def from_openai(cls, response: Any, llm_client: Any | None = None) -> ToolCallResponse:
@@ -66,7 +67,12 @@ class ToolCallResponse:
                     name=tc.function.name,
                     arguments=args,
                 ))
-        return cls(text=text, tool_calls=tool_calls, finish_reason=None)
+        return cls(
+            text=text,
+            tool_calls=tool_calls,
+            finish_reason=response.choices[0].finish_reason,
+            reasoning_content=getattr(msg, "reasoning_content", None),
+        )
 
 
 class LLMClient:
@@ -614,10 +620,12 @@ class LLMClient:
         text = "".join(text_parts)
         if not text and reasoning_parts:
             text = "".join(reasoning_parts)
+        reasoning = "".join(reasoning_parts) or None
 
         return ToolCallResponse(
             text=text or None,
             tool_calls=final_tool_calls,
+            reasoning_content=reasoning,
         )
 
     def _stream_synthetic_fallback(

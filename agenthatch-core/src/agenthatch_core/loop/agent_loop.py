@@ -350,6 +350,9 @@ class ConversationLoop:
                     for tc in response.tool_calls
                 ],
             }
+            # v0.9.8: Preserve reasoning_content for DeepSeek thinking mode
+            if response.reasoning_content:
+                assistant_msg["reasoning_content"] = response.reasoning_content
             messages.append(assistant_msg)
 
             self.ctx.add_to_history(
@@ -807,11 +810,15 @@ class ConversationLoop:
                 }
                 for tc in response.tool_calls
             ]
-            messages.append({
+            stream_assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "content": None,
                 "tool_calls": assistant_tool_calls,
-            })
+            }
+            # v0.9.8: Preserve reasoning_content for DeepSeek thinking mode
+            if response.reasoning_content:
+                stream_assistant_msg["reasoning_content"] = response.reasoning_content
+            messages.append(stream_assistant_msg)
             self.ctx.add_to_history(
                 "assistant", None, tool_calls=assistant_tool_calls
             )
