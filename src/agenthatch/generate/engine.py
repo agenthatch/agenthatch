@@ -186,6 +186,8 @@ class GenerateEngine:
             "script_map": script_map,
             "requires": requires,
             "brick_manifest": brick_manifest,
+            # v0.9.8: loop_workflow extracted as top-level template variable
+            "loop_workflow": brick_manifest.get("loop_workflow") if brick_manifest else None,
             "ai_tool_impls": {},  # populated by AI generation step
             "ai_references": {},  # populated by AI reference extraction
             # v0.8.19: Pass dependencies for CLI tool fallback in template
@@ -329,6 +331,16 @@ class GenerateEngine:
             api_templates=ahspec.get("interface", {}).get("api_templates", []),
             rules=ahspec.get("instructions", {}).get("rules", []),
         )
+
+        # v0.9.8: Allow spec to override task_complete_enabled and loop_workflow.
+        # The base section of agenthatch.yaml can set these for interactive agents.
+        base = ahspec.get("base", {}) or {}
+        if "task_complete_enabled" in base:
+            cfg["task_complete_enabled"] = bool(base["task_complete_enabled"])
+        if "loop_workflow" in base:
+            cfg["loop_workflow"] = base["loop_workflow"]
+        if "loop_engine" in base:
+            cfg["loop_engine"] = base["loop_engine"]
 
         return {
             **cfg,

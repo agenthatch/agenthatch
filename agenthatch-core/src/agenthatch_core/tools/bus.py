@@ -41,6 +41,8 @@ class CapBus:
     _external_schemas: dict[str, dict[str, Any]] = field(default_factory=dict)
     _guard: Any = None  # v0.7.6: CompiledGuard for pre-tool validation
     _output_schemas: dict[str, dict[str, Any]] = field(default_factory=dict)  # v0.7.6
+    task_complete_enabled: bool = True  # v0.9.7: opt-out for interactive REPL agents
+    _plan_layer: Any = None  # v0.9.8: PlanLayer reference for plan-guided agents
 
     def register(
         self,
@@ -76,6 +78,10 @@ class CapBus:
         # v0.6: task_complete signal tool — LLM calls this to mark task done
         if tool_name == "task_complete":
             return "Task completed."
+
+        # v0.9.8: Plan tool — delegates to PlanLayer state machine
+        if tool_name == "plan" and self._plan_layer is not None:
+            return self._plan_layer.handle_plan_tool(arguments)
 
         # v0.7.6: Pre-tool validation via CompiledGuard
         if self._guard is not None:
@@ -173,26 +179,37 @@ class CapBus:
                     }
                 ))
 
-        # v0.6: task_complete signal tool — LLM must explicitly call this to terminate
-        tools.append(ToolDefinition(
-            function={
-                "name": "task_complete",
-                "description": (
-                    "Call this tool when the user's request has been fully completed. "
-                    "Only invoke this after all required steps are done and results are confirmed."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "summary": {
-                            "type": "string",
-                            "description": "Brief summary of what was accomplished (1-2 sentences).",
+        # v0.9.7: Only inject task_complete if the agent wants it.
+        # Interactive REPL agents (e.g. agent-browser) set
+        # task_complete_enabled=False so the user controls when
+        # the session ends, not the LLM.
+        if self.task_complete_enabled:
+            tools.append(ToolDefinition(
+                function={
+                    "name": "task_complete",
+                    "description": (
+                        "Call this tool when the user's request has been fully completed. "
+                        "Only invoke this after all required steps are done and results are confirmed."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary": {
+                                "type": "string",
+                                "description": "Brief summary of what was accomplished (1-2 sentences).",
+                            },
                         },
+                        "required": ["summary"],
                     },
-                    "required": ["summary"],
-                },
-            }
-        ))
+                }
+            ))
+
+        # v0.9.8: Inject plan tool when PlanLayer is active
+        if self._plan_layer is not None:
+            from agenthatch_core.bricks.plan import PLAN_TOOL_DEFINITION
+            tools.append(ToolDefinition(
+                function=PLAN_TOOL_DEFINITION["function"],
+            ))
 
         return tools
 

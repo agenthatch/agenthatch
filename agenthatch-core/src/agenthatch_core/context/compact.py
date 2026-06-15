@@ -55,6 +55,9 @@ information while discarding redundant details.
    pending_actions.
 3. If the agent made a choice between alternatives, record it in key_decisions.
 4. Be specific: "Created /tmp/report.csv (1,234 rows)" not "Created a file".
+5. Tool calls are included in this conversation.  Use tool_calls_summary to
+   describe what tools were called, their key results, and any failures.
+   Example: "Called web_search (3 times), grep (5 times), found 2 matches."
 
 ## Output format
 Respond ONLY with a JSON object. No markdown fences, no explanation, no prefix
@@ -68,7 +71,7 @@ or suffix. Start with "{" and end with "}". The JSON must match this schema:
   "pending_actions": ["<action>", ...],
   "open_questions": ["<question>", ...],
   "errors_encountered": ["<error description>", ...],
-  "tool_calls_summary": "<one paragraph>",
+  "tool_calls_summary": "<one paragraph summarizing tool calls and results>",
   "conversation_turns": <integer>
 }
 """

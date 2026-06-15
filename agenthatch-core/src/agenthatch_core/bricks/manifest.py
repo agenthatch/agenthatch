@@ -65,3 +65,8 @@ class BrickManifest:
 
     # v0.7.6: memory — enable persistent MemoryBrick (default-on, opt-out)
     memory: bool = True
+
+    # v0.9.7: task_complete — injected as a virtual tool so the LLM
+    # can signal completion.  Set False for interactive REPL agents
+    # where the user controls when the session ends.
+    task_complete_enabled: bool = True

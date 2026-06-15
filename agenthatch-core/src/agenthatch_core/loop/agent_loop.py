@@ -36,9 +36,14 @@ _INTERRUPT_MESSAGE = (
 # ── v0.6 Autonomous task completion ──────────────────────────────────
 _TASK_COMPLETE_TOOL = "task_complete"
 _CONTINUE_NUDGE = (
-    "Task not complete. Continue working on the user's request. "
-    "If all steps are done, call task_complete with a summary."
+    "Continue working on the user's request if there are remaining steps. "
+    "Call task_complete ONLY when you have completed ALL of the user's "
+    "requests, not after each individual sub-task."
 )
+# Grace period: allow N text-only responses before nudging,
+# so the agent can report progress naturally without being
+# pushed to task_complete prematurely.
+_NUDGE_GRACE = 2
 
 
 def _route_with_timeout(
@@ -103,6 +108,7 @@ class ConversationLoop:
         token_counter: TokenCounter | None = None,
         memory_brick: Any = None,  # v0.7.11: MemoryBrick for persistent memory
         checkpoint_mgr: Any = None,  # v0.7.12: CheckpointManager for conversation persistence
+        plan_layer: Any = None,  # v0.9.8: PlanLayer for state-machine planning
     ):
         self.llm = llm
         self.capbus = capbus
@@ -112,6 +118,7 @@ class ConversationLoop:
         self._token_counter = token_counter
         self._memory_brick = memory_brick  # v0.7.11
         self._checkpoint_mgr = checkpoint_mgr  # v0.7.12: FROM PARAMETER
+        self._plan_layer = plan_layer  # v0.9.8: PlanLayer for plan-guided agents
 
         # v0.9: Interruptable execution — set by EarlyInputReader on Ctrl+C
         self._interrupted = False
@@ -200,6 +207,17 @@ class ConversationLoop:
 
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
+
+        # v0.9.8: PlanLayer — inject plan context into system prompt
+        if self._plan_layer is not None:
+            self._plan_layer.handle_turn_start()
+            plan_ctx = self._plan_layer.plan_context
+            if plan_ctx and messages and messages[0]["role"] == "system":
+                messages[0]["content"] += "\n" + plan_ctx
+            suggestion = self._plan_layer.next_suggestion
+            if suggestion and messages[-1]["role"] == "user":
+                messages[-1]["content"] += "\n\n" + suggestion
+
         tools_for_api = [
             {"type": t.type, "function": t.function}
             if hasattr(t, "type") else
@@ -265,6 +283,29 @@ class ConversationLoop:
                 _consecutive_text_only += 1
                 if _consecutive_text_only > _MAX_CONSECUTIVE_TEXT_ONLY:
                     break
+                # v0.9.6: Grace period — allow the agent to report
+                # progress naturally (e.g. "Page opened, search box visible")
+                # before nudging it to continue or complete.
+                if _consecutive_text_only < _NUDGE_GRACE:
+                    messages.append({
+                        "role": "assistant",
+                        "content": response.text,
+                    })
+                    self.ctx.add_to_history("assistant", str(response.text))
+                    try:
+                        response = self._call_with_retry(
+                            self.llm.chat_with_tools, messages, tools_for_api,
+                        )
+                        self._cb_record(True)
+                        self._record_usage(response)
+                    except Exception as e:
+                        self._cb_record(False)
+                        logger.error("LLM API call failed in tool loop: %s", e)
+                        response = ToolCallResponse(
+                            text=f"Error communicating with model provider: {e}",
+                            tool_calls=[],
+                        )
+                    continue
                 messages.append({
                     "role": "assistant",
                     "content": response.text or "",
@@ -335,6 +376,8 @@ class ConversationLoop:
                 self.llm.features.supports_parallel_tool_calls
                 and len(response.tool_calls) > 1
             )
+            # v0.9.8: Collect tool results for PlanLayer
+            plan_tool_results: list[dict[str, Any]] = []
             for entry in self._execute_tool_calls(
                 response.tool_calls, parallel=parallel
             ):
@@ -365,6 +408,28 @@ class ConversationLoop:
                     })
                 has_executed_tools = True
                 _consecutive_text_only = 0  # v0.8.14: reset on tool execution
+
+                # v0.9.8: Collect for PlanLayer
+                plan_tool_results.append({
+                    "name": tc.name,
+                    "content": result_str,
+                })
+
+            # v0.9.8: PlanLayer — update state after tool execution
+            if self._plan_layer is not None and plan_tool_results:
+                self._plan_layer.handle_turn_end(
+                    response_text=None,
+                    tool_results=plan_tool_results,
+                )
+                # Re-inject plan context after state change
+                if self._plan_layer.state.value != "done":
+                    plan_ctx = self._plan_layer.plan_context
+                    if plan_ctx and messages and messages[0]["role"] == "system":
+                        base = self.ctx.build_system_prompt()
+                        messages[0]["content"] = base + "\n" + plan_ctx
+                    suggestion = self._plan_layer.next_suggestion
+                    if suggestion:
+                        messages.append({"role": "user", "content": suggestion})
 
             if not self._cb_allow():
                 break
@@ -590,6 +655,17 @@ class ConversationLoop:
 
         messages = self.ctx.build_messages(user_input)
         tools = self.capbus.list_tool_definitions()
+
+        # v0.9.8: PlanLayer injection for streaming path
+        if self._plan_layer is not None:
+            self._plan_layer.handle_turn_start()
+            plan_ctx = self._plan_layer.plan_context
+            if plan_ctx and messages and messages[0]["role"] == "system":
+                messages[0]["content"] += "\n" + plan_ctx
+            suggestion = self._plan_layer.next_suggestion
+            if suggestion and messages[-1]["role"] == "user":
+                messages[-1]["content"] += "\n\n" + suggestion
+
         tools_for_api = [
             {"type": t.type, "function": t.function}
             if hasattr(t, "type") else
@@ -697,6 +773,13 @@ class ConversationLoop:
                 if _consecutive_text_only > _MAX_CONSECUTIVE_TEXT_ONLY:
                     full_response_text = response.text or accumulated_text
                     break
+                # v0.9.8: Grace period — allow the agent to report
+                # progress naturally (e.g. "Page opened, search box visible")
+                # before nudging it to continue or complete.
+                # This matches the run() method's grace period logic.
+                if _consecutive_text_only < _NUDGE_GRACE:
+                    accumulated_text = ""
+                    continue
                 messages.append({
                     "role": "assistant",
                     "content": response.text or accumulated_text,
@@ -751,6 +834,8 @@ class ConversationLoop:
                 self.llm.features.supports_parallel_tool_calls
                 and len(response.tool_calls) > 1
             )
+            # v0.9.8: Collect tool results for PlanLayer
+            stream_plan_results: list[dict[str, Any]] = []
             for entry in self._execute_tool_calls(
                 response.tool_calls, parallel=parallel
             ):
@@ -790,6 +875,19 @@ class ConversationLoop:
                     })
                 has_executed_tools = True
                 _consecutive_text_only = 0  # v0.8.14: reset on tool execution
+
+                # v0.9.8: Collect for PlanLayer
+                stream_plan_results.append({
+                    "name": tc.name,
+                    "content": result_str,
+                })
+
+            # v0.9.8: PlanLayer — update state after stream tool execution
+            if self._plan_layer is not None and stream_plan_results:
+                self._plan_layer.handle_turn_end(
+                    response_text=None,
+                    tool_results=stream_plan_results,
+                )
 
         self.ctx.add_to_history("user", user_input)
         final_text = full_response_text or accumulated_text

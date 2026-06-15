@@ -61,7 +61,9 @@ class AHCoreAgent:
         self._manifest = brick_manifest or BrickManifest()
 
         # Assemble bricks — use null stubs for disabled features
-        self.capbus: Any = CapBus() if self._manifest.capbus else _NullCapBus()
+        self.capbus: Any = CapBus(
+            task_complete_enabled=self._manifest.task_complete_enabled,
+        ) if self._manifest.capbus else _NullCapBus()
         # v0.8: Sandbox always enabled — direct subprocess execution (no Docker)
         self.sandbox: Any = Sandbox()
         self.hooks: Any = HooksManager() if self._manifest.hooks else _NullHooks()
@@ -74,6 +76,20 @@ class AHCoreAgent:
         # v0.7.6: Wire guard to CapBus for pre-tool validation
         if self._manifest.guard_active and self.guard is not None:
             self.capbus._guard = self.guard
+
+        # v0.9.8: PlanLayer — runtime state machine for all agents.
+        # The `plan` tool is always available; agents opt in at runtime
+        # by calling it for complex tasks.  plan_guided mode nags a bit
+        # more actively (4 turns vs 2 for conversation mode).
+        from agenthatch_core.bricks.plan import PlanLayer
+        plan_mode = (
+            "plan_guided"
+            if self._manifest.loop_engine == LoopKind.PLAN_GUIDED
+            else "conversation"
+        )
+        self._plan_layer = PlanLayer(mode=plan_mode)
+        if self._manifest.capbus:
+            self.capbus._plan_layer = self._plan_layer
 
         # CredentialVault + APITemplateExecutor (v0.7)
         self.vault: Any = None
@@ -501,28 +517,18 @@ class AHCoreAgent:
                 memory_brick=self._memory,
                 hooks=self.hooks,
             ).run(user_input)
-        elif self._manifest.loop_engine == LoopKind.PLAN_GUIDED:
-            # v0.7.12: PLAN_GUIDED reserved for v0.8 PlanLayer.
-            # Falls through to standard ConversationLoop for now.
+        else:
+            # v0.9.8: All non-DIRECT agents use ConversationLoop with
+            # PlanLayer (created in __init__).  The `plan` tool is
+            # available at runtime; agents opt in by calling it.
             loop = ConversationLoop(
                 self.llm, self.capbus, self.sandbox, self.ctx,
                 hooks=self.hooks,
                 token_counter=self.token_counter,
                 memory_brick=self._memory,
                 checkpoint_mgr=self._checkpoint_mgr,
+                plan_layer=self._plan_layer,
             )
-            # v0.9: Propagate interrupt flag
-            loop._interrupted = self._interrupted
-            result = loop.run(user_input)
-        else:
-            loop = ConversationLoop(
-                self.llm, self.capbus, self.sandbox, self.ctx,
-                hooks=self.hooks,
-                token_counter=self.token_counter,
-                memory_brick=self._memory,  # v0.7.12: wire memory brick
-                checkpoint_mgr=self._checkpoint_mgr,  # v0.7.12: wire checkpointing
-            )
-            # v0.9: Propagate interrupt flag
             loop._interrupted = self._interrupted
             result = loop.run(user_input)
 
@@ -555,26 +561,17 @@ class AHCoreAgent:
                 memory_brick=self._memory,
                 hooks=self.hooks,
             ).stream(user_input)
-        elif self._manifest.loop_engine == LoopKind.PLAN_GUIDED:
-            # v0.7.12: PLAN_GUIDED reserved for v0.8 PlanLayer.
-            # Falls through to standard ConversationLoop for now.
+        else:
+            # v0.9.8: All non-DIRECT agents use ConversationLoop with
+            # PlanLayer (created in __init__).  The `plan` tool is
+            # available at runtime; agents opt in by calling it.
             loop = ConversationLoop(
                 self.llm, self.capbus, self.sandbox, self.ctx,
                 hooks=self.hooks,
                 token_counter=self.token_counter,
                 memory_brick=self._memory,
                 checkpoint_mgr=self._checkpoint_mgr,
-            )
-            # v0.9: Propagate interrupt flag
-            loop._interrupted = self._interrupted
-            result = yield from loop.stream(user_input)
-        else:
-            loop = ConversationLoop(
-                self.llm, self.capbus, self.sandbox, self.ctx,
-                hooks=self.hooks,
-                token_counter=self.token_counter,
-                memory_brick=self._memory,  # v0.7.12: wire memory brick
-                checkpoint_mgr=self._checkpoint_mgr,  # v0.7.12: wire checkpointing
+                plan_layer=self._plan_layer,
             )
             # v0.9: Propagate interrupt flag
             loop._interrupted = self._interrupted

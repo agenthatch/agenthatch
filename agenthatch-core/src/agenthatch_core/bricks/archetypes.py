@@ -165,6 +165,9 @@ def archetype_to_brick_config(
     return {
         "loop_engine": (
             LoopKind.DIRECT if archetype == SkillArchetype.PROMPT_ONLY
+            else LoopKind.PLAN_GUIDED if archetype in (
+                SkillArchetype.MULTI_STEP, SkillArchetype.MCP_CONNECTOR
+            )
             else LoopKind.CONVERSATION
         ),
         "capbus": archetype != SkillArchetype.PROMPT_ONLY,
@@ -176,4 +179,12 @@ def archetype_to_brick_config(
             SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
         ),
         "guard_active": bool(rules) and archetype != SkillArchetype.PROMPT_ONLY,
+        # v0.9.8: task_complete_enabled — interactive REPL agents
+        # (browser, shell, etc.) set this False so the user controls
+        # when the session ends.  Default True for task-oriented agents.
+        "task_complete_enabled": True,
+        # v0.9.8: loop_workflow — step index to loop back to after
+        # the linear workflow completes.  None means no loop.
+        # Interactive agents typically set loop_steps=1.
+        "loop_workflow": None,
     }

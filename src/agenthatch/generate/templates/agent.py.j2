@@ -71,6 +71,7 @@ class {{ agent_class }}(AHCoreAgent):
             file_processor={{ brick_manifest.file_processor | pybool }},
             memory={{ brick_manifest.memory | pybool }},
             archetype="{{ brick_manifest.archetype }}",
+            task_complete_enabled={{ brick_manifest.task_complete_enabled | pybool }},
         )
 {% else %}
         manifest = None
@@ -107,7 +108,7 @@ class {{ agent_class }}(AHCoreAgent):
                 script={{ step.script | python_repr }},
             ),
 {% endfor %}
-        ])
+        ]{% if loop_workflow is not none %} loop_steps={{ loop_workflow }}{% endif %})
 
         self._run_warmup_scripts()
 {% else %}

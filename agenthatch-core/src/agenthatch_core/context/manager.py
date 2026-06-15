@@ -61,8 +61,14 @@ class ContextManager:
     COMPACT_MIN_SAVINGS_RATIO: float = 0.30
     MIN_RECENT_TURNS: int = 3
     MAX_CONSECUTIVE_FAILURES: int = 3
-    MAX_TOOL_RESULTS_FULL: int = 10
-    TOOL_RESULT_SUMMARY_CHARS: int = 200
+    MAX_TOOL_RESULTS_FULL: int = 20
+    TOOL_RESULT_SUMMARY_CHARS: int = 500
+    # v0.9.8: Micro-compaction — lightweight in-process truncation of old
+    # tool results to prevent context bloat between full LLM compactions.
+    # Inspired by Claude Code's microCompact.ts.
+    MICRO_COMPACT_MAX_TOOL_RESULTS: int = 30
+    MICRO_COMPACT_KEEP_RECENT: int = 15
+    MICRO_COMPACT_TRUNCATE_CHARS: int = 200
     ANCHOR_RULES: list[str] = []
     _skill_dir: Path | None = None
     mcp_status_note: str = ""
@@ -81,7 +87,7 @@ class ContextManager:
         self._raw_spec = spec
 
         self.history: list[dict[str, Any]] = []
-        self.max_history_turns = 20
+        self.max_history_turns = 40
 
         self._consecutive_compact_failures: int = 0
         self.compact_config: dict[str, Any] | None = None
@@ -513,6 +519,54 @@ class ContextManager:
         if tool_calls:
             msg["tool_calls"] = tool_calls
         self.history.append(msg)
+        # v0.9.8: Micro-compact after each tool result to prevent
+        # unbounded context growth between full LLM compactions.
+        if role == "tool":
+            self.micro_compact()
+
+    def micro_compact(self) -> int:
+        """Lightweight in-process truncation of old tool results.
+
+        Unlike full compact() which calls an LLM, this is a deterministic
+        truncation that keeps recent tool results intact and summarizes
+        older ones to a brief extract.  Preserves tool_call_id → tool_result
+        pairing integrity.
+
+        Returns the number of tool results truncated.
+        """
+        # Count tool results and find their positions
+        tool_indices: list[int] = []
+        for i, msg in enumerate(self.history):
+            if msg.get("role") == "tool":
+                tool_indices.append(i)
+
+        total_tools = len(tool_indices)
+        if total_tools <= self.MICRO_COMPACT_MAX_TOOL_RESULTS:
+            return 0
+
+        # Keep the most recent MICRO_COMPACT_KEEP_RECENT tool results intact
+        keep_from = tool_indices[-self.MICRO_COMPACT_KEEP_RECENT] if len(tool_indices) >= self.MICRO_COMPACT_KEEP_RECENT else 0
+
+        truncated = 0
+        for idx in tool_indices:
+            if idx >= keep_from:
+                break  # reached the "keep recent" zone
+            content = self.history[idx].get("content", "")
+            if isinstance(content, str) and len(content) > self.MICRO_COMPACT_TRUNCATE_CHARS:
+                self.history[idx]["content"] = (
+                    content[:self.MICRO_COMPACT_TRUNCATE_CHARS]
+                    + "... [micro-compacted]"
+                )
+                truncated += 1
+
+        if truncated > 0:
+            logger.debug(
+                "Micro-compact: truncated %d old tool results "
+                "(total: %d, kept recent: %d)",
+                truncated, total_tools,
+                min(self.MICRO_COMPACT_KEEP_RECENT, total_tools),
+            )
+        return truncated
 
     def estimate_input_tokens(self) -> int:
         """Estimate total input tokens for current context."""
@@ -667,7 +721,13 @@ class ContextManager:
         return self._state_manager.save_history(list(self.history))
 
     def _build_compact_messages(self) -> list[dict[str, Any]]:
-        """Build messages for the compaction LLM call."""
+        """Build messages for the compaction LLM call.
+
+        v0.9.8: Include tool call results (truncated) so the LLM knows
+        what tools were called and what happened.  Previously only user
+        and assistant (non-tool-call) messages were included, making the
+        tool_calls_summary field in CompactSummary always empty.
+        """
         prompt = COMPACT_SYSTEM_PROMPT
 
         if self.summary:
@@ -686,12 +746,38 @@ class ContextManager:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": prompt},
         ]
+
+        # Max chars for a single tool result in the compaction prompt.
+        # Tool results are truncated to this length to avoid token bloat
+        # while still giving the LLM enough context to summarize.
+        TOOL_COMPACT_CHARS = 800
+
         for msg in self.history:
-            if msg["role"] in ("user", "assistant"):
-                if msg["role"] == "assistant" and not msg.get("tool_calls"):
+            role = msg["role"]
+            if role in ("user", "assistant"):
+                if role == "assistant" and msg.get("tool_calls"):
+                    # Include tool call requests (function names + arguments)
+                    # but strip the full content to save tokens
+                    tc_msg = dict(msg)
+                    tc_msg.pop("content", None)
+                    messages.append(tc_msg)
+                elif role == "assistant":
                     messages.append(msg)
-                elif msg["role"] == "user":
+                elif role == "user":
                     messages.append(msg)
+            elif role == "tool":
+                # Include tool results, truncated to TOOL_COMPACT_CHARS
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > TOOL_COMPACT_CHARS:
+                    tc_msg = dict(msg)
+                    tc_msg["content"] = (
+                        content[:TOOL_COMPACT_CHARS]
+                        + "... [truncated for compaction]"
+                    )
+                    messages.append(tc_msg)
+                else:
+                    messages.append(msg)
+
         return messages
 
     def _generate_summary(self) -> CompactSummary:

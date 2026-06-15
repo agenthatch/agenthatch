@@ -825,9 +825,7 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
     will detect the missing tool and inform the LLM.
     """
     import platform
-    import select
     import shutil
-    import subprocess
     import threading
 
     if shutil.which(tool):
@@ -856,9 +854,14 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
                 text=True,
             )
             last_output = [time.time()]
-            output_lines = []
+            output_lines: list[str] = []
 
-            def _drain():
+            def _drain(
+                proc: subprocess.Popen[str] = proc,
+                last_output: list[float] = last_output,
+                output_lines: list[str] = output_lines,
+            ) -> None:
+                assert proc.stdout is not None  # captured with PIPE
                 while True:
                     line = proc.stdout.readline()
                     if not line and proc.poll() is not None:

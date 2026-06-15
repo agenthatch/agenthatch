@@ -80,7 +80,7 @@ class TestContextManagerInit:
 
     def test_default_max_turns(self, minimal_spec):
         ctx = ContextManager(minimal_spec)
-        assert ctx.max_history_turns == 20
+        assert ctx.max_history_turns == 40
 
 
 class TestBuildSystemPrompt:
