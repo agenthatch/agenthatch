@@ -1,6 +1,7 @@
 """agenthatch run — launch an independent Agent in interactive TUI mode.
 
-v0.9.8: Agent-direct launcher with PlanLayer, Micro-Compaction, reasoning_content support for DeepSeek/GLM models.
+v0.9.8: Agent-direct launcher with PlanLayer, Micro-Compaction,
+    reasoning_content support for DeepSeek/GLM models.
 
 Old config-driven SkillAgent.from_ahspec() path has been removed.
 """
