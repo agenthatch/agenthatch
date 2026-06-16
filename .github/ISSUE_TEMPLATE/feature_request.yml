@@ -1,0 +1,38 @@
+name: "⭐ Feature request"
+description: Propose a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched [existing issues](https://github.com/agenthatch/agenthatch/issues?q=is%3Aissue) and found no duplicate.
+          required: true
+        - label: This is a feature request, not a bug report or question.
+          required: true
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve? Describe the use case.
+      placeholder: "I'm trying to hatch an agent that uses MCP tools, but..."
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed solution
+      description: How should agenthatch solve this? A CLI flag, API change, new harness — be specific.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or alternative approaches you've tried.
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Contribution
+      description: Not a commitment, just a signal.
+      options:
+        - label: I am interested in implementing this feature.
+          required: false

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "🔐 Security vulnerability"
+    url: "https://github.com/agenthatch/agenthatch/security/advisories/new"
+    about: Report security vulnerabilities privately. Do not use public issues.
+  - name: "💬 Discussions"
+    url: "https://github.com/agenthatch/agenthatch/discussions"
+    about: Ask questions, share ideas, and discuss the project roadmap.

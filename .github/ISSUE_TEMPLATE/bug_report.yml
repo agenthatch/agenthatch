@@ -1,0 +1,62 @@
+name: "🐛 Bug report"
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: checkboxes
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have read the [Contributing Guide](https://github.com/agenthatch/agenthatch/blob/main/CONTRIBUTING.md).
+          required: true
+        - label: I have searched [existing issues](https://github.com/agenthatch/agenthatch/issues?q=is%3Aissue) and found no duplicate.
+          required: true
+        - label: This is a bug report, not a question or feature request. For questions, use [Discussions](https://github.com/agenthatch/agenthatch/discussions).
+          required: true
+  - type: input
+    attributes:
+      label: agenthatch version
+      description: Run `agenthatch --version` and paste the output.
+      placeholder: "e.g. 0.9.11"
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Python version
+      description: Run `python --version` and paste the output.
+      placeholder: "e.g. 3.11.9"
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Install method
+      options:
+        - pip install agenthatch
+        - pip install -e ".[dev]" (from source)
+        - pipx
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Terminal commands and output. Use triple backticks (```) for code blocks.
+      placeholder: |
+        1. Run `agenthatch hatch my-skill`
+        2. See error:
+        ```
+        Traceback ...
+        ```
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
