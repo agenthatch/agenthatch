@@ -93,6 +93,7 @@ class LLMClient:
         context_window: int | None = None,
         thinking: bool = True,              # v0.8: deep thinking ON by default
         reasoning_effort: str = "medium",    # v0.8: OpenAI o-series
+        effort: str | None = None,          # v0.10: Anthropic effort (low/medium/high/max/xhigh)
         **kwargs: Any,
     ):
         if not api_key:
@@ -105,6 +106,7 @@ class LLMClient:
         self._context_window = context_window or 128000
         self._thinking = thinking
         self._reasoning_effort = reasoning_effort
+        self._effort = effort
         self.last_usage: Any = None
 
         if self._features.requires_anthropic_adapter:
@@ -159,8 +161,10 @@ class LLMClient:
 
         Provider-specific thinking configuration:
           DeepSeek:  {"thinking": {"type": "enabled"}}
-          OpenAI:    {"reasoning_effort": "medium"}   (o-series)
-          Anthropic: {"thinking": {"type": "enabled", "budget_tokens": 4000}}
+          OpenAI:    {"reasoning_effort": "medium"}   (o-series / GPT-5.5)
+          Anthropic: {"thinking": {"type": "adaptive"}} (Opus 4.6+, Sonnet 4.6+)
+                     budget_tokens is DEPRECATED on 4.6+ and REMOVED on 4.7/4.8.
+                     Use output_config.effort to control thinking depth.
           Others:    None (passthrough)
         """
         if not self._thinking:
@@ -171,7 +175,10 @@ class LLMClient:
         elif provider == "openai":
             return {"reasoning_effort": self._reasoning_effort}
         elif provider == "anthropic":
-            return {"thinking": {"type": "enabled", "budget_tokens": 4000}}
+            body: dict[str, Any] = {"thinking": {"type": "adaptive"}}
+            if self._effort:
+                body["effort"] = self._effort
+            return body
         return None
 
     def _effective_tool_choice(

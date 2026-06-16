@@ -353,6 +353,15 @@ def _openai_messages_to_anthropic(
     return system, anthropic_messages
 
 
+def _is_opus_47_or_later(model: str) -> bool:
+    """Check if model is Opus 4.7+ (temperature/top_p/top_k removed)."""
+    model_lower = model.lower()
+    return any(
+        m in model_lower
+        for m in ("claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-7", "claude-sonnet-4-8")
+    )
+
+
 def _openai_tools_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
     """Convert OpenAI-format tools to Anthropic format."""
     if not tools:
@@ -397,33 +406,42 @@ class AnthropicChatCompletions:
         system, anthropic_messages = _openai_messages_to_anthropic(messages)
         anthropic_tools = _openai_tools_to_anthropic(tools)
 
-        # Build extra_headers for thinking support
+        # Build thinking parameter for extended thinking support
+        # Opus 4.6+/Sonnet 4.6+: adaptive thinking (no budget_tokens)
+        # Opus 4.7/4.8: adaptive only — budget_tokens returns 400
+        # Supports optional thinking.display for 4.7/4.8: "omitted" (default) or "summarized"
+        thinking_config: dict[str, Any] | None = None
         if extra_body:
             thinking = extra_body.get("thinking")
             if thinking:
-                anthropic_tools = [{
-                    "type": "custom",
-                    "name": "thinking",
-                    "thinking": {
-                        "type": thinking.get("type", "enabled"),
-                        "budget_tokens": thinking.get("budget_tokens", 4000),
-                    },
-                }]
-                if anthropic_tools:
-                    anthropic_tools = [{
-                        "type": "custom",
-                        "name": "thinking",
-                        "thinking": {
-                            "type": thinking.get("type", "enabled"),
-                            "budget_tokens": thinking.get("budget_tokens", 4000),
-                        },
-                    }]
+                thinking_config = {
+                    "type": thinking.get("type", "adaptive"),
+                }
+                # Only include display if explicitly set (default is "omitted" on 4.7/4.8)
+                if "display" in thinking:
+                    thinking_config["display"] = thinking["display"]
+                # budget_tokens is deprecated on 4.6+ and removed on 4.7/4.8
+                # Only include if explicitly provided for backward compat with older models
+                if "budget_tokens" in thinking and thinking.get("type") == "enabled":
+                    thinking_config["budget_tokens"] = thinking["budget_tokens"]
 
         kwargs_for_api: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
             "messages": anthropic_messages,
         }
+
+        if thinking_config:
+            kwargs_for_api["thinking"] = thinking_config
+
+        # Effort parameter (GA, no beta header)
+        # Controls thinking depth: "low"|"medium"|"high"|"max"|"xhigh" (Opus 4.7+)
+        # Best practice: "xhigh" for coding/agentic use cases on Opus 4.7/4.8,
+        # "high" as minimum for intelligence-sensitive work
+        if extra_body:
+            effort = extra_body.get("effort")
+            if effort:
+                kwargs_for_api["output_config"] = {"effort": effort}
 
         if system:
             if isinstance(system, str):
@@ -434,8 +452,11 @@ class AnthropicChatCompletions:
         if anthropic_tools:
             kwargs_for_api["tools"] = anthropic_tools
 
+        # Opus 4.7/4.8: temperature, top_p, top_k are removed (400 if passed)
+        # Only include temperature for pre-4.7 models
         if temperature is not None and temperature > 0:
-            kwargs_for_api["temperature"] = temperature
+            if not _is_opus_47_or_later(model):
+                kwargs_for_api["temperature"] = temperature
 
         # Handle tool_choice
         if tool_choice and tool_choice != "auto":

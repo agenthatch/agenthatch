@@ -10,11 +10,6 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README_CN.md">简体中文</a>
-</p>
-
-<p align="center">
   <a href="https://pypi.org/project/agenthatch/">
     <img src="https://img.shields.io/pypi/v/agenthatch?color=blue" alt="PyPI version">
   </a>
@@ -27,10 +22,10 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <a href="https://github.com/agenthatch/agenthatch/discussions">
+  <a href="https://discord.gg/TODO">
     <img src="https://img.shields.io/badge/Discord-coming_soon-5865F2" alt="Discord">
   </a>
-  <a href="https://github.com/agenthatch/agenthatch/discussions">
+  <a href="https://twitter.com/TODO">
     <img src="https://img.shields.io/badge/Twitter-coming_soon-1DA1F2" alt="Twitter">
   </a>
 </p>
@@ -79,7 +74,7 @@ MCP 集成以及运行时配置。它不是对 skill 的包装——它**就是*
      PlanLayer 驱动执行、工具调用、MCP 集成 -->
 
 <p align="center">
-  <em>演示即将上线。先试试下面的 Quick Start，一分钟内即可跑通。</em>
+  <em>演示即将上线。先试试下面的快速开始，一分钟内即可跑通。</em>
 </p>
 
 ---
@@ -125,7 +120,8 @@ agenthatch run my-skill
 
 ## 架构
 
-<!-- TODO: 3 阶段流水线架构图 -->
+<!-- TODO: 3 阶段流水线架构图
+     (解析 → 6-Harness LLM → 代码生成) -->
 
 agenthatch 运行 **3 阶段流水线**，内含 6 个 AI Harness 并行工作：
 
@@ -305,17 +301,10 @@ agenthatch 将它们转化为 Agent。
 
 ---
 
-## Star History
-
-<a href="https://star-history.com/#agenthatch/agenthatch&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date&theme=dark">
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date">
-  </picture>
-</a>
-
----
-
 ## 许可证
 
 MIT — 详见 [LICENSE](LICENSE)。
+
+---
+
+<sub>📖 English version: [README.md](README.md)</sub>

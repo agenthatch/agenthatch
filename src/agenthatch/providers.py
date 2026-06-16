@@ -85,6 +85,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_stream_tools=True,
             supports_json_mode=True,
             supports_parallel_tool_calls=True,
+            supports_reasoning_content=True,  # o-series / GPT-5.5 thinking models
         ),
     ),
     "anthropic": ProviderInfo(
@@ -92,11 +93,11 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="ANTHROPIC_API_KEY",
         base_url="https://api.anthropic.com",
-        default_model="claude-sonnet-4-20250514",
-        context_window=200000,
+        default_model="claude-opus-4-8",
+        context_window=1000000,  # 1M context for Opus 4.8 / Sonnet 4.6+
         features=ProviderFeatures(
             supports_tools=True,
-            supports_stream_tools=False,
+            supports_stream_tools=False,  # synthetic streaming via adapter
             supports_json_mode=False,
             supports_parallel_tool_calls=True,
             supports_reasoning_content=True,

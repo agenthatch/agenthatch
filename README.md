@@ -10,11 +10,6 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README_CN.md">简体中文</a>
-</p>
-
-<p align="center">
   <a href="https://pypi.org/project/agenthatch/">
     <img src="https://img.shields.io/pypi/v/agenthatch?color=blue" alt="PyPI version">
   </a>
@@ -27,10 +22,10 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <a href="https://github.com/agenthatch/agenthatch/discussions">
+  <a href="https://discord.gg/TODO">
     <img src="https://img.shields.io/badge/Discord-coming_soon-5865F2" alt="Discord">
   </a>
-  <a href="https://github.com/agenthatch/agenthatch/discussions">
+  <a href="https://twitter.com/TODO">
     <img src="https://img.shields.io/badge/Twitter-coming_soon-1DA1F2" alt="Twitter">
   </a>
 </p>
@@ -46,9 +41,9 @@ Code, Codex CLI, or OpenClaw knows the friction:
 | Pain point | What actually happens |
 |---|---|
 | **No isolation** | Skills leak into each other. A file-organizer skill and a git-ops skill share the same context window. The agent confuses instructions meant for one with the other. |
-| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it — it picks the parts that seem relevant and ignores the rest. |
-| **Token waste** | Every SKILL.md lives in the system prompt. Add 5 skills at 3KB each and you just burned 15KB of context — before the conversation even starts. On long-running tasks this compounds fast. |
-| **No validation** | A typo in a tool name, a missing parameter, an ambiguous instruction — the agent won't catch it until runtime. And by then the conversation is 20 turns deep. |
+| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it. It picks the parts that seem relevant and ignores the rest. |
+| **Token waste** | Every SKILL.md lives in the system prompt. Add 5 skills at 3KB each and you just burned 15KB of context before the conversation even starts. On long-running tasks this compounds fast. |
+| **No validation** | A typo in a tool name, a missing parameter, an ambiguous instruction. The agent won't catch any of it until runtime, and by then the conversation is 20 turns deep. |
 | **Scale decays** | Skills work at 1–3. At 10+ they become unmanageable. No dependency graph, no conflict detection, no way to tell which skill overrides which. |
 
 The core issue isn't the format. It's that SKILL.md is **prompt engineering**, not
@@ -120,26 +115,27 @@ skillhouse and can be re-run anytime.
 |---|---|---|
 | **Execution** | Interpreted at runtime by LLM | Compiled into standalone Python package |
 | **Isolation** | All skills share one context window | Each agent has its own runtime, tools, and config |
-| **Validation** | None — typos and ambiguities caught at runtime | Schema-validated AHSSPEC before code generation |
+| **Validation** | None. Typos and ambiguities caught at runtime. | Schema-validated AHSSPEC before code generation |
 | **Token cost** | Full skill body in system prompt every turn | ~150 bytes of runtime config |
 | **Tool definitions** | Prose descriptions, LLM guesses how to call | Type-annotated Python functions with JSON Schema |
 | **MCP** | Manual wiring per agent | Auto-detected, auto-configured |
 | **Determinism** | LLM interprets differently each time | Same SKILL.md → same agent binary |
-| **Multi-skill scaling** | Degrades past 3–5 skills | Unlimited — each agent is a separate process |
+| **Multi-skill scaling** | Degrades past 3–5 skills | Unlimited. Each agent is a separate process. |
 | **Debugging** | Read the LLM's chain-of-thought and pray | Standard Python debugging, logging, tests |
 
 ---
 
 ## Architecture
 
-<!-- TODO: architecture diagram showing the 3-phase pipeline -->
+<!-- TODO: architecture diagram showing the 3-phase pipeline
+     (Parse → 6-Harness LLM → Code Generation) -->
 
 agenthatch runs a **3-phase pipeline** with 6 AI harnesses working in parallel:
 
 ### Phase 1: Deterministic Parse (no AI)
 
 The SKILL.md is parsed for frontmatter, body, and directory files. No AI
-involved — a pure file-system operation. The output is a `ContextPack`
+involved. A pure file-system operation. The output is a `ContextPack`
 with zero semantic transformation.
 
 ### Phase 2: 6-Harness LLM Inference
@@ -192,7 +188,7 @@ degrades gracefully when tools time out.
 
 Sets up `~/.agenthatch/` with your LLM provider configuration. Supports OpenAI,
 DeepSeek, Anthropic, and any OpenAI-compatible endpoint. The config file is
-TOML — readable, versionable, and easy to share.
+TOML. Readable, versionable, easy to share.
 
 ### Step 2: `agenthatch skills add <path>`
 
@@ -286,7 +282,7 @@ pip install -e ".[dev]"
 ## Contributing
 
 agenthatch is a solo project looking for its first contributors.
-Issues, pull requests, documentation, design — it all helps.
+Issues, pull requests, documentation, design -- every bit moves the project forward.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the quality gate
 (`hatch run quality:check`), and PR guidelines.
@@ -323,17 +319,10 @@ skills in markdown — agenthatch turns them into agents.
 
 ---
 
-## Star History
-
-<a href="https://star-history.com/#agenthatch/agenthatch&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date&theme=dark">
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date">
-  </picture>
-</a>
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+<sub>📖 简体中文版请见 [README_CN.md](README_CN.md)</sub>
