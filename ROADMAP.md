@@ -31,19 +31,9 @@ describe a diagnosis workflow — the hatched agent embeds a full knowledge base
 retrieves relevant references per query, and can be shared as a self-contained
 package ready for production.
 
-### One-sentence agent
-
-```
-agenthatch hatch "monitor this repo and open an issue when CI fails"
-```
-
-No SKILL.md required. A single sentence → full pipeline → runnable agent. The
-harness infers identity, intent, interface, and base from a natural language
-description.
-
 ---
 
-## Phase 3: Multi-Agent
+## Phase 3: Composition
 
 ### Skill fusion (`agenthatch hatch --fuse`)
 
@@ -80,6 +70,18 @@ just run in a terminal; it lives where your team already communicates.
 The current sandbox runs subprocesses directly with a command whitelist.
 Add an optional Docker-backed execution layer for full filesystem and network
 isolation — safe enough to run untrusted tool code in production.
+
+---
+
+## Final milestone: One-sentence agent
+
+```
+agenthatch hatch "monitor this repo and open an issue when CI fails"
+```
+
+No SKILL.md required. A single sentence → full pipeline → runnable agent. The
+harness infers identity, intent, interface, and base from a natural language
+description. This is the north star — everything in Phases 1–4 builds toward it.
 
 ---
 
