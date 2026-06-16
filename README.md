@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="README.md">English</a> |
+  <a href="README_CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://pypi.org/project/agenthatch/">
     <img src="https://img.shields.io/pypi/v/agenthatch?color=blue" alt="PyPI version">
   </a>
@@ -22,8 +27,12 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <!-- TODO: add CI badge after .github/workflows/ci.yml is set up -->
-  <!-- TODO: add Discord badge after server is created -->
+  <a href="https://github.com/agenthatch/agenthatch/discussions">
+    <img src="https://img.shields.io/badge/Discord-coming_soon-5865F2" alt="Discord">
+  </a>
+  <a href="https://github.com/agenthatch/agenthatch/discussions">
+    <img src="https://img.shields.io/badge/Twitter-coming_soon-1DA1F2" alt="Twitter">
+  </a>
 </p>
 
 ---
@@ -37,10 +46,10 @@ Code, Codex CLI, or OpenClaw knows the friction:
 | Pain point | What actually happens |
 |---|---|
 | **No isolation** | Skills leak into each other. A file-organizer skill and a git-ops skill share the same context window. The agent confuses instructions meant for one with the other. |
-| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it like a human reading docs — it picks the parts that seem relevant and ignores the rest. |
+| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it — it picks the parts that seem relevant and ignores the rest. |
 | **Token waste** | Every SKILL.md lives in the system prompt. Add 5 skills at 3KB each and you just burned 15KB of context — before the conversation even starts. On long-running tasks this compounds fast. |
 | **No validation** | A typo in a tool name, a missing parameter, an ambiguous instruction — the agent won't catch it until runtime. And by then the conversation is 20 turns deep. |
-| **Scale decays** | Skills work at 1-3. At 10+ they become unmanageable. There's no dependency graph, no conflict detection, no way to tell which skill overrides which. |
+| **Scale decays** | Skills work at 1–3. At 10+ they become unmanageable. No dependency graph, no conflict detection, no way to tell which skill overrides which. |
 
 The core issue isn't the format. It's that SKILL.md is **prompt engineering**, not
 **software engineering**. You're asking an LLM to interpret human prose at
@@ -66,6 +75,45 @@ compiled into code.
 
 ---
 
+## Demo
+
+<!-- TODO: record terminal demo GIF showing the full pipeline:
+     agenthatch init → skills add → hatch → run
+     Recommended: asciinema or terminalizer for SVG terminal recording -->
+
+<!-- TODO: record a longer demo showing a multi-turn agent conversation
+     with PlanLayer-driven execution, tool calling, and MCP integration -->
+
+<p align="center">
+  <em>Demo coming soon. For now, try the Quick Start below — it takes under a minute.</em>
+</p>
+
+---
+
+## Quick Start
+
+```bash
+# Install
+pip install agenthatch
+
+# Initialize with your LLM provider
+agenthatch init
+
+# Add a SKILL.md
+agenthatch skills add ./my-skill/SKILL.md
+
+# Hatch it into an agent
+agenthatch hatch my-skill
+
+# Run it
+agenthatch run my-skill
+```
+
+Three steps from markdown to running agent. The hatched agent lives in your
+skillhouse and can be re-run anytime.
+
+---
+
 ## SKILL.md vs agenthatch
 
 | | SKILL.md (raw) | agenthatch (hatched) |
@@ -77,7 +125,7 @@ compiled into code.
 | **Tool definitions** | Prose descriptions, LLM guesses how to call | Type-annotated Python functions with JSON Schema |
 | **MCP** | Manual wiring per agent | Auto-detected, auto-configured |
 | **Determinism** | LLM interprets differently each time | Same SKILL.md → same agent binary |
-| **Multi-skill scaling** | Degrades past 3-5 skills | Unlimited — each agent is a separate process |
+| **Multi-skill scaling** | Degrades past 3–5 skills | Unlimited — each agent is a separate process |
 | **Debugging** | Read the LLM's chain-of-thought and pray | Standard Python debugging, logging, tests |
 
 ---
@@ -91,7 +139,7 @@ agenthatch runs a **3-phase pipeline** with 6 AI harnesses working in parallel:
 ### Phase 1: Deterministic Parse (no AI)
 
 The SKILL.md is parsed for frontmatter, body, and directory files. No AI
-involved — this is a pure file-system operation. The output is a `ContextPack`
+involved — a pure file-system operation. The output is a `ContextPack`
 with zero semantic transformation.
 
 ### Phase 2: 6-Harness LLM Inference
@@ -135,30 +183,6 @@ degrades gracefully when tools time out.
 
 ---
 
-## Quick Start
-
-```bash
-# Install
-pip install agenthatch
-
-# Initialize with your LLM provider
-agenthatch init
-
-# Add a SKILL.md
-agenthatch skills add ./my-skill/SKILL.md
-
-# Hatch it into an agent
-agenthatch hatch my-skill
-
-# Run it
-agenthatch run my-skill
-```
-
-Three steps from markdown to running agent. The hatched agent lives in your
-skillhouse and can be re-run anytime.
-
----
-
 ## How it works under the hood
 
 <details>
@@ -174,7 +198,7 @@ TOML — readable, versionable, and easy to share.
 
 Copies the SKILL.md and its directory into the skillhouse index. The skillhouse
 tracks every skill you've added, its hatch status, and where its generated agent
-lives. Think of it as `pip` for skills.
+lives.
 
 ### Step 3: `agenthatch hatch <name>`
 
@@ -183,7 +207,7 @@ The full pipeline runs:
 ```
 Phase 1 (deterministic): Parse SKILL.md → ContextPack
 Phase 2 (AI): 6 harnesses → HarnessOutput → Assembly → AHSSPEC
-Phase 3 (Jinja2): AHSSPEC → agent package (pyproject.toml + agent.py + cli.py + tools.py + runtime.toml)
+Phase 3 (Jinja2): AHSSPEC → agent package
 ```
 
 Flags:
@@ -217,17 +241,6 @@ with tool calling, context compaction, and PlanLayer-driven execution.
 
 ---
 
-## Demo
-
-<!-- TODO: record terminal demo GIF showing the full pipeline:
-     agenthatch init → skills add → hatch → run
-     Recommended: asciinema or terminalizer for SVG terminal recording -->
-
-<!-- TODO: record a longer demo showing a multi-turn agent conversation
-     with PlanLayer-driven execution, tool calling, and MCP integration -->
-
----
-
 ## Installation
 
 ```bash
@@ -237,6 +250,7 @@ pip install agenthatch
 Requires Python 3.11 or later.
 
 For development:
+
 ```bash
 git clone https://github.com/agenthatch/agenthatch.git
 cd agenthatch
@@ -250,7 +264,7 @@ pip install -e ".[dev]"
 <!-- TODO: set up docs site (MkDocs Material or Mintlify) -->
 
 | Document | Link |
-|---|---|---|
+|---|---|
 | Contributing Guide | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Security Policy | [SECURITY.md](SECURITY.md) |
 | Support | [SUPPORT.md](SUPPORT.md) |
@@ -262,11 +276,10 @@ pip install -e ".[dev]"
 
 ## Community
 
-<!-- TODO: add Discord invite link -->
-<!-- TODO: add X/Twitter handle -->
-
 - [GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions) — questions, ideas, roadmap
 - [GitHub Issues](https://github.com/agenthatch/agenthatch/issues) — bugs and feature requests
+- Discord — coming soon
+- X/Twitter — coming soon
 
 ---
 
@@ -312,8 +325,12 @@ skills in markdown — agenthatch turns them into agents.
 
 ## Star History
 
-<!-- TODO: add after first release -->
-<!-- [![Star History Chart](https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date)](https://star-history.com/#agenthatch/agenthatch&Date) -->
+<a href="https://star-history.com/#agenthatch/agenthatch&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date&theme=dark">
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date">
+  </picture>
+</a>
 
 ---
 
