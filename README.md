@@ -1,192 +1,319 @@
-# agenthatch
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/agenthatch/.github/main/profile/assets/logo-dark.svg">
+    <img alt="agenthatch" src="https://raw.githubusercontent.com/agenthatch/.github/main/profile/assets/logo-light.svg" width="600">
+  </picture>
+</p>
 
-**Turn any SKILL.md into a runnable AI Agent.**
+<p align="center">
+  <strong>Turn any SKILL.md into a standalone, runnable AI Agent.</strong>
+</p>
 
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Status](https://img.shields.io/badge/status-alpha-orange)]()
-
-agenthatch is an **Agent Factory** that transforms declarative `SKILL.md` files into fully functional, standalone AI agents. Inspired by the [Claude Code `SKILL.md` specification](https://docs.anthropic.com/en/docs/claude-code/skills), agenthatch goes further: it analyzes, reasons about, and generates production-ready agents with tool calling, MCP integration, and multi-turn conversation capabilities.
-
----
-
-## Why agenthatch?
-
-|                 | Claude Code + SKILL.md | agenthatch |
-|-----------------|------------------------|------------|
-| Agent format    | Inline prompt injection | Standalone runnable agent |
-| Tool calling    | Built-in tools only     | MCP + custom tools + sandbox |
-| Multi-turn      | Single-shot context     | Full conversation loop |
-| Deployment      | Requires Claude Code    | Self-contained Python package |
-| Customization   | None                   | Full harness pipeline |
-| Quality control | Manual                 | Automated fidelity checks |
-
----
-
-## Quick Start
-
-### 1. Install
-
-```bash
-pip install agenthatch
-```
-
-### 2. Initialize
-
-```bash
-agenthatch init
-```
-
-### 3. Add a Skill
-
-```bash
-agenthatch skill add path/to/SKILL.md
-```
-
-### 4. Hatch an Agent
-
-```bash
-agenthatch hatch my-skill
-```
-
-This runs the full pipeline:
-- **Phase 1** — Parse SKILL.md frontmatter and content
-- **Phase 2** — 6-harness LLM reasoning pipeline (identity, intent, interface, base, assembly, MCP servers)
-- **Phase 3** — Generate standalone agent code
-- **Phase 4** — Readiness verification
-
-### 5. Run the Agent
-
-```bash
-agenthatch run my-skill
-```
+<p align="center">
+  <a href="https://pypi.org/project/agenthatch/">
+    <img src="https://img.shields.io/pypi/v/agenthatch?color=blue" alt="PyPI version">
+  </a>
+  <a href="https://pypi.org/project/agenthatch/">
+    <img src="https://img.shields.io/pypi/pyversions/agenthatch" alt="Python versions">
+  </a>
+  <a href="https://pypi.org/project/agenthatch/">
+    <img src="https://img.shields.io/pypi/dm/agenthatch" alt="PyPI downloads">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  </a>
+  <!-- TODO: add CI badge after .github/workflows/ci.yml is set up -->
+  <!-- TODO: add Discord badge after server is created -->
+</p>
 
 ---
 
-## How It Works
+## The problem with SKILL.md
 
-### The Harness Pipeline
+SKILL.md promised a lot. Write a markdown file, tell your agent what to do, and
+it works. In practice, anyone who has used more than three skills across Claude
+Code, Codex CLI, or OpenClaw knows the friction:
 
-agenthatch uses a chain of specialized LLM agents ("harnesses") to analyze and reason about your skill:
+| Pain point | What actually happens |
+|---|---|
+| **No isolation** | Skills leak into each other. A file-organizer skill and a git-ops skill share the same context window. The agent confuses instructions meant for one with the other. |
+| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it like a human reading docs — it picks the parts that seem relevant and ignores the rest. |
+| **Token waste** | Every SKILL.md lives in the system prompt. Add 5 skills at 3KB each and you just burned 15KB of context — before the conversation even starts. On long-running tasks this compounds fast. |
+| **No validation** | A typo in a tool name, a missing parameter, an ambiguous instruction — the agent won't catch it until runtime. And by then the conversation is 20 turns deep. |
+| **Scale decays** | Skills work at 1-3. At 10+ they become unmanageable. There's no dependency graph, no conflict detection, no way to tell which skill overrides which. |
 
-```
-SKILL.md
-  │
-  ├─ Harness A: Identity     → Who is this agent?
-  ├─ Harness B: Intent       → What triggers and satisfies it?
-  ├─ Harness C: Interface    → What capabilities does it provide/require?
-  ├─ Harness F: MCP Servers  → What MCP connections does it need?
-  ├─ Harness D: Base         → What runtime environment?
-  ├─ Harness E: Assembly     → Cross-validate and produce AHSSPEC
-  │
-  ▼
-agenthatch.yaml (AHSSPEC)
-  │
-  ▼
-Generated Agent (standalone Python package)
-```
-
-### Fidelity Protection
-
-Every generated agent includes:
-- **Fidelity Anchors** — SHA256 hashes of constraints extracted from the original SKILL.md
-- **Fidelity Manifest** — Verification file in the agent directory
-- **Quality Review** — Harness E validates intent fidelity, capability coverage, and MCP integrity
-
-### Skill Management
-
-```bash
-# List all skills
-agenthatch skill list
-
-# Add a new skill
-agenthatch skill add path/to/SKILL.md
-
-# Delete a skill
-agenthatch skill delete my-skill
-
-# Search skills
-agenthatch search "data analysis"
-```
+The core issue isn't the format. It's that SKILL.md is **prompt engineering**, not
+**software engineering**. You're asking an LLM to interpret human prose at
+runtime, every time, with no compilation, no type checking, no contract.
 
 ---
 
-## SKILL.md Format
+## What agenthatch does
 
-agenthatch follows the [Claude Code SKILL.md specification](https://docs.anthropic.com/en/docs/claude-code/skills):
+agenthatch treats a SKILL.md as **source code** — not a prompt. It compiles it
+through a deterministic pipeline into a standalone Python agent that you can
+import, ship, and run anywhere.
 
-```markdown
----
-name: My Skill
-description: What this skill does
----
-
-# Skill Instructions
-
-Detailed instructions for the agent...
-
-## Workflow
-
-1. Step one
-2. Step two
-
-## MCP Tools
-
-This skill uses mcp__my-server__my-tool for data access.
+```
+SKILL.md  →  Parse  →  6-Harness LLM Pipeline  →  Code Generation  →  Runnable Agent
+   (input)   (Phase 1)    (Phase 2: AI inference)     (Phase 3: Jinja2)     (output)
 ```
 
-### MCP Support
+The result is a self-contained Python package with its own `pyproject.toml`,
+a CLI entry point, typed tool definitions, MCP integration, and a runtime
+configuration. It's not a wrapper around your skill — it **is** the skill,
+compiled into code.
 
-agenthatch automatically detects MCP server references in your SKILL.md:
+---
 
-- `mcp__SERVER__TOOL` patterns
-- `mcporter call Server.Tool` syntax
-- Frontmatter `mcpServers` declarations
+## SKILL.md vs agenthatch
+
+| | SKILL.md (raw) | agenthatch (hatched) |
+|---|---|---|
+| **Execution** | Interpreted at runtime by LLM | Compiled into standalone Python package |
+| **Isolation** | All skills share one context window | Each agent has its own runtime, tools, and config |
+| **Validation** | None — typos and ambiguities caught at runtime | Schema-validated AHSSPEC before code generation |
+| **Token cost** | Full skill body in system prompt every turn | ~150 bytes of runtime config |
+| **Tool definitions** | Prose descriptions, LLM guesses how to call | Type-annotated Python functions with JSON Schema |
+| **MCP** | Manual wiring per agent | Auto-detected, auto-configured |
+| **Determinism** | LLM interprets differently each time | Same SKILL.md → same agent binary |
+| **Multi-skill scaling** | Degrades past 3-5 skills | Unlimited — each agent is a separate process |
+| **Debugging** | Read the LLM's chain-of-thought and pray | Standard Python debugging, logging, tests |
 
 ---
 
 ## Architecture
 
+<!-- TODO: architecture diagram showing the 3-phase pipeline -->
+
+agenthatch runs a **3-phase pipeline** with 6 AI harnesses working in parallel:
+
+### Phase 1: Deterministic Parse (no AI)
+
+The SKILL.md is parsed for frontmatter, body, and directory files. No AI
+involved — this is a pure file-system operation. The output is a `ContextPack`
+with zero semantic transformation.
+
+### Phase 2: 6-Harness LLM Inference
+
+Six specialized AI harnesses run concurrently, each with its own persona,
+temperature, and model tier:
+
+| Harness | Role | Model | Temp |
+|---|---|---|---|
+| **A — Identity** | Extract name, version, description from frontmatter | Small | 0.1 |
+| **B — Intent** | Infer trigger phrases and user intents | Small | 0.5 |
+| **C — Interface** | Design tool signatures, parameters, and return types | Large | 0.5 |
+| **D — Base** | Detect runtime base class and instruction structure | Large | 0.3 |
+| **E — Assembly** | Cross-validate all harness outputs, produce AHSSPEC | Small | 0.2 |
+| **F — MCP** | Detect and configure MCP server connections | Moderate | 0.3 |
+
+Each harness runs an **Analyze → Infer → Self-Validate → Correct** loop with
+up to 2 internal retries. Harness E cross-validates the other five outputs and
+produces a unified AHSSPEC (Agent Hatch Standard Specification).
+
+### Phase 3: Code Generation
+
+Jinja2 templates render the AHSSPEC into a complete Python agent package:
+
 ```
-agenthatch/
-├── src/agenthatch/          # CLI, skill engine, harness, generation
-│   ├── cli/                 # Typer CLI commands
-│   ├── skill/               # Skill parsing, harness, validation
-│   ├── generate/            # Agent code generation + templates
-│   ├── agent/               # Runtime, builtins, MCP
-│   ├── house/               # Skillhouse index, discovery
-│   └── config/              # Configuration management
-├── agenthatch-core/         # Universal agent runtime
-│   └── src/agenthatch_core/ # LLM client, sandbox, conversation loop
-└── tests/                   # Test suite
+hatched-agent/
+├── pyproject.toml          # pip-installable package
+├── agent.py                # Agent class (extends AHCoreAgent)
+├── cli.py                  # Typer-based CLI entry point
+├── tools.py                # Type-annotated tool implementations
+├── runtime.toml            # LLM provider, model, API keys
+└── README.md               # Generated usage docs
+```
+
+### Runtime: PlanLayer
+
+Generated agents use the **PlanLayer state machine** — a 6-state planning
+engine that runs STARTING → PLANNING → EXECUTING → VERIFYING → REPLANNING →
+DONE. It adapts mid-task: merges completed steps, branches on failure, and
+degrades gracefully when tools time out.
+
+---
+
+## Quick Start
+
+```bash
+# Install
+pip install agenthatch
+
+# Initialize with your LLM provider
+agenthatch init
+
+# Add a SKILL.md
+agenthatch skills add ./my-skill/SKILL.md
+
+# Hatch it into an agent
+agenthatch hatch my-skill
+
+# Run it
+agenthatch run my-skill
+```
+
+Three steps from markdown to running agent. The hatched agent lives in your
+skillhouse and can be re-run anytime.
+
+---
+
+## How it works under the hood
+
+<details>
+<summary>Click to expand: the full pipeline in detail</summary>
+
+### Step 1: `agenthatch init`
+
+Sets up `~/.agenthatch/` with your LLM provider configuration. Supports OpenAI,
+DeepSeek, Anthropic, and any OpenAI-compatible endpoint. The config file is
+TOML — readable, versionable, and easy to share.
+
+### Step 2: `agenthatch skills add <path>`
+
+Copies the SKILL.md and its directory into the skillhouse index. The skillhouse
+tracks every skill you've added, its hatch status, and where its generated agent
+lives. Think of it as `pip` for skills.
+
+### Step 3: `agenthatch hatch <name>`
+
+The full pipeline runs:
+
+```
+Phase 1 (deterministic): Parse SKILL.md → ContextPack
+Phase 2 (AI): 6 harnesses → HarnessOutput → Assembly → AHSSPEC
+Phase 3 (Jinja2): AHSSPEC → agent package (pyproject.toml + agent.py + cli.py + tools.py + runtime.toml)
+```
+
+Flags:
+- `--no-generate` — skip Phase 3, review the AHSSPEC first
+- `--force` — overwrite existing hatched agent
+- `--dry-run` — preview without writing files
+
+### Step 4: `agenthatch run <name>`
+
+Launches the hatched agent in interactive TUI mode. The agent loads its
+runtime config, connects to its LLM provider, and starts a conversation loop
+with tool calling, context compaction, and PlanLayer-driven execution.
+
+</details>
+
+---
+
+## CLI Reference
+
+| Command | What it does |
+|---|---|
+| `agenthatch init` | Initialize config and provider setup |
+| `agenthatch skills add <path>` | Register a SKILL.md in the skillhouse |
+| `agenthatch skills list` | List all registered skills |
+| `agenthatch skills delete <name>` | Remove a skill from the skillhouse |
+| `agenthatch hatch <name>` | Run the full pipeline (parse → harness → generate) |
+| `agenthatch run <name>` | Launch a hatched agent in interactive TUI |
+| `agenthatch search <query>` | Search the skillhouse index |
+| `agenthatch doctor` | Diagnose environment and dependencies |
+| `agenthatch assemble` | Re-assemble an existing skillhouse agent |
+
+---
+
+## Demo
+
+<!-- TODO: record terminal demo GIF showing the full pipeline:
+     agenthatch init → skills add → hatch → run
+     Recommended: asciinema or terminalizer for SVG terminal recording -->
+
+<!-- TODO: record a longer demo showing a multi-turn agent conversation
+     with PlanLayer-driven execution, tool calling, and MCP integration -->
+
+---
+
+## Installation
+
+```bash
+pip install agenthatch
+```
+
+Requires Python 3.11 or later.
+
+For development:
+```bash
+git clone https://github.com/agenthatch/agenthatch.git
+cd agenthatch
+pip install -e ".[dev]"
 ```
 
 ---
 
-## Requirements
+## Documentation
 
-- Python 3.11+
-- LLM API access (OpenAI, DeepSeek, or custom provider)
-- Optional: `mcporter` for MCP server support (`npm install -g mcporter`)
+<!-- TODO: set up docs site (MkDocs Material or Mintlify) -->
+
+| Document | Link |
+|---|---|---|
+| Contributing Guide | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Security Policy | [SECURITY.md](SECURITY.md) |
+| Support | [SUPPORT.md](SUPPORT.md) |
+| Roadmap | [ROADMAP.md](ROADMAP.md) |
+| Code of Conduct | [CODE_OF_CONDUCT.md](https://github.com/agenthatch/.github/blob/main/CODE_OF_CONDUCT.md) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+
+---
+
+## Community
+
+<!-- TODO: add Discord invite link -->
+<!-- TODO: add X/Twitter handle -->
+
+- [GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions) — questions, ideas, roadmap
+- [GitHub Issues](https://github.com/agenthatch/agenthatch/issues) — bugs and feature requests
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for dev environment setup, quality gate
-instructions, and PR guidelines.
+agenthatch is a solo project looking for its first contributors.
+Issues, pull requests, documentation, design — it all helps.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the quality gate
+(`hatch run quality:check`), and PR guidelines.
+
+AI-assisted contributions are welcome. Run the quality gate before submitting —
+that's all that matters.
 
 ---
 
-## Security
+## FAQ
 
-See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy.
+### Who is this for?
+
+Anyone who maintains more than 3 SKILL.md files and feels the friction. Claude
+Code users, Codex CLI users, OpenClaw users — if you've ever thought "I wish
+this skill was a real program," this is for you.
+
+### Can I use this with Claude Code / Codex / OpenClaw?
+
+Yes. The hatched agent is a standalone Python package. You can run it as a CLI,
+import it as a library, or wrap it as an MCP server. It doesn't depend on any
+specific agent platform.
+
+### What MCP servers are supported?
+
+Any MCP server that speaks the standard protocol. Harness F auto-detects MCP
+servers referenced in your SKILL.md and configures them in the generated agent's
+runtime.
+
+### Does this replace SKILL.md?
+
+No. SKILL.md is the input format. agenthatch is the compiler. You still write
+skills in markdown — agenthatch turns them into agents.
 
 ---
 
-## Support
+## Star History
 
-See [SUPPORT.md](SUPPORT.md) for help channels.
+<!-- TODO: add after first release -->
+<!-- [![Star History Chart](https://api.star-history.com/svg?repos=agenthatch/agenthatch&type=Date)](https://star-history.com/#agenthatch/agenthatch&Date) -->
 
 ---
 
