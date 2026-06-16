@@ -173,20 +173,20 @@ agenthatch/
 
 ## Contributing
 
-agenthatch is in active development. Contributions are welcome!
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev environment setup, quality gate
+instructions, and PR guidelines.
 
-```bash
-# Development setup
-git clone https://github.com/agenthatch/agenthatch
-cd agenthatch
-pip install -e ".[dev]"
+---
 
-# Run tests
-pytest
+## Security
 
-# Quality checks
-hatch run quality:check
-```
+See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy.
+
+---
+
+## Support
+
+See [SUPPORT.md](SUPPORT.md) for help channels.
 
 ---
 
