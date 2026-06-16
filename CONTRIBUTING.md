@@ -52,15 +52,30 @@ agenthatch/
 │   ├── generate/                    # Jinja2 templates, Agent code generation
 │   ├── agent/                       # Runtime, built-in tools, MCP
 │   ├── house/                       # Skillhouse index and discovery
-│   └── config/                      # Config loading and validation
+│   ├── config/                      # Config loading and validation
+│   ├── cap/                         # Capability bus and marshal
+│   ├── base/                        # Sandbox base classes
+│   ├── output/                      # Output sanitization
+│   ├── providers.py                 # LLM provider abstraction
+│   ├── exceptions.py                # Custom exceptions
+│   └── __main__.py                  # `python -m agenthatch` entry
 ├── agenthatch-core/                 # Universal agent runtime (independent)
 │   └── src/agenthatch_core/
 │       ├── bricks/                  # Plan layer, sandbox, memory, guards, workflow
 │       ├── llm/                     # LLM client, Anthropic adapter, types
 │       ├── loop/                    # Agent conversation loop, token counter
 │       ├── mcp/                     # MCP client and configuration
-│       └── tools/                   # Tool bus, marshal, MCP loader
-└── tests/                           # pytest suite with example SKILL.md fixtures
+│       ├── tools/                   # Tool bus, marshal, MCP loader
+│       ├── context/                 # Context compaction and management
+│       ├── offload/                 # Checkpoint and state persistence
+│       ├── output/                  # Output sanitization
+│       ├── sandbox/                 # Sandbox executors
+│       ├── agent.py                 # Base Agent class
+│       ├── config.py                # Runtime configuration
+│       ├── state.py                 # Agent state management
+│       ├── hooks.py                 # Lifecycle hooks
+│       └── types.py                 # Core type definitions
+└── tests/                           # pytest suite (157 tests) with SKILL.md fixtures
 ```
 
 Both `src/agenthatch` and `agenthatch-core/src/agenthatch_core` are bundled into
@@ -137,5 +152,8 @@ Found a bug or have an idea?
 
 <!-- TODO: add Discord and other channels -->
 
-For now, [GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions)
+[GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions)
 is the primary community space.
+
+AI-assisted contributions are welcome. Run the quality gate
+(`hatch run quality:check`) before submitting — that's all that matters.

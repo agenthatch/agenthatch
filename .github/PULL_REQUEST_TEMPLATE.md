@@ -4,7 +4,7 @@
 
 ## Checklist
 
-- [ ] I have read the [Contributing Guide](CONTRIBUTING.md).
+- [ ] I have read the [Contributing Guide](https://github.com/agenthatch/agenthatch/blob/main/CONTRIBUTING.md).
 - [ ] `hatch run quality:check` passes locally (ruff + mypy + pytest).
 - [ ] I have added tests if this PR changes behavior.
 - [ ] I have updated documentation if this PR adds or changes features.
