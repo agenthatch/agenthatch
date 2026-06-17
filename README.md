@@ -22,11 +22,11 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <a href="https://discord.gg/TODO">
-    <img src="https://img.shields.io/badge/Discord-coming_soon-5865F2" alt="Discord">
+  <a href="https://discord.gg/uSgU2HUD4">
+    <img src="https://img.shields.io/badge/Discord-join-5865F2" alt="Discord">
   </a>
-  <a href="https://twitter.com/TODO">
-    <img src="https://img.shields.io/badge/Twitter-coming_soon-1DA1F2" alt="Twitter">
+  <a href="https://x.com/EterRights">
+    <img src="https://img.shields.io/badge/X-@EterRights-1DA1F2" alt="X">
   </a>
 </p>
 
@@ -70,21 +70,6 @@ compiled into code.
 
 ---
 
-## Demo
-
-<!-- TODO: record terminal demo GIF showing the full pipeline:
-     agenthatch init → skills add → hatch → run
-     Recommended: asciinema or terminalizer for SVG terminal recording -->
-
-<!-- TODO: record a longer demo showing a multi-turn agent conversation
-     with PlanLayer-driven execution, tool calling, and MCP integration -->
-
-<p align="center">
-  <em>Demo coming soon. For now, try the Quick Start below — it takes under a minute.</em>
-</p>
-
----
-
 ## Quick Start
 
 ```bash
@@ -119,16 +104,13 @@ skillhouse and can be re-run anytime.
 | **Token cost** | Full skill body in system prompt every turn | ~150 bytes of runtime config |
 | **Tool definitions** | Prose descriptions, LLM guesses how to call | Type-annotated Python functions with JSON Schema |
 | **MCP** | Manual wiring per agent | Auto-detected, auto-configured |
-| **Determinism** | LLM interprets differently each time | Same SKILL.md → same agent binary |
+| **Determinism** | LLM interprets differently each time | Same SKILL.md → same AHSSPEC structure (low-temp inference) |
 | **Multi-skill scaling** | Degrades past 3–5 skills | Unlimited. Each agent is a separate process. |
 | **Debugging** | Read the LLM's chain-of-thought and pray | Standard Python debugging, logging, tests |
 
 ---
 
 ## Architecture
-
-<!-- TODO: architecture diagram showing the 3-phase pipeline
-     (Parse → 6-Harness LLM → Code Generation) -->
 
 agenthatch runs a **3-phase pipeline** with 6 AI harnesses working in parallel:
 
@@ -140,17 +122,17 @@ with zero semantic transformation.
 
 ### Phase 2: 6-Harness LLM Inference
 
-Six specialized AI harnesses run concurrently, each with its own persona,
-temperature, and model tier:
+Six specialized AI harnesses process the skill, each with its own persona
+and temperature profile:
 
-| Harness | Role | Model | Temp |
-|---|---|---|---|
-| **A — Identity** | Extract name, version, description from frontmatter | Small | 0.1 |
-| **B — Intent** | Infer trigger phrases and user intents | Small | 0.5 |
-| **C — Interface** | Design tool signatures, parameters, and return types | Large | 0.5 |
-| **D — Base** | Detect runtime base class and instruction structure | Large | 0.3 |
-| **E — Assembly** | Cross-validate all harness outputs, produce AHSSPEC | Small | 0.2 |
-| **F — MCP** | Detect and configure MCP server connections | Moderate | 0.3 |
+| Harness | Role | Temp |
+|---|---|---|
+| **A — Identity** | Extract name, version, description from frontmatter | 0.1 |
+| **B — Intent** | Infer trigger phrases and user intents | 0.5 |
+| **C — Interface** | Design tool signatures, parameters, and return types | 0.5 |
+| **D — Base** | Detect runtime base class and instruction structure | 0.3 |
+| **E — Assembly** | Cross-validate all harness outputs, produce AHSSPEC | 0.2 |
+| **F — MCP** | Detect and configure MCP server connections | 0.3 |
 
 Each harness runs an **Analyze → Infer → Self-Validate → Correct** loop with
 up to 2 internal retries. Harness E cross-validates the other five outputs and
@@ -163,11 +145,14 @@ Jinja2 templates render the AHSSPEC into a complete Python agent package:
 ```
 hatched-agent/
 ├── pyproject.toml          # pip-installable package
-├── agent.py                # Agent class (extends AHCoreAgent)
-├── cli.py                  # Typer-based CLI entry point
-├── tools.py                # Type-annotated tool implementations
 ├── runtime.toml            # LLM provider, model, API keys
-└── README.md               # Generated usage docs
+├── README.md               # Generated usage docs
+├── agenthatch.yaml         # AHSSPEC manifest
+└── src/{package_name}/
+    ├── __init__.py
+    ├── agent.py            # Agent class (extends AHCoreAgent)
+    ├── tools.py            # Type-annotated tool implementations
+    └── references.py       # AI-extracted structured data
 ```
 
 ### Runtime: PlanLayer
@@ -257,8 +242,6 @@ pip install -e ".[dev]"
 
 ## Documentation
 
-<!-- TODO: set up docs site (MkDocs Material or Mintlify) -->
-
 | Document | Link |
 |---|---|
 | Contributing Guide | [CONTRIBUTING.md](CONTRIBUTING.md) |
@@ -274,8 +257,8 @@ pip install -e ".[dev]"
 
 - [GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions) — questions, ideas, roadmap
 - [GitHub Issues](https://github.com/agenthatch/agenthatch/issues) — bugs and feature requests
-- Discord — coming soon
-- X/Twitter — coming soon
+- [Discord](https://discord.gg/uSgU2HUD4)
+- [X (Twitter)](https://x.com/EterRights)
 
 ---
 
