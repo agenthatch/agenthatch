@@ -40,3 +40,8 @@ docs/
 
 # claude specific
 .claude/
+
+# Marketing & planning (not part of the package)
+.workbuddy/
+campaign/
+deliverables/

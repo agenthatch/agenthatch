@@ -67,6 +67,51 @@ v0.6 marks a major architectural transformation from "configuration-driven" to "
 
 ---
 
+## [v0.9.16] — 2026-06-17
+
+### Open Source Prep: Final Polish
+
+- **Remove Discord links** from README, README_CN, SUPPORT.md, CONTRIBUTING.md — defer to D+7~14 when community exists (empty room problem)
+- **Add GitHub Release auto-creation** to publish.yml via `softprops/action-gh-release@v2` — tag push now creates both PyPI artifact and GitHub Release
+- **Add .gitignore entries** for `.workbuddy/`, `campaign/`, `deliverables/` — marketing artifacts excluded from package
+
+---
+
+## [v0.9.14] — 2026-06-17
+
+### Community & CI Fixes
+
+- **Add Discord and Twitter/X links** to README, SUPPORT.md, CONTRIBUTING.md
+- **Fix CI**: add `types-PyYAML>=6.0` to `[dev]` dependencies — GitHub Actions failed on mypy with missing yaml stubs
+- **Humanizer polish**: remove AI writing patterns from README (em dash overuse, inflated language)
+
+---
+
+## [v0.9.13] — 2026-06-17
+
+### README Audit & CI Infrastructure
+
+#### Added
+- **CI workflow** (`.github/workflows/ci.yml`): ruff lint + mypy --strict + pytest on Python 3.11/12/13 matrix
+- **Publish workflow** (`.github/workflows/publish.yml`): PyPI trusted publishing via OIDC, triggered on `v*` tag push
+- **README_CN.md**: Chinese translation of README
+
+#### Fixed (README — source code audit)
+- Remove architecture diagram placeholder (CLI tools don't need diagrams; text pipeline + harness table is sufficient)
+- Remove docs site TODO (docs site deferred, README is the documentation for CLI tools)
+- Fix "generates cli.py" claim → actual output is `agent.py` + `tools.py` + `references.py`
+- Fix "run concurrently" → harnesses run sequentially (A→B→C→D→F→E)
+- Add `references.py` to output file tree (was missing)
+- Fix file paths: outputs live under `src/{package_name}/`, not root
+- Fix determinism claim: "Same SKILL.md → same agent binary" → "Same SKILL.md → same AHSSPEC structure (low-temp inference)"
+
+#### Removed
+- Demo section from README (Quick Start is the demo for CLI tools)
+- Star History chart (pre-launch anti-pattern)
+- "Coming soon" shields badges for non-existent Discord/Twitter
+
+---
+
 ## [v0.5.10] — 2026-05-XX
 
 ### Fixed
