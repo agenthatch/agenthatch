@@ -150,10 +150,10 @@ Found a bug or have an idea?
 
 ## Community
 
-<!-- TODO: add Discord and other channels -->
-
 [GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions)
 is the primary community space.
+
+[Discord](https://discord.gg/uSgU2HUD4) for real-time chat.
 
 AI-assisted contributions are welcome. Run the quality gate
 (`hatch run quality:check`) before submitting — that's all that matters.

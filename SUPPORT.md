@@ -19,11 +19,13 @@ https://github.com/agenthatch/agenthatch/issues
 
 Please search existing issues before opening a new one.
 
-### Community chat
+### Discord
 
-<!-- TODO: add Discord invite link -->
+https://discord.gg/uSgU2HUD4
 
-<!-- TODO: add X/Twitter handle -->
+### X (Twitter)
+
+https://x.com/EterRights
 
 ### Email
 
