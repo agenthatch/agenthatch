@@ -22,9 +22,6 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </a>
-  <a href="https://discord.gg/uSgU2HUD4">
-    <img src="https://img.shields.io/badge/Discord-join-5865F2" alt="Discord">
-  </a>
   <a href="https://x.com/EterRights">
     <img src="https://img.shields.io/badge/X-@EterRights-1DA1F2" alt="X">
   </a>
@@ -257,7 +254,6 @@ pip install -e ".[dev]"
 
 - [GitHub Discussions](https://github.com/agenthatch/agenthatch/discussions) — questions, ideas, roadmap
 - [GitHub Issues](https://github.com/agenthatch/agenthatch/issues) — bugs and feature requests
-- [Discord](https://discord.gg/uSgU2HUD4)
 - [X (Twitter)](https://x.com/EterRights)
 
 ---

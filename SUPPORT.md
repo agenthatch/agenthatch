@@ -19,10 +19,6 @@ https://github.com/agenthatch/agenthatch/issues
 
 Please search existing issues before opening a new one.
 
-### Discord
-
-https://discord.gg/uSgU2HUD4
-
 ### X (Twitter)
 
 https://x.com/EterRights
