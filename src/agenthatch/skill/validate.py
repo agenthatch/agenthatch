@@ -23,6 +23,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agenthatch.skill.spec import (
+    HARNESS_LABELS,
     AHSSpec,
     BaseSpec,
     Composition,
@@ -84,16 +85,6 @@ _PARENT_FIELD_MAP: dict[str, str] = {
     # base sub-fields
     "runtime": "base", "sandbox": "base", "timeout": "base",
     "env": "base", "dependencies": "base",
-}
-
-# Harness key → human-readable label
-_HARNESS_LABEL: dict[str, str] = {
-    "A": "extract_identity",
-    "B": "infer_intent",
-    "C": "infer_interface",
-    "D": "detect_base_and_instructions",
-    "E": "assemble_and_validate",
-    "F": "infer_mcp_servers",
 }
 
 
@@ -307,7 +298,7 @@ def _retarget_harness(
             0,
         )
 
-    logger.info(f"Retargeting Harness {harness_key} ({_HARNESS_LABEL.get(harness_key, '?')})")
+    logger.info(f"Retargeting Harness {harness_key} ({HARNESS_LABELS.get(harness_key, '?')})")
 
     if harness_key == "A":
         output = h.run(

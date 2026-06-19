@@ -130,6 +130,32 @@ def _format_file_contents_for_harness(
         parts.append(f"\n### {path}\n```{suffix}\n{content}\n```\n")
     return "\n".join(parts)
 
+
+def _accumulate_token_usage(
+    accumulated: dict[str, int], client: LLMClient
+) -> dict[str, int]:
+    """v0.9.17: Accumulate LLM token usage from client.last_usage.
+
+    LLMClient.last_usage is overwritten on each call. This helper reads
+    the most recent usage and adds it to the running total for the harness.
+
+    Returns a new dict with keys: prompt_tokens, completion_tokens, total_tokens.
+    """
+    usage = getattr(client, "last_usage", None)
+    if usage is None:
+        return dict(accumulated)
+
+    # OpenAI usage object: CompletionUsage(prompt_tokens, completion_tokens, total_tokens)
+    prompt = getattr(usage, "prompt_tokens", 0) or 0
+    completion = getattr(usage, "completion_tokens", 0) or 0
+    total = getattr(usage, "total_tokens", 0) or (prompt + completion)
+
+    result = dict(accumulated)
+    result["prompt_tokens"] = result.get("prompt_tokens", 0) + int(prompt)
+    result["completion_tokens"] = result.get("completion_tokens", 0) + int(completion)
+    result["total_tokens"] = result.get("total_tokens", 0) + int(total)
+    return result
+
 # ─────────────────────────────────────────────────────────────────────────
 # Model tier map (which model each Harness uses per skill type)
 # ─────────────────────────────────────────────────────────────────────────
@@ -270,6 +296,7 @@ class AgentHarness:
         reasoning: list[str] = []
         degradations: list[str] = []
         retries = 0
+        token_usage: dict[str, int] = {}
 
         system = self.build_system_prompt()
         user = self.build_user_message(**inputs)
@@ -282,6 +309,7 @@ class AgentHarness:
 
         # Step 1: Initial inference
         result = self._infer(messages)
+        token_usage = _accumulate_token_usage(token_usage, self.client)
         reasoning.append(
             f"[{self.name}] infer: output received, {len(str(result))} chars"
         )
@@ -303,6 +331,7 @@ class AgentHarness:
                 break
 
             result = self.correct_on_failure(result, reason, **inputs)
+            token_usage = _accumulate_token_usage(token_usage, self.client)
             retries += 1
             reasoning.append(
                 f"[{self.name}] correct: attempt {retries}/{self.max_internal_retries}"
@@ -317,6 +346,7 @@ class AgentHarness:
             self_check_passed=len(degradations) == 0,
             degradation_applied=degradations,
             internal_retries=retries,
+            token_usage=token_usage,
         )
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
@@ -816,6 +846,7 @@ class InferMCPServersHarness(AgentHarness):
 
         # v0.8.1: Apply HARNESS_CONFIG for thinking + temperature
         cfg = HARNESS_CONFIG.get("F", {})
+        token_usage: dict[str, int] = {}
 
         try:
             messages = [
@@ -830,6 +861,7 @@ class InferMCPServersHarness(AgentHarness):
                 thinking=cfg.get("thinking"),
                 temperature=cfg.get("temperature", 0.3),
             )
+            token_usage = _accumulate_token_usage(token_usage, self.client)
             llm_servers_raw = []
             for s in response.mcp_servers:
                 llm_servers_raw.append({
@@ -899,6 +931,7 @@ class InferMCPServersHarness(AgentHarness):
             reasoning_trace=[f"detected {len(mcp_servers)} MCP servers: "
                              f"{[s.get('name') for s in mcp_servers]}"],
             self_check_passed=True,
+            token_usage=token_usage,
         )
 
 

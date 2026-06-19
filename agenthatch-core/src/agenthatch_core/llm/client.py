@@ -449,14 +449,24 @@ class LLMClient:
             call_kwargs["extra_body"] = extra
 
         try:
-            return client.chat.completions.create(**call_kwargs)
+            # v0.9.17: use create_with_completion to capture token usage
+            # (create returns only the parsed model, dropping .usage).
+            parsed, completion = client.chat.completions.create_with_completion(
+                **call_kwargs
+            )
+            self.last_usage = getattr(completion, "usage", None)
+            return parsed
         except Exception as e:
             logger.debug("chat_structured Instructor call failed: %s", e)
             # v0.8: Try without thinking
             if extra:
                 call_kwargs.pop("extra_body", None)
                 try:
-                    return client.chat.completions.create(**call_kwargs)
+                    parsed, completion = (
+                        client.chat.completions.create_with_completion(**call_kwargs)
+                    )
+                    self.last_usage = getattr(completion, "usage", None)
+                    return parsed
                 except Exception:
                     pass
             # Fallback: raw JSON parsing (pre-v0.8 behavior)

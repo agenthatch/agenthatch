@@ -61,15 +61,33 @@ class ContextPack:
 
 # ─── Harness Contracts ─────────────────────────────────────────────────
 
+# v0.9.17: Single source of truth for harness key → human-readable label.
+# Consumed by hatch.py renderers, validate.py repair router, and report.py.
+HARNESS_LABELS: dict[str, str] = {
+    "A": "extract_identity",
+    "B": "infer_intent",
+    "C": "infer_interface",
+    "D": "detect_base_and_instructions",
+    "E": "assemble_and_validate",
+    "F": "infer_mcp_servers",
+}
+
+
 @dataclass
 class HarnessOutput:
-    """Unified output contract for all 5 AgentHarnesses."""
+    """Unified output contract for all 6 AgentHarnesses.
+
+    v0.9.17: token_usage captures LLM token consumption for the hatch report.
+    Populated by AgentHarness.run() from client.last_usage after each LLM call.
+    Empty dict when no LLM call was made (e.g. Harness F regex fallback).
+    """
     result: dict[str, Any]
     confidence: float
     reasoning_trace: list[str]
     self_check_passed: bool
     degradation_applied: list[str] = field(default_factory=list)
     internal_retries: int = 0
+    token_usage: dict[str, int] = field(default_factory=dict)
 
 
 # ─── AHSSPEC v1.1 Schema ───────────────────────────────────────────────

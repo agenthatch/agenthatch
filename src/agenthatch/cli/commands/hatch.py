@@ -202,14 +202,7 @@ def _render_confidence(ahs_spec: Any) -> None:
     if not cr or not cr.per_harness:
         return
 
-    labels = {
-        "A": "extract_identity",
-        "B": "infer_intent",
-        "C": "infer_interface",
-        "D": "detect_base_and_instructions",
-        "E": "assemble_and_validate",
-        "F": "infer_mcp_servers",
-    }
+    from agenthatch.skill.spec import HARNESS_LABELS
 
     BAR_WIDTH = 22
     mcp_servers = (
@@ -222,7 +215,7 @@ def _render_confidence(ahs_spec: Any) -> None:
     for key in ["A", "B", "C", "D", "E", "F"]:
         if key not in cr.per_harness:
             continue
-        name = labels.get(key, key)
+        name = HARNESS_LABELS.get(key, key)
         score = cr.per_harness[key]
         filled = max(1, int(score * BAR_WIDTH))
 
@@ -252,19 +245,13 @@ def _render_confidence(ahs_spec: Any) -> None:
 
 def _render_harness_traces(harness_outputs: dict[str, Any]) -> None:
     """Render Rich Tree for each harness trace (--trace mode)."""
-    labels = {
-        "A": "extract_identity",
-        "B": "infer_intent",
-        "C": "infer_interface",
-        "D": "detect_base_and_instructions",
-        "E": "assemble_and_validate",
-        "F": "infer_mcp_servers",
-    }
+    from agenthatch.skill.spec import HARNESS_LABELS
+
     for key in ["A", "B", "C", "D", "E", "F"]:
         if key not in harness_outputs:
             continue
         h_output = harness_outputs[key]
-        label = labels.get(key, key)
+        label = HARNESS_LABELS.get(key, key)
 
         tree = Tree(f"[bold]Harness {key}: {label}[/bold]")
         for trace_line in h_output.reasoning_trace:
@@ -289,14 +276,7 @@ def _render_summary(
     no_generate: bool,
 ) -> None:
     """Render final summary table with harness confidence and output info."""
-    labels = {
-        "A": "extract_identity",
-        "B": "infer_intent",
-        "C": "infer_interface",
-        "D": "detect_base_and_instructions",
-        "E": "assemble_and_validate",
-        "F": "infer_mcp_servers",
-    }
+    from agenthatch.skill.spec import HARNESS_LABELS
 
     table = Table(title="Hatch Summary", border_style="cyan")
     table.add_column("Harness", style="accent", justify="center")
@@ -308,7 +288,7 @@ def _render_summary(
         if key not in harness_outputs:
             continue
         h = harness_outputs[key]
-        label = labels.get(key, key)
+        label = HARNESS_LABELS.get(key, key)
         conf = f"{h.confidence:.2f}"
         check = "[ok]✓[/ok]" if h.self_check_passed else "[error]✗[/error]"
         table.add_row(key, label, conf, check)
@@ -408,7 +388,11 @@ def hatch_command(
     ] = False,
     report: Annotated[
         bool,
-        typer.Option("--report", "-r", help="Show detailed hatch readiness report"),
+        typer.Option(
+            "--report", "-r",
+            help="Show structured hatch report (confidence, traces, tokens, verdict). "
+                 "Use with --json for CI-friendly JSON output.",
+        ),
     ] = False,
     framework: Annotated[
         str,
@@ -446,6 +430,14 @@ def hatch_command(
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     config = Config.load()
+
+    # v0.9.17: When emitting the HatchReport as JSON for CI, route all Rich
+    # progress/rendering output to stderr so stdout contains only the JSON
+    # report — parseable by jq and other CI tooling. Terminal mode (--report
+    # without --json) is unchanged.
+    quiet_for_json = bool(report and json_output)
+    if quiet_for_json:
+        console.file = sys.stderr
 
     # ── 1. Resolve skill (name or path, 3-layer fallback) ──────────────
     skill_real_path, from_index = _resolve_skill_name(skill_path, config)
@@ -535,14 +527,8 @@ def hatch_command(
     large_model = harness_cfg.get("large_model", "") if isinstance(harness_cfg, dict) else ""
     small_model = harness_cfg.get("small_model", "") if isinstance(harness_cfg, dict) else ""
 
-    harness_labels = {
-        "A": "extract_identity",
-        "B": "infer_intent",
-        "C": "infer_interface",
-        "D": "detect_base_and_instructions",
-        "F": "infer_mcp_servers",
-        "E": "assemble_and_validate",
-    }
+    from agenthatch.skill.spec import HARNESS_LABELS
+
     harness_order = ["A", "B", "C", "D", "F", "E"]
 
     _state: dict[str, Any] = {"current": "A", "completed": []}
@@ -550,7 +536,7 @@ def hatch_command(
     def _render_harness_progress() -> Group:
         renderables: list[Any] = []
         for key in harness_order:
-            label = harness_labels.get(key, key)
+            label = HARNESS_LABELS.get(key, key)
             if key in _state["completed"]:
                 renderables.append(
                     Text(f"     ✓ Harness {key}: {label}", style="ok")
@@ -610,7 +596,11 @@ def hatch_command(
     _render_confidence(ahs_spec)
 
     # ── 9. Dry-run YAML/JSON output ─────────────────────────────────────
-    if dry_run:
+    # v0.9.17: When --report is set, the HatchReport (terminal or JSON)
+    # is emitted at the end of the run. Skip the AHSSPEC dry-run dump
+    # here to avoid double output; the AHSSPEC is still written to
+    # agenthatch.yaml on disk for inspection.
+    if dry_run and not report:
         console.print()
         if json_output:
             console.print_json(ahs_spec.model_dump_json())
@@ -655,6 +645,8 @@ def hatch_command(
         _register_skillhouse(ahs_spec, yaml_output_path, config)
 
     # ── 12. Phase 3: Readiness + Generation (silent unless --report) ──
+    # v0.9.17: Capture readiness verdict for the HatchReport.
+    readiness_verdict: Any | None = None
     if no_generate:
         console.print(
             "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](skipped)[/dim]"
@@ -667,6 +659,27 @@ def hatch_command(
             dry_run=False,
             no_generate=True,
         )
+        # v0.9.17: Emit report even when generation is skipped.
+        if report:
+            _emit_hatch_report(
+                ahs_spec=ahs_spec,
+                harness_outputs=harness_outputs,
+                phases=_build_phase_reports(
+                    elapsed1=elapsed1,
+                    elapsed2=elapsed2,
+                    elapsed3=0.0,
+                    no_generate=True,
+                    dry_run=dry_run,
+                    phase3_tokens={},
+                ),
+                readiness_verdict=readiness_verdict,
+                agent_output_dir=None,
+                file_count=0,
+                provider_name=provider_name,
+                model_display=model_display,
+                classification=classification,
+                json_output=json_output,
+            )
         return
 
     # Resolve agent output dir for readiness check and generation
@@ -686,6 +699,7 @@ def hatch_command(
                 agent_path=str(agent_output_dir),
                 skip_network_probe=False,
             )
+            readiness_verdict = result.readiness
             # v0.8.11: Silent readiness check unless --report.
             # Agenthatch auto-resolves what it can (install mcporter)
             # and always proceeds to generation.
@@ -707,9 +721,11 @@ def hatch_command(
                             _auto_install_dependency(console, pkg)
                 if not result.readiness.mcporter_installed and result._mcp_skill:
                     _auto_install_dependency(console, "mcporter")
-                if report and result.report:
+                # v0.9.17: Readiness text report is now part of HatchReport.
+                # Only print standalone if --report is NOT set (legacy behavior).
+                if not report and result.report:
                     console.print(result.report)
-            elif report and result.report:
+            elif not report and result.report:
                 console.print(result.report)
         except Exception as e:
             logger.warning("Readiness phase skipped: %s", e)
@@ -721,10 +737,16 @@ def hatch_command(
         )
 
     # v0.9: Create AI chat function for tool implementation generation
+    # v0.9.17: Wrap to capture Phase 3 token usage for the HatchReport.
     ai_chat_fn = None
+    phase3_token_accumulator: dict[str, int] = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
     if not no_ai_tools:
-        ai_chat_fn = _create_ai_chat_fn(config)
-        if ai_chat_fn is None:
+        raw_chat_fn = _create_ai_chat_fn(config)
+        if raw_chat_fn is None:
                 # v0.9: Visible warning — user must know tools may be stubs
                 console.print(
                     "[yellow]⚠ No API key configured.[/yellow] "
@@ -732,6 +754,17 @@ def hatch_command(
                     "some tools may be non-functional stubs. "
                     "Run [bold]agenthatch init[/bold] to configure.[/dim]"
                 )
+        else:
+            def _token_wrapped_chat_fn(system_prompt: str, user_prompt: str) -> str:
+                """Wrap ai_chat_fn to accumulate Phase 3 token usage."""
+                result: str = raw_chat_fn(system_prompt, user_prompt)
+                # raw_chat_fn closure holds `client`; read its last_usage
+                # via introspection (the closure variable).
+                # We use a module-level helper to avoid coupling.
+                _accumulate_phase3_tokens(phase3_token_accumulator, raw_chat_fn)
+                return result
+
+            ai_chat_fn = _token_wrapped_chat_fn
 
     file_count, agent_output_dir, elapsed3 = _run_phase3_generate(
         ahs_spec=ahs_spec,
@@ -767,7 +800,30 @@ def hatch_command(
         no_generate=False,
     )
 
-    # ── 15. Next step ───────────────────────────────────────────────────
+    # ── 15. Hatch Report (v0.9.17) ──────────────────────────────────────
+    # Emitted after all phases complete. Never blocks — verdict is advisory.
+    if report:
+        _emit_hatch_report(
+            ahs_spec=ahs_spec,
+            harness_outputs=harness_outputs,
+            phases=_build_phase_reports(
+                elapsed1=elapsed1,
+                elapsed2=elapsed2,
+                elapsed3=elapsed3,
+                no_generate=False,
+                dry_run=dry_run,
+                phase3_tokens=phase3_token_accumulator,
+            ),
+            readiness_verdict=readiness_verdict,
+            agent_output_dir=str(agent_output_dir) if not dry_run else None,
+            file_count=file_count if not dry_run else 0,
+            provider_name=provider_name,
+            model_display=model_display,
+            classification=classification,
+            json_output=json_output,
+        )
+
+    # ── 16. Next step ───────────────────────────────────────────────────
     if not no_generate and not dry_run:
         console.print(
             f"[dim]Next step:[/dim] [bold]agenthatch run {ahs_spec.identity.id}[/bold]"
@@ -775,6 +831,165 @@ def hatch_command(
 
 
 # ── Internal helpers (yaml, skillhouse, output path) ────────────────────────
+
+
+def _accumulate_phase3_tokens(
+    accumulator: dict[str, int], raw_chat_fn: Any
+) -> None:
+    """v0.9.17: Extract token usage from the ai_chat_fn closure.
+
+    The closure created by _create_ai_chat_fn holds an `LLMClient` instance
+    in its `client` variable. After each call, `client.last_usage` contains
+    the most recent CompletionUsage. We read it and accumulate.
+    """
+    try:
+        # Inspect closure to find the LLMClient instance
+        closure_cells = raw_chat_fn.__closure__ or []
+        client = None
+        for cell in closure_cells:
+            obj = cell.cell_contents
+            if hasattr(obj, "last_usage"):
+                client = obj
+                break
+        if client is None or client.last_usage is None:
+            return
+
+        usage = client.last_usage
+        prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion = int(getattr(usage, "completion_tokens", 0) or 0)
+        total = int(getattr(usage, "total_tokens", 0) or (prompt + completion))
+
+        accumulator["prompt_tokens"] += prompt
+        accumulator["completion_tokens"] += completion
+        accumulator["total_tokens"] += total
+    except Exception as e:
+        logger.debug("Phase 3 token accumulation failed: %s", e)
+
+
+def _build_phase_reports(
+    *,
+    elapsed1: float,
+    elapsed2: float,
+    elapsed3: float,
+    no_generate: bool,
+    dry_run: bool,
+    phase3_tokens: dict[str, int],
+) -> list[Any]:
+    """v0.9.17: Build PhaseReport list for the HatchReport.
+
+    Phase 1 (context assembly) and Phase 2 (agentic inference) have no
+    LLM token consumption tracked at the phase level — Phase 2 tokens are
+    captured per-harness in HarnessOutput.token_usage. Phase 3 (agent
+    generation) may consume tokens via AI tool generation.
+    """
+    from agenthatch.skill.report import PhaseReport
+
+    phases: list[PhaseReport] = [
+        PhaseReport(
+            name="phase_1_context",
+            label="Phase 1: Context Assembly",
+            elapsed_seconds=elapsed1,
+            token_usage={},
+            status="ok",
+        ),
+        PhaseReport(
+            name="phase_2_inference",
+            label="Phase 2: Agentic Inference",
+            elapsed_seconds=elapsed2,
+            token_usage={},  # tokens tracked per-harness, not per-phase
+            status="ok",
+        ),
+    ]
+
+    if no_generate:
+        phases.append(
+            PhaseReport(
+                name="phase_3_generation",
+                label="Phase 3: Agent Generation",
+                elapsed_seconds=0.0,
+                token_usage={},
+                status="skipped",
+                detail="skipped (--no-generate)",
+            )
+        )
+    elif dry_run:
+        phases.append(
+            PhaseReport(
+                name="phase_3_generation",
+                label="Phase 3: Agent Generation",
+                elapsed_seconds=elapsed3,
+                token_usage=dict(phase3_tokens) if phase3_tokens else {},
+                status="ok",
+                detail="dry-run (no files written)",
+            )
+        )
+    else:
+        phases.append(
+            PhaseReport(
+                name="phase_3_generation",
+                label="Phase 3: Agent Generation",
+                elapsed_seconds=elapsed3,
+                token_usage=dict(phase3_tokens) if phase3_tokens else {},
+                status="ok",
+            )
+        )
+
+    return phases
+
+
+def _emit_hatch_report(
+    *,
+    ahs_spec: Any,
+    harness_outputs: dict[str, Any],
+    phases: list[Any],
+    readiness_verdict: Any | None,
+    agent_output_dir: str | None,
+    file_count: int,
+    provider_name: str,
+    model_display: str,
+    classification: Any,
+    json_output: bool,
+) -> None:
+    """v0.9.17: Build and emit the HatchReport (terminal or JSON).
+
+    Never blocks — verdict is advisory (PASS or WARN only).
+    """
+    from agenthatch.skill.report import build_hatch_report
+
+    archetype = getattr(classification, "archetype", None)
+    if archetype is not None:
+        archetype_str = (
+            archetype.value if hasattr(archetype, "value") else str(archetype)
+        )
+    else:
+        archetype_str = None
+    archetype_conf = getattr(classification, "confidence", None)
+
+    report = build_hatch_report(
+        skill_id=ahs_spec.identity.id,
+        skill_name=ahs_spec.identity.display_name,
+        provider=provider_name,
+        model=model_display,
+        phases=phases,
+        harness_outputs=harness_outputs,
+        readiness=readiness_verdict,
+        agent_output_dir=agent_output_dir,
+        file_count=file_count,
+        archetype=archetype_str,
+        archetype_confidence=float(archetype_conf) if archetype_conf is not None else None,
+    )
+
+    if json_output:
+        # CI-friendly JSON: write directly to stdout. When quiet_for_json
+        # is set, the Rich console has been redirected to stderr, so stdout
+        # contains only this JSON — clean for jq/CI pipelines.
+        sys.stdout.write(report.to_json())
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    else:
+        # Rich terminal rendering
+        console.print()
+        console.print(report.to_terminal())
 
 
 def _resolve_yaml_path(skill_dir: Path, output: str | None) -> Path:
