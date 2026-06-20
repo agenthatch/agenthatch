@@ -9,9 +9,9 @@ from pathlib import Path
 
 
 def main() -> None:
-    PROJECT = "/Users/didi/agenthatch_developer/project/agenthatch"
-    sys.path.insert(0, f"{PROJECT}/src")
-    sys.path.insert(0, f"{PROJECT}/agenthatch-core/src")
+    PROJECT = Path(__file__).parent.parent
+    sys.path.insert(0, str(PROJECT / "src"))
+    sys.path.insert(0, str(PROJECT / "agenthatch-core" / "src"))
 
     from agenthatch.agent.runtime import SkillAgent
     from agenthatch.config import Config

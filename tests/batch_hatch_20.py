@@ -16,7 +16,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).parent.parent  # .../project/agenthatch/
 DEVELOPER = Path(__file__).parent.parent.parent.parent  # .../agenthatch_developer/
-PYTHON = "/opt/homebrew/bin/python3.14"
+PYTHON = sys.executable
 OUTPUT_DIR = Path("/tmp/agenthatch_20_test")
 
 # ─── Collect all 20 skills ────────────────────────────────────────────

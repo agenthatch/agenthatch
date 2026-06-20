@@ -190,7 +190,7 @@ def analyze_python_script(path: Path, rel_path: str) -> ScriptAnalysis:
 
 # ── Test Execution ──
 
-skill_dir = Path("/Users/didi/agenthatch_developer/project/agenthatch/tests/fixtures/skills/data-analyzer")  # noqa: E501
+skill_dir = Path(__file__).parent / "fixtures" / "skills" / "data-analyzer"  # noqa: E501
 py_file = skill_dir / "scripts" / "compute.py"
 
 print("=" * 70)

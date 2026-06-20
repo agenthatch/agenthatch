@@ -4,12 +4,13 @@ substantive, high-quality responses — not just empty shell dialogue.
 Uses LLMClient directly with the generated agent's system prompt.
 """
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/Users/didi/agenthatch_developer/project/agenthatch/src")
-sys.path.insert(0, "/Users/didi/agenthatch_developer/project/agenthatch/agenthatch-core/src")
+_PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+sys.path.insert(0, str(_PROJECT_ROOT / "agenthatch-core" / "src"))
 
 import re
-from pathlib import Path
 
 import yaml
 from agenthatch_core.llm.client import LLMClient
