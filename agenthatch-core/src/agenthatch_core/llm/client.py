@@ -351,6 +351,7 @@ class LLMClient:
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                 reasoning_parts.append(delta.reasoning_content)
                 # v0.7.11: Emit as ThinkingDelta event, NOT as visible content
+                from agenthatch_core.loop.token_counter import ThinkingDelta  # deferred to avoid circular import
                 yield ThinkingDelta(content=delta.reasoning_content)
 
         text = "".join(text_parts)
