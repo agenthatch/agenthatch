@@ -67,6 +67,17 @@ v0.6 marks a major architectural transformation from "configuration-driven" to "
 
 ---
 
+## [v0.9.18] — 2026-06-21
+
+### Fixed (accumulated bug fixes)
+
+- **fix: add missing ThinkingDelta import in LLMClient.chat_stream** — `ThinkingDelta` was referenced but not imported, causing `NameError` when streaming reasoning content from DeepSeek V4 Pro. Fixed via deferred import to avoid circular dependency.
+- **fix: correct split count in MCPClient.register_with_capbus** — `split("__", 1)` should be `split("__", 2)` for three-segment MCP tool names (`mcp__<server>__<tool>`). The wrong split produced incorrect server names in the server-side tool discovery path.
+- **fix: correct escape sequence in _escape_fts5_query** — `re.sub` replacement had 6 backslashes (3 literal `\`, capture group lost) instead of 3 (1 literal `\` + capture group). FTS5 special characters were not properly escaped, silently falling back to LIKE search.
+- **fix: use getattr for reasoning_tokens in DirectLoop._record_usage** — `DirectLoop` accessed `usage.reasoning_tokens` directly, but OpenAI's `CompletionUsage` nests it under `completion_tokens_details`. This caused `AttributeError` for prompt-only skills. Now uses `getattr(usage, "reasoning_tokens", 0)` matching `ConversationLoop`.
+
+---
+
 ## [v0.9.16] — 2026-06-17
 
 ### Open Source Prep: Final Polish

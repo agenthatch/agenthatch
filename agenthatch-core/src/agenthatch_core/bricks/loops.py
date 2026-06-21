@@ -67,5 +67,5 @@ class DirectLoop:
             "prompt_tokens": usage.prompt_tokens,
             "completion_tokens": usage.completion_tokens,
             "total_tokens": usage.total_tokens,
-            "reasoning_tokens": usage.reasoning_tokens,
+            "reasoning_tokens": getattr(usage, "reasoning_tokens", 0),
         })
