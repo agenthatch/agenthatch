@@ -14,12 +14,6 @@ Extend this to a post-generation review phase: the hatched agent inspects its
 own code, tests its own tools, and iterates until the quality gate passes
 autonomously.
 
-### Hatch report (`agenthatch report`)
-
-Every hatch run produces a structured report — harness confidence scores,
-reasoning traces, degradation events, token consumption per phase, and a
-pass/fail verdict. Readable as both terminal output and JSON for CI pipelines.
-
 ---
 
 ## Phase 2: Intelligence
@@ -96,6 +90,7 @@ Some items people commonly ask about are already implemented:
 | **6-Harness LLM pipeline** with self-validation | ✅ Core pipeline since v0.6 |
 | **MCP auto-detection** (Harness F) | ✅ Since v0.7 |
 | **Context auto-compaction** | ✅ In `agenthatch-core` context manager |
+| **Hatch report** (`--report` / `--json`) | ✅ Since v0.9.17 |
 
 ---
 
