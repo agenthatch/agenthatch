@@ -210,7 +210,7 @@ class MemorySearch:
     def _escape_fts5_query(query: str) -> str:
         """Escape special FTS5 characters and format for prefix matching."""
         # FTS5 special chars: * " - ( ) :
-        escaped = re.sub(r'([*"\-():])', r'\\\\\\1', query)
+        escaped = re.sub(r'([*"\-():])', r'\\\1', query)
         # Add prefix wildcard to last word for partial matching
         words = escaped.strip().split()
         if words:
