@@ -481,7 +481,7 @@ class MCPClient:
         from agenthatch_core.tools.bus import _normalize_json_schema
 
         for full_name, t in self._tools.items():
-            sname = full_name.split("__", 1)[1]
+            sname = full_name.split("__", 2)[1]
             tool_name = t.name
 
             def make_handler(sn: str, tn: str) -> Callable[..., str]:
