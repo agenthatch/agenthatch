@@ -1299,12 +1299,6 @@ class Orchestrator:
         e_client, e_model = _resolve("E")
         f_client, f_model = _resolve("F")
 
-        # Extend timeout for reasoning models via the public features property
-        d_timeout = 60
-        if d_client and hasattr(d_client, 'features'):
-            if d_client.features.supports_reasoning_content:
-                d_timeout = 120
-        logger.debug("Harness D timeout: %ds (note: fixed timeout in client)", d_timeout)
         return {
             "A": ExtractIdentityHarness(name="extract_identity", client=a_client, model=a_model),
             "B": InferIntentHarness(name="infer_intent", client=b_client, model=b_model),

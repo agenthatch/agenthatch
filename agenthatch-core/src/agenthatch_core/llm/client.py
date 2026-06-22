@@ -471,12 +471,15 @@ class LLMClient:
                 except Exception:
                     pass
             # Fallback: raw JSON parsing (pre-v0.8 behavior)
+            # v0.9.18: pass through caller's temperature/max_tokens
+            # instead of hardcoding — harnesses configure per-task
+            # values (e.g. AssembleHarness uses 8192).
             return self._chat_structured_raw(
                 messages=messages,
                 response_model=response_model,
                 model=model,
-                temperature=0.0,
-                max_tokens=4096,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
 
     # ── Tool Calling ─────────────────────────────────────────────────
