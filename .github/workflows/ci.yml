@@ -28,7 +28,7 @@ jobs:
         run: ruff check src/
 
       - name: Type check (mypy)
-        run: mypy --strict src/agenthatch
+        run: mypy --strict --python-version ${{ matrix.python-version }} src/agenthatch
 
       - name: Test (pytest)
         run: pytest

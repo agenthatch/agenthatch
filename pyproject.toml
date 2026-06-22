@@ -91,6 +91,10 @@ select = ["E", "W", "F", "I", "B", "C4", "UP"]
 python_version = "3.11"
 strict = true
 
+[[tool.mypy.overrides]]
+module = "numpy"
+ignore_errors = true
+
 [tool.coverage.run]
 branch = true
 source = ["agenthatch"]
