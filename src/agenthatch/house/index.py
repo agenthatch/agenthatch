@@ -128,9 +128,6 @@ class SkillhouseIndex:
         if self._embedder is not None or self._embedder_disabled:
             return
 
-        import io as _io
-        import sys as _sys
-
         from sentence_transformers import SentenceTransformer
 
         embedder_result: list[Any] = [None]
@@ -138,16 +135,15 @@ class SkillhouseIndex:
 
         def _load() -> None:
             try:
-                # Suppress huggingface_hub stderr noise (SSL errors, retry messages)
+                # Suppress huggingface_hub Python logging noise (retry messages, etc.)
+                # C-level stderr (SSL errors, etc.) is preserved — those are
+                # important diagnostic signals, not noise.
                 hf_log = logging.getLogger("huggingface_hub")
                 hf_level = hf_log.level
                 hf_log.setLevel(logging.ERROR)
-                _stderr = _sys.stderr
-                _sys.stderr = _io.StringIO()
                 try:
                     embedder_result[0] = SentenceTransformer(self._embedding_model_name)
                 finally:
-                    _sys.stderr = _stderr
                     hf_log.setLevel(hf_level)
             except Exception as e:
                 embedder_error[0] = e
