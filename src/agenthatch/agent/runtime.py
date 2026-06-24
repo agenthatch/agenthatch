@@ -509,19 +509,19 @@ class SkillAgent:
 
         # Checkpoint restore
         # Use project-local directory to avoid sandbox permission denial
-        self._checkpoint_mgr = CheckpointManager(
-            Path.cwd() / ".agenthatch" / "sessions" / self.spec.identity.id
-        )
-        # Migration: if old path has data, copy it once
+        # Migration: if old path has data, copy it once.
+        # Must run BEFORE CheckpointManager() which mkdirs new_dir,
+        # otherwise not new_dir.exists() is always False (dead code).
         old_dir = Path.home() / ".agenthatch" / "sessions" / self.spec.identity.id
         new_dir = Path.cwd() / ".agenthatch" / "sessions" / self.spec.identity.id
-        if old_dir.exists() and not new_dir.exists():
+        if old_dir.exists() and not (new_dir / "checkpoint.json").exists():
             import shutil
             try:
-                shutil.copytree(old_dir, new_dir)
+                shutil.copytree(old_dir, new_dir, dirs_exist_ok=True)
                 logger.info("Migrated checkpoint from %s to %s", old_dir, new_dir)
             except OSError as e:
                 logger.warning("Checkpoint migration failed: %s", e)
+        self._checkpoint_mgr = CheckpointManager(new_dir)
         if self._checkpoint_mgr.exists():
             cp = self._checkpoint_mgr.load()
             if cp:

@@ -67,6 +67,18 @@ v0.6 marks a major architectural transformation from "configuration-driven" to "
 
 ---
 
+## [v0.9.19] — 2026-06-22
+
+### Fixed (accumulated bug fixes)
+
+- **fix: pass through temperature/max_tokens in chat_structured fallback** — `chat_structured()` Instructor fallback path hardcoded `temperature=0.0` and `max_tokens=4096`, discarding caller-configured values. Harnesses configure per-task values (e.g. AssembleHarness uses 8192) that were silently overridden. Now passes through the function parameters.
+- **fix: remove dead harness timeout code** — `_build_harnesses()` computed `d_timeout` based on client features but never used it (only logged then discarded). Removed the dead code.
+- **fix: resolve numpy 2.5.0 mypy incompatibility in CI** — numpy 2.5.0 stubs use `type` statement (Python 3.12+) which breaks mypy when `pyproject.toml` hardcodes `python_version = "3.11"`. CI now passes `--python-version` from matrix to mypy; `pyproject.toml` adds mypy override to ignore numpy module errors.
+- **fix: remove global sys.stderr hijack in _ensure_embedder** — `_ensure_embedder` replaced process-level `sys.stderr` with `StringIO` during SentenceTransformer download (up to 60s). This silently discarded all other threads' stderr output. On timeout, the hijack persisted until the daemon thread finished. Removed the hijack; `hf_log.setLevel(ERROR)` already suppresses Python logging noise, and C-level stderr (SSL errors, etc.) is preserved as diagnostic signals.
+- **fix: checkpoint migration dead code** — `CheckpointManager.__init__` mkdirs `new_dir` before the migration check, so `not new_dir.exists()` was always `False` — the `shutil.copytree` migration never ran. Users upgrading from old checkpoint paths (`~/.agenthatch/sessions/`) silently lost history. Migration now runs before `CheckpointManager()` construction, and the condition checks `checkpoint.json` existence instead of directory existence.
+
+---
+
 ## [v0.9.18] — 2026-06-21
 
 ### Fixed (accumulated bug fixes)
