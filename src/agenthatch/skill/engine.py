@@ -1165,6 +1165,28 @@ class Orchestrator:
             if progress_callback:
                 progress_callback("F")
 
+        # Step 5.5: v0.9.20 — Harness self-reflection (A/B/C/D/F)
+        # Each harness reflects on its own output against SKILL.md and peers.
+        # Corrections applied in-place to outputs[name].result.
+        # Advisory only — never blocks; on LLM failure, output unchanged.
+        # Runs BEFORE Step 5b so C's corrections propagate to interface_for_e.
+        from agenthatch.skill.reflection import reflect_and_correct_harness
+
+        reflection_targets = [k for k in ("A", "B", "C", "D", "F") if k in outputs]
+        for name in reflection_targets:
+            peers = {
+                k: v.result
+                for k, v in outputs.items()
+                if k != name and k in reflection_targets
+            }
+            outputs[name], _ = reflect_and_correct_harness(
+                harness=harnesses[name],
+                output=outputs[name],
+                skill_md_body=context.body,
+                peer_outputs=peers,
+                max_rounds=2,
+            )
+
         # Step 5b: Merge F's MCP servers into C's interface before E sees it
         interface_for_e = dict(outputs["C"].result) if "C" in outputs else {}
         if "F" in outputs:
@@ -1219,6 +1241,20 @@ class Orchestrator:
                 from agenthatch.exceptions import SchemaValidationError
                 raise SchemaValidationError(f"Harness E failed: {e2}") from e2
 
+        # Step 6.5: v0.9.20 — Harness E self-reflection
+        # E reflects on the assembled ahs_spec against SKILL.md and peers.
+        # If corrections pass E's validate_output, they commit before Step 7
+        # builds the final AHSSpec. Advisory only — never blocks.
+        if "E" in outputs:
+            peers_e = {k: v.result for k, v in outputs.items() if k != "E"}
+            outputs["E"], _ = reflect_and_correct_harness(
+                harness=harnesses["E"],
+                output=outputs["E"],
+                skill_md_body=context.body,
+                peer_outputs=peers_e,
+                max_rounds=2,
+            )
+
         # Step 7: Build AHSSpec from Harness E assembly output
         ahs_dict: dict[str, Any] = {}
         try:
@@ -1243,6 +1279,33 @@ class Orchestrator:
             ahs_dict["interface"]["api_templates"] = api_templates
 
             ahs_spec = self._dict_to_ahspec(ahs_dict)
+
+            # Step 7.5: v0.9.20 — CP2 Fidelity Checkpoint (advisory)
+            # Verifies AHSSpec faithfully represents SKILL.md.
+            # Never blocks — low fidelity is logged and recorded in E's trace.
+            from agenthatch.skill.reflection import run_fidelity_checkpoint
+
+            cp2 = run_fidelity_checkpoint(
+                client=harnesses["E"].client,
+                model=harnesses["E"].model,
+                skill_md=context.body,
+                ahspec_json=ahs_spec.model_dump_json(),
+            )
+            # Accumulate CP2 tokens into E's usage
+            if "E" in outputs:
+                outputs["E"].token_usage = _accumulate_token_usage(
+                    outputs["E"].token_usage, harnesses["E"].client
+                )
+            if cp2.fidelity_score < 0.7:
+                logger.warning(
+                    "CP2 fidelity low: score=%.2f coverage=%s hallucination=%s",
+                    cp2.fidelity_score, cp2.coverage, cp2.hallucination,
+                )
+            if "E" in outputs:
+                outputs["E"].reasoning_trace.append(
+                    f"[E] cp2: fidelity={cp2.fidelity_score:.2f} "
+                    f"coverage={cp2.coverage} hallucination={cp2.hallucination}"
+                )
 
             # Attach confidence report and traces
             confidence_report = outputs["E"].result.get("confidence_report", {})

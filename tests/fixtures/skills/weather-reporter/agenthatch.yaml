@@ -1,16 +1,7 @@
 identity:
   id: weather-reporter
   display_name: Weather Reporter
-  version: 1.0.0
-  license: null
-  author: agenthatch-labs
-  meta:
-    description: Query current weather and forecast data from OpenWeatherMap API.
-      Use when the user asks about weather, temperature, forecast, humidity, wind,
-      or precipitation for any location.
-    compatibility: Requires OPENWEATHER_API_KEY environment variable and internet
-      access
-    allowed-tools: Bash(curl:*) Bash(jq:*) Read
+  version: ''
 intent:
   triggers:
   - weather
@@ -22,7 +13,8 @@ intent:
   - climate
   - conditions
   - meteorological
-  - OpenWeatherMap
+  - check
+  - report
   satisfies:
   - get weather for {city}
   - check temperature in {city}
@@ -30,34 +22,45 @@ intent:
   - check humidity in {city}
   - get weather conditions for {location}
   - get multi-day forecast for {city}
-  summary: Queries current weather conditions and multi-day forecasts from OpenWeatherMap
-    API for any city, providing temperature, humidity, wind speed, and precipitation
-    data.
+  summary: Fetches current weather conditions and multi-day forecasts for any city,
+    providing temperature, humidity, wind, and condition description data.
 interface:
   provides:
   - capability: weather_current
     type: data
     input_schema:
       city: string
+    output_schema:
+      city: string
+      country: string
+      temperature: number
+      feels_like: number
+      description: string
+      humidity: number
+      wind_speed: number
   - capability: weather_forecast
     type: data
     input_schema:
       city: string
       days: number
+    output_schema:
+      city: string
+      days: number
+      forecast: array
   requires:
   - capability: http_client
     type: action
     input_schema: {}
+    output_schema: {}
   - capability: json_parser
     type: data
     input_schema: {}
+    output_schema: {}
   - capability: bash_runtime
     type: action
     input_schema: {}
-  compatible_with:
-  - slack-notifier
-  - dashboard-builder
-  - alert-system
+    output_schema: {}
+  compatible_with: []
   mcp_servers: []
   api_templates:
   - name: get_data_2_5_weather
@@ -68,7 +71,6 @@ interface:
     auth_env_var: null
 base:
   runtime: bash
-  sandbox: true
   timeout: 120s
   env:
   - name: OPENWEATHER_API_KEY
@@ -121,12 +123,12 @@ resources:
     hash: 513ec12a4857b0770a0362cd8268b08556119e3544e6dedc7de48c62ebd4f2c9
   references:
   - name: agenthatch.yaml
-    hash: 3692cc677098fcd7af1352098053bcf9a2914a0bf239ba619adf8ca400dfc72c
+    hash: 3607f3a3b4803649a0bc340cc59eb49aeaca76933fe943f44fc991de0407f676
   assets: []
 modes: null
 composition:
   event_listeners: []
 agent:
-  status: not_generated
+  status: hatched
+  hatched_at: 2026-06-25 09:37:09.733195+00:00
   generated_at: null
-  runtime: null
