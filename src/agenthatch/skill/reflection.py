@@ -364,13 +364,16 @@ def should_skip_reflection(
 
     Optimization: Harnesses A and F can skip reflection if primary
     confidence > 0.9. Harness E can skip if all cross-checks pass.
+
+    ``harness_name`` is the harness's ``.name`` attribute (e.g.
+    ``"extract_identity"``), not the single-letter key.
     """
     if has_errors:
         return False  # Never skip if there were errors
 
-    if harness_name in ("A", "F") and confidence >= 0.9:
+    if harness_name in ("extract_identity", "infer_mcp_servers") and confidence >= 0.9:
         return True
-    if harness_name == "E" and confidence >= 0.95:
+    if harness_name == "assemble_and_validate" and confidence >= 0.95:
         return True
 
     return False

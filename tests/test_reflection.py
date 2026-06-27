@@ -91,23 +91,23 @@ def _make_output(
 
 class TestShouldSkipReflection:
     def test_skip_a_high_confidence(self):
-        assert should_skip_reflection("A", 0.95) is True
+        assert should_skip_reflection("extract_identity", 0.95) is True
 
     def test_skip_f_high_confidence(self):
-        assert should_skip_reflection("F", 0.92) is True
+        assert should_skip_reflection("infer_mcp_servers", 0.92) is True
 
     def test_skip_e_very_high_confidence(self):
-        assert should_skip_reflection("E", 0.96) is True
+        assert should_skip_reflection("assemble_and_validate", 0.96) is True
 
     def test_no_skip_e_below_threshold(self):
-        assert should_skip_reflection("E", 0.94) is False
+        assert should_skip_reflection("assemble_and_validate", 0.94) is False
 
     def test_no_skip_b_regardless_of_confidence(self):
         # B has no skip threshold — always reflects
-        assert should_skip_reflection("B", 0.99) is False
+        assert should_skip_reflection("infer_intent", 0.99) is False
 
     def test_no_skip_when_errors(self):
-        assert should_skip_reflection("A", 0.95, has_errors=True) is False
+        assert should_skip_reflection("extract_identity", 0.95, has_errors=True) is False
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ class TestShouldSkipReflection:
 class TestReflectAndCorrectHarness:
     def test_skip_high_confidence_harness_a(self):
         """Harness A with confidence >= 0.9 bypasses reflection."""
-        harness = _FakeHarness(name="A")
+        harness = _FakeHarness(name="extract_identity")
         output = _make_output(confidence=0.95)
 
         result, corrections = reflect_and_correct_harness(
