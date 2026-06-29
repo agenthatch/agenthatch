@@ -6,6 +6,8 @@ and fidelity to source.
 
 v0.9.20: Activated — ``reflect_and_correct_harness`` and
 ``run_fidelity_checkpoint`` are now wired into ``Orchestrator.run()``.
+Critic-role LLM calls use ``temperature=0.0`` per industry consensus
+(DSPy/Instructor): deterministic judgment ensures reproducible corrections.
 """
 
 from __future__ import annotations
@@ -204,7 +206,9 @@ def run_harness_reflection(
             ],
             response_model=HarnessReflectionOutput,
             model=model,
-            temperature=0.2,
+            # Critic role: temperature=0 per industry consensus (DSPy/Instructor).
+            # Deterministic judgment ensures reproducible corrections.
+            temperature=0.0,
             thinking=True,
         )
         return reflection  # type: ignore[no-any-return]
@@ -591,7 +595,8 @@ def run_fidelity_checkpoint(
             messages=[{"role": "user", "content": prompt}],
             response_model=FidelityCheckpointOutput,
             model=model,
-            temperature=0.1,
+            # Critic role: temperature=0 per industry consensus (DSPy/Instructor).
+            temperature=0.0,
             thinking=True,
         )
         return result  # type: ignore[no-any-return]

@@ -965,6 +965,20 @@ def _emit_hatch_report(
         archetype_str = None
     archetype_conf = getattr(classification, "confidence", None)
 
+    # v0.9.20: Resolve provider's official temperature range for the
+    # Harness Detail table's Temp column (advisory — never blocks).
+    temperature_range: tuple[float, float] | None = None
+    try:
+        from agenthatch.config import Config
+        from agenthatch.providers import get_provider
+
+        config = Config.load()
+        provider_info = get_provider(provider_name, config)
+        if provider_info and provider_info.features:
+            temperature_range = provider_info.features.temperature_range
+    except Exception:
+        pass
+
     report = build_hatch_report(
         skill_id=ahs_spec.identity.id,
         skill_name=ahs_spec.identity.display_name,
@@ -977,6 +991,7 @@ def _emit_hatch_report(
         file_count=file_count,
         archetype=archetype_str,
         archetype_confidence=float(archetype_conf) if archetype_conf is not None else None,
+        temperature_range=temperature_range,
     )
 
     if json_output:

@@ -53,6 +53,10 @@ class ProviderFeatures:
     supports_reasoning_content: bool = False
     requires_anthropic_adapter: bool = False
     available_models: tuple[str, ...] = ()
+    # v0.9.20: Official temperature range for the provider's API.
+    # OpenAI: 0-2 (per openai-python SDK); Anthropic: 0-1 (per docs.claude.com).
+    # Used by --report to surface misconfigured temperatures (advisory only).
+    temperature_range: tuple[float, float] = (0.0, 2.0)
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_parallel_tool_calls=True,
             supports_reasoning_content=True,
             requires_anthropic_adapter=True,
+            temperature_range=(0.0, 1.0),  # per docs.claude.com/en/api/messages
         ),
     ),
     "deepseek": ProviderInfo(
@@ -361,7 +366,8 @@ def _load_config_safe() -> dict[str, Any]:
         return {}
     try:
         with open(CONFIG_FILE, "rb") as f:
-            return tomllib.load(f)
+            loaded = tomllib.load(f)
+        return dict(loaded)
     except (tomllib.TOMLDecodeError, OSError):
         return {}
 

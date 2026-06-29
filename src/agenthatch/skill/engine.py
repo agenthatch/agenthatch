@@ -91,7 +91,7 @@ HARNESS_CONFIG: dict[str, dict[str, Any]] = {
     },
     "E": {
         "thinking": True,
-        "temperature": 0.2,
+        "temperature": 0.3,
         "reason": "Assembly validation is structured — low temp for consistency",
     },
     "F": {
@@ -339,6 +339,10 @@ class AgentHarness:
 
         confidence = self._estimate_confidence(result, degradations, retries)
 
+        # v0.9.20: Record configured temperature for --report visibility.
+        cfg = HARNESS_CONFIG.get(self.name, {})
+        temperature_used = cfg.get("temperature")
+
         return HarnessOutput(
             result=result,
             confidence=confidence,
@@ -347,6 +351,7 @@ class AgentHarness:
             degradation_applied=degradations,
             internal_retries=retries,
             token_usage=token_usage,
+            temperature_used=temperature_used,
         )
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
@@ -689,6 +694,8 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
 
     def _infer(self, messages: list[dict[str, Any]]) -> Any:
         """Harness E: try structured output first, fallback to raw chat."""
+        # v0.9.20: Use HARNESS_CONFIG for temperature consistency
+        cfg = HARNESS_CONFIG.get("E", {})
         # ── v0.5.10: Prefer chat_structured for reliability ──
         try:
             from agenthatch.skill.spec import AssembleOutput
@@ -696,7 +703,7 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
                 messages=messages,
                 response_model=AssembleOutput,
                 model=self.model,
-                temperature=0.3,
+                temperature=cfg.get("temperature", 0.3),
                 max_tokens=8192,
             )
             return result.model_dump()
@@ -707,7 +714,7 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
         response = self.client.chat(
             messages=messages,
             model=self.model,
-            temperature=0.3,
+            temperature=cfg.get("temperature", 0.3),
             max_tokens=8192,
         )
         import json
@@ -801,7 +808,9 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
         )
 
     def _get_correction_kwargs(self) -> dict[str, Any]:
-        return {"temperature": 0.3, "max_tokens": 8192}
+        # v0.9.20: Use HARNESS_CONFIG for temperature consistency
+        cfg = HARNESS_CONFIG.get("E", {})
+        return {"temperature": cfg.get("temperature", 0.3), "max_tokens": 8192}
 
     def _parse_correction_response(
         self, response: str, result: dict[str, Any]

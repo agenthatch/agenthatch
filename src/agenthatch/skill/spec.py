@@ -80,6 +80,11 @@ class HarnessOutput:
     v0.9.17: token_usage captures LLM token consumption for the hatch report.
     Populated by AgentHarness.run() from client.last_usage after each LLM call.
     Empty dict when no LLM call was made (e.g. Harness F regex fallback).
+
+    v0.9.20: temperature_used records the configured temperature for the
+    primary LLM call. Surfaced in --report's Harness Detail table alongside
+    the provider's valid range, so misconfigured temperatures are visible
+    without blocking hatch.
     """
     result: dict[str, Any]
     confidence: float
@@ -88,6 +93,7 @@ class HarnessOutput:
     degradation_applied: list[str] = field(default_factory=list)
     internal_retries: int = 0
     token_usage: dict[str, int] = field(default_factory=dict)
+    temperature_used: float | None = None
 
 
 # ─── AHSSPEC v1.1 Schema ───────────────────────────────────────────────

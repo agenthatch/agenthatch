@@ -52,6 +52,7 @@ class HarnessReport(BaseModel):
     internal_retries: int = 0
     reasoning_trace: list[str] = Field(default_factory=list)
     token_usage: dict[str, int] = Field(default_factory=dict)
+    temperature_used: float | None = None
 
 
 class ReadinessSummary(BaseModel):
@@ -93,6 +94,10 @@ class HatchReport(BaseModel):
     archetype: str | None = None
     archetype_confidence: float | None = None
     total_tokens: dict[str, int] = Field(default_factory=dict)
+    # v0.9.20: Provider's official temperature range (e.g. (0.0, 2.0) for
+    # OpenAI/DeepSeek, (0.0, 1.0) for Anthropic). Displayed in Harness Detail
+    # table so users can see if a harness temperature is out of range.
+    temperature_range: tuple[float, float] | None = None
 
     # ── Verdict computation ───────────────────────────────────────────
 
@@ -215,13 +220,30 @@ class HatchReport(BaseModel):
             h_table.add_column("Key", style="accent", justify="center")
             h_table.add_column("Task")
             h_table.add_column("Conf.", justify="right")
+            h_table.add_column("Temp", justify="right")
             h_table.add_column("Self-Check", justify="center")
             h_table.add_column("Retries", justify="right")
             h_table.add_column("Tokens", justify="right")
             h_table.add_column("Degradations")
 
+            # v0.9.20: Temp column shows configured temperature; caption
+            # contextualizes it against the provider's official range.
             for h in self.harnesses:
                 conf_str = f"{h.confidence:.2f}"
+                # v0.9.20: Show configured temperature; highlight if out of range.
+                if h.temperature_used is None:
+                    temp_str = "[dim]—[/dim]"
+                else:
+                    temp_val = h.temperature_used
+                    out_of_range = (
+                        self.temperature_range is not None
+                        and not (self.temperature_range[0] <= temp_val <= self.temperature_range[1])
+                    )
+                    temp_fmt = f"{temp_val:.2f}"
+                    if out_of_range:
+                        temp_str = f"[warn]{temp_fmt}[/warn] ⚠"
+                    else:
+                        temp_str = temp_fmt
                 check_str = "[ok]✓[/ok]" if h.self_check_passed else "[error]✗[/error]"
                 tok = h.token_usage.get("total_tokens", 0)
                 tok_str = f"{tok:,}" if tok else "—"
@@ -234,10 +256,18 @@ class HatchReport(BaseModel):
                     h.key,
                     h.label,
                     conf_str,
+                    temp_str,
                     check_str,
                     str(h.internal_retries),
                     tok_str,
                     deg_str,
+                )
+            # v0.9.20: Append provider range as a caption so the Temp column is contextualized.
+            if self.temperature_range:
+                lo, hi = self.temperature_range
+                h_table.caption = (
+                    f"Temp column: configured value "
+                    f"[dim](provider range 0–{hi:g})[/dim]"
                 )
             renderables.append(h_table)
 
@@ -318,6 +348,7 @@ def build_hatch_report(
     file_count: int,
     archetype: str | None,
     archetype_confidence: float | None,
+    temperature_range: tuple[float, float] | None = None,
 ) -> HatchReport:
     """Construct a HatchReport from hatch telemetry.
 
@@ -333,6 +364,9 @@ def build_hatch_report(
         file_count: Number of files generated in Phase 3
         archetype: Skill archetype string, or None
         archetype_confidence: Archetype confidence 0.0-1.0, or None
+        temperature_range: v0.9.20 — Provider's official temperature range
+            (e.g. (0.0, 2.0) for OpenAI/DeepSeek). Displayed in Harness Detail
+            table to contextualize each harness's configured temperature.
     """
     # Build harness reports in canonical order A→B→C→D→E→F
     harness_reports: list[HarnessReport] = []
@@ -355,6 +389,7 @@ def build_hatch_report(
             internal_retries=int(h_out.internal_retries),
             reasoning_trace=list(h_out.reasoning_trace),
             token_usage=dict(h_out.token_usage),
+            temperature_used=getattr(h_out, "temperature_used", None),
         )
         harness_reports.append(h_report)
 
@@ -396,6 +431,7 @@ def build_hatch_report(
         archetype=archetype,
         archetype_confidence=archetype_confidence,
         total_tokens=total_tokens,
+        temperature_range=temperature_range,
     )
     report.verdict = report.compute_verdict()
     return report

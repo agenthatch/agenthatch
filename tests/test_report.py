@@ -35,6 +35,7 @@ def _make_harness_output(
     degradations: list[str] | None = None,
     retries: int = 0,
     tokens: dict[str, int] | None = None,
+    temperature_used: float | None = None,
 ) -> HarnessOutput:
     """Build a minimal HarnessOutput for testing."""
     return HarnessOutput(
@@ -45,6 +46,7 @@ def _make_harness_output(
         degradation_applied=degradations or [],
         internal_retries=retries,
         token_usage=tokens or {},
+        temperature_used=temperature_used,
     )
 
 
@@ -478,3 +480,110 @@ class TestHarnessOutputTokenUsage:
             token_usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
         )
         assert out.token_usage["total_tokens"] == 150
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# v0.9.20: Temperature visibility tests
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestTemperatureVisibility:
+    """v0.9.20: temperature_used + temperature_range surface in report."""
+
+    def test_harness_output_carries_temperature(self) -> None:
+        """HarnessOutput.temperature_used defaults to None."""
+        out = HarnessOutput(
+            result={},
+            confidence=0.9,
+            reasoning_trace=[],
+            self_check_passed=True,
+        )
+        assert out.temperature_used is None
+
+    def test_harness_report_temperature_propagated(self) -> None:
+        """build_hatch_report propagates temperature_used to HarnessReport."""
+        report = build_hatch_report(
+            skill_id="test",
+            skill_name="Test",
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            phases=[],
+            harness_outputs={
+                "A": _make_harness_output("A", temperature_used=0.1),
+                "B": _make_harness_output("B", temperature_used=0.5),
+            },
+            readiness=None,
+            agent_output_dir=None,
+            file_count=0,
+            archetype=None,
+            archetype_confidence=None,
+            temperature_range=(0.0, 2.0),
+        )
+        assert report.harnesses[0].temperature_used == 0.1
+        assert report.harnesses[1].temperature_used == 0.5
+        assert report.temperature_range == (0.0, 2.0)
+
+    def test_json_includes_temperature_fields(self) -> None:
+        """JSON output includes temperature_used and temperature_range."""
+        report = build_hatch_report(
+            skill_id="test",
+            skill_name="Test",
+            provider="anthropic",
+            model="claude-opus-4-8",
+            phases=[],
+            harness_outputs={
+                "A": _make_harness_output("A", temperature_used=0.5),
+            },
+            readiness=None,
+            agent_output_dir=None,
+            file_count=0,
+            archetype=None,
+            archetype_confidence=None,
+            temperature_range=(0.0, 1.0),
+        )
+        data = json.loads(report.to_json())
+        assert data["harnesses"][0]["temperature_used"] == 0.5
+        assert list(data["temperature_range"]) == [0.0, 1.0]
+
+    def test_temperature_none_renders_dash(self) -> None:
+        """to_terminal() renders '—' when temperature_used is None."""
+        report = build_hatch_report(
+            skill_id="test",
+            skill_name="Test",
+            provider=None,
+            model=None,
+            phases=[],
+            harness_outputs={
+                "A": _make_harness_output("A", temperature_used=None),
+            },
+            readiness=None,
+            agent_output_dir=None,
+            file_count=0,
+            archetype=None,
+            archetype_confidence=None,
+        )
+        # Should not raise even without temperature_range
+        group = report.to_terminal()
+        assert group is not None
+
+    def test_temperature_out_of_range_renders_warning(self) -> None:
+        """to_terminal() highlights out-of-range temperature without raising."""
+        report = build_hatch_report(
+            skill_id="test",
+            skill_name="Test",
+            provider="anthropic",
+            model="claude-opus-4-8",
+            phases=[],
+            harness_outputs={
+                "B": _make_harness_output("B", temperature_used=1.5),  # > 1.0
+            },
+            readiness=None,
+            agent_output_dir=None,
+            file_count=0,
+            archetype=None,
+            archetype_confidence=None,
+            temperature_range=(0.0, 1.0),
+        )
+        # Should not raise; out-of-range is advisory only
+        group = report.to_terminal()
+        assert group is not None

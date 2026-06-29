@@ -203,7 +203,7 @@ class SkillhouseIndex:
         if not self._embedder_disabled and self._embedder is not None:
             import numpy as np
 
-            query_emb: np.ndarray = self._embedder.encode(
+            query_emb: np.ndarray[Any, Any] = self._embedder.encode(
                 query, normalize_embeddings=True
             )
             for sid, entry in self._data["entries"].items():
@@ -308,7 +308,7 @@ class SkillhouseIndex:
         ]
         text = " ".join(text_parts)
         import numpy as np
-        emb: np.ndarray = self._embedder.encode(text, normalize_embeddings=True)
+        emb: np.ndarray[Any, Any] = self._embedder.encode(text, normalize_embeddings=True)
         return emb.tolist()  # type: ignore[no-any-return]
 
     def remove_entry(self, skill_id: str) -> None:
