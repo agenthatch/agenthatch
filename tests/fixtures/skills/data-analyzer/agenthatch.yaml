@@ -1,8 +1,161 @@
-agent:
-  import_binding: true  # v0.8.0: enable Phase 1.5 import binding
-  sandbox: strict
-  loop: full
+identity:
+  id: data-analyzer
+  display_name: Data Analyzer
+  version: ''
+intent:
+  triggers:
+  - statistics
+  - analysis
+  - mean
+  - median
+  - standard deviation
+  - outlier
+  - transform
+  - normalize
+  - dataset
+  - CSV
+  - data analysis
+  - statistical
+  satisfies:
+  - analyze dataset {file}
+  - compute statistics for {column}
+  - normalize data in {column}
+  - detect outliers in {dataset}
+  - summarize statistics for {file}
+  - transform {data} by {method}
+  - perform statistical analysis on {csv}
+  summary: Performs statistical analysis on datasets, computing descriptive statistics,
+    identifying data types, missing values, and detecting outliers; also supports
+    data transformation.
+interface:
+  provides:
+  - capability: compute_stats
+    type: action
+    input_schema:
+      values: array
+    output_schema:
+      type: object
+      properties:
+        count:
+          type: number
+        mean:
+          type: number
+        median:
+          type: number
+        std:
+          type: number
+        min:
+          type: number
+        max:
+          type: number
+        q1:
+          type: number
+        q3:
+          type: number
+        range:
+          type: number
+  - capability: detect_outliers
+    type: action
+    input_schema:
+      values: array
+      threshold: number
+    output_schema:
+      type: array
+      items:
+        type: number
+  - capability: load_csv
+    type: data
+    input_schema:
+      path: string
+      delimiter: string
+    output_schema:
+      type: object
+      properties:
+        headers:
+          type: array
+          items:
+            type: string
+        columns:
+          type: object
+        row_count:
+          type: number
+  requires:
+  - capability: python3_runtime
+    type: action
+    input_schema: {}
+    output_schema: {}
+  compatible_with: []
+  mcp_servers: []
+  api_templates: []
+base:
+  runtime: python3.11
+  timeout: 120s
+  env: []
+  dependencies: []
+instructions:
+  workflow:
+  - step: 1
+    description: Load and validate data
+    script: scripts/compute.py:load_csv
+  - step: 2
+    description: Compute descriptive statistics (mean, median, stddev, quartiles)
+    script: scripts/compute.py:compute_stats
+  - step: 3
+    description: Identify data types, missing values, and outliers
+    script: scripts/compute.py:detect_outliers
+  - step: 4
+    description: Present findings in a clear summary
+    script: null
+  rules:
+  - Ensure data is validated before analysis
+  - Present findings in a clear summary
+  safety:
+    confirmation_required_for: []
+    plan_required: false
+    max_rows_default: null
+    parameterized_only: false
+  output_template: null
+  raw_body: '# Data Analyzer
 
-hatch:
-  small_model: deepseek-chat
-  large_model: deepseek-chat
+
+    Analyze structured datasets and compute statistical summaries.
+
+
+    ## Usage
+
+
+    When a user provides a data file or describes a dataset, this agent:
+
+
+    1. Loads and validates the data
+
+    2. Computes descriptive statistics (mean, median, stddev, quartiles)
+
+    3. Identifies data types, missing values, and outliers
+
+    4. Presents findings in a clear summary
+
+
+    ## Operation Modes
+
+
+    - **Quick Stats**: Compute basic statistics on a single column
+
+    - **Full Analysis**: Multi-column correlation, distribution analysis
+
+    - **Transform**: Normalize, scale, or transform data columns'
+resources:
+  scripts:
+  - name: scripts/compute.py
+    hash: df21ccc087280ace74445d611faac7f5a5461fc761dccaa0c31ca44f6cb41b34
+  references:
+  - name: agenthatch.yaml
+    hash: 1d0230b213128abc7c404b0de70ad36877335f5b7f38ec7275b75c7ee1f66c88
+  assets: []
+modes: null
+composition:
+  event_listeners: []
+agent:
+  status: hatched
+  hatched_at: 2026-07-02 07:20:35.170006+00:00
+  generated_at: null

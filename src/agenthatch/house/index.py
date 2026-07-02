@@ -124,11 +124,24 @@ class SkillhouseIndex:
 
         If the model cannot be downloaded (offline/network issues),
         embedding search is disabled gracefully — keyword-only mode.
+
+        v0.9.22: sentence-transformers is now an optional dependency.
+        If not installed (pip install agenthatch without [semantic]),
+        embedding search is disabled — BM25 keyword search still works.
         """
         if self._embedder is not None or self._embedder_disabled:
             return
 
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            logger.info(
+                "sentence-transformers not installed. "
+                "Embedding search disabled (keyword-only mode). "
+                "Install with: pip install agenthatch[semantic]"
+            )
+            self._embedder_disabled = True
+            return
 
         embedder_result: list[Any] = [None]
         embedder_error: list[Any] = [None]

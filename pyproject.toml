@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "0.9.21"
+version = "0.9.22"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 dependencies = [
-    
+
     "typer>=0.15.0",
     "packaging>=24.0",
     "httpx>=0.28.0",
@@ -36,7 +36,9 @@ dependencies = [
     "python-frontmatter>=1.0",
     "rich>=13.0",
     "instructor>=1.0",
-    "sentence-transformers>=3.0",
+    # v0.9.22: sentence-transformers moved to optional 'semantic' group
+    # Core install no longer pulls PyTorch. BM25 keyword search still works.
+    # For semantic (embedding) search: pip install agenthatch[semantic]
     "rank-bm25>=0.2",
     "jinja2>=3.1",
     "tomli-w>=1.0",
@@ -52,6 +54,9 @@ dev = [
     "types-PyYAML>=6.0",
     "build>=1.0",
     "twine>=5.0",
+]
+semantic = [
+    "sentence-transformers>=3.0",
 ]
 
 [project.urls]

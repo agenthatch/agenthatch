@@ -27,7 +27,7 @@
   </a>
 </p>
 
----
+***
 
 ## The problem with SKILL.md
 
@@ -35,19 +35,19 @@ SKILL.md promised a lot. Write a markdown file, tell your agent what to do, and
 it works. In practice, anyone who has used more than three skills across Claude
 Code, Codex CLI, or OpenClaw knows the friction:
 
-| Pain point | What actually happens |
-|---|---|
-| **No isolation** | Skills leak into each other. A file-organizer skill and a git-ops skill share the same context window. The agent confuses instructions meant for one with the other. |
-| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it. It picks the parts that seem relevant and ignores the rest. |
-| **Token waste** | Every SKILL.md lives in the system prompt. Add 5 skills at 3KB each and you just burned 15KB of context before the conversation even starts. On long-running tasks this compounds fast. |
-| **No validation** | A typo in a tool name, a missing parameter, an ambiguous instruction. The agent won't catch any of it until runtime, and by then the conversation is 20 turns deep. |
-| **Scale decays** | Skills work at 1–3. At 10+ they become unmanageable. No dependency graph, no conflict detection, no way to tell which skill overrides which. |
+| Pain point                               | What actually happens                                                                                                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No isolation**                         | Skills leak into each other. A file-organizer skill and a git-ops skill share the same context window. The agent confuses instructions meant for one with the other.                    |
+| **Reference book, not operating manual** | Agents treat SKILL.md as a loose suggestion, not a contract. Given a long skill, the model skim-reads it. It picks the parts that seem relevant and ignores the rest.                   |
+| **Token waste**                          | Every SKILL.md lives in the system prompt. Add 5 skills at 3KB each and you just burned 15KB of context before the conversation even starts. On long-running tasks this compounds fast. |
+| **No validation**                        | A typo in a tool name, a missing parameter, an ambiguous instruction. The agent won't catch any of it until runtime, and by then the conversation is 20 turns deep.                     |
+| **Scale decays**                         | Skills work at 1–3. At 10+ they become unmanageable. No dependency graph, no conflict detection, no way to tell which skill overrides which.                                            |
 
 The core issue isn't the format. It's that SKILL.md is **prompt engineering**, not
 **software engineering**. You're asking an LLM to interpret human prose at
 runtime, every time, with no compilation, no type checking, no contract.
 
----
+***
 
 ## What agenthatch does
 
@@ -65,7 +65,7 @@ a CLI entry point, typed tool definitions, MCP integration, and a runtime
 configuration. It's not a wrapper around your skill — it **is** the skill,
 compiled into code.
 
----
+***
 
 ## Quick Start
 
@@ -89,23 +89,23 @@ agenthatch run my-skill
 Three steps from markdown to running agent. The hatched agent lives in your
 skillhouse and can be re-run anytime.
 
----
+***
 
 ## SKILL.md vs agenthatch
 
-| | SKILL.md (raw) | agenthatch (hatched) |
-|---|---|---|
-| **Execution** | Interpreted at runtime by LLM | Compiled into standalone Python package |
-| **Isolation** | All skills share one context window | Each agent has its own runtime, tools, and config |
-| **Validation** | None. Typos and ambiguities caught at runtime. | Schema-validated AHSSPEC before code generation |
-| **Token cost** | Full skill body in system prompt every turn | ~150 bytes of runtime config |
-| **Tool definitions** | Prose descriptions, LLM guesses how to call | Type-annotated Python functions with JSON Schema |
-| **MCP** | Manual wiring per agent | Auto-detected, auto-configured |
-| **Determinism** | LLM interprets differently each time | Same SKILL.md → same AHSSPEC structure (low-temp inference) |
-| **Multi-skill scaling** | Degrades past 3–5 skills | Unlimited. Each agent is a separate process. |
-| **Debugging** | Read the LLM's chain-of-thought and pray | Standard Python debugging, logging, tests |
+| <br />                  | SKILL.md (raw)                                 | agenthatch (hatched)                                        |
+| ----------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
+| **Execution**           | Interpreted at runtime by LLM                  | Compiled into standalone Python package                     |
+| **Isolation**           | All skills share one context window            | Each agent has its own runtime, tools, and config           |
+| **Validation**          | None. Typos and ambiguities caught at runtime. | Schema-validated AHSSPEC before code generation             |
+| **Token cost**          | Full skill body in system prompt every turn    | \~150 bytes of runtime config                               |
+| **Tool definitions**    | Prose descriptions, LLM guesses how to call    | Type-annotated Python functions with JSON Schema            |
+| **MCP**                 | Manual wiring per agent                        | Auto-detected, auto-configured                              |
+| **Determinism**         | LLM interprets differently each time           | Same SKILL.md → same AHSSPEC structure (low-temp inference) |
+| **Multi-skill scaling** | Degrades past 3–5 skills                       | Unlimited. Each agent is a separate process.                |
+| **Debugging**           | Read the LLM's chain-of-thought and pray       | Standard Python debugging, logging, tests                   |
 
----
+***
 
 ## Architecture
 
@@ -122,14 +122,14 @@ with zero semantic transformation.
 Six specialized AI harnesses process the skill, each with its own persona
 and temperature profile:
 
-| Harness | Role | Temp |
-|---|---|---|
-| **A — Identity** | Extract name, version, description from frontmatter | 0.1 |
-| **B — Intent** | Infer trigger phrases and user intents | 0.5 |
-| **C — Interface** | Design tool signatures, parameters, and return types | 0.5 |
-| **D — Base** | Detect runtime base class and instruction structure | 0.3 |
-| **E — Assembly** | Cross-validate all harness outputs, produce AHSSPEC | 0.2 |
-| **F — MCP** | Detect and configure MCP server connections | 0.3 |
+| Harness           | Role                                                 | Temp |
+| ----------------- | ---------------------------------------------------- | ---- |
+| **A — Identity**  | Extract name, version, description from frontmatter  | 0.1  |
+| **B — Intent**    | Infer trigger phrases and user intents               | 0.5  |
+| **C — Interface** | Design tool signatures, parameters, and return types | 0.5  |
+| **D — Base**      | Detect runtime base class and instruction structure  | 0.3  |
+| **E — Assembly**  | Cross-validate all harness outputs, produce AHSSPEC  | 0.2  |
+| **F — MCP**       | Detect and configure MCP server connections          | 0.3  |
 
 Each harness runs an **Analyze → Infer → Self-Validate → Correct** loop with
 up to 2 internal retries. Harness E cross-validates the other five outputs and
@@ -159,7 +159,7 @@ engine that runs STARTING → PLANNING → EXECUTING → VERIFYING → REPLANNIN
 DONE. It adapts mid-task: merges completed steps, branches on failure, and
 degrades gracefully when tools time out.
 
----
+***
 
 ## How it works under the hood
 
@@ -189,6 +189,7 @@ Phase 3 (Jinja2): AHSSPEC → agent package
 ```
 
 Flags:
+
 - `--no-generate` — skip Phase 3, review the AHSSPEC first
 - `--force` — overwrite existing hatched agent
 - `--dry-run` — preview without writing files
@@ -201,23 +202,23 @@ with tool calling, context compaction, and PlanLayer-driven execution.
 
 </details>
 
----
+***
 
 ## CLI Reference
 
-| Command | What it does |
-|---|---|
-| `agenthatch init` | Initialize config and provider setup |
-| `agenthatch skills add <path>` | Register a SKILL.md in the skillhouse |
-| `agenthatch skills list` | List all registered skills |
-| `agenthatch skills delete <name>` | Remove a skill from the skillhouse |
-| `agenthatch hatch <name>` | Run the full pipeline (parse → harness → generate) |
-| `agenthatch run <name>` | Launch a hatched agent in interactive TUI |
-| `agenthatch search <query>` | Search the skillhouse index |
-| `agenthatch doctor` | Diagnose environment and dependencies |
-| `agenthatch assemble` | Re-assemble an existing skillhouse agent |
+| Command                           | What it does                                       |
+| --------------------------------- | -------------------------------------------------- |
+| `agenthatch init`                 | Initialize config and provider setup               |
+| `agenthatch skills add <path>`    | Register a SKILL.md in the skillhouse              |
+| `agenthatch skills list`          | List all registered skills                         |
+| `agenthatch skills delete <name>` | Remove a skill from the skillhouse                 |
+| `agenthatch hatch <name>`         | Run the full pipeline (parse → harness → generate) |
+| `agenthatch run <name>`           | Launch a hatched agent in interactive TUI          |
+| `agenthatch search <query>`       | Search the skillhouse index                        |
+| `agenthatch doctor`               | Diagnose environment and dependencies              |
+| `agenthatch assemble`             | Re-assemble an existing skillhouse agent           |
 
----
+***
 
 ## Installation
 
@@ -235,20 +236,20 @@ cd agenthatch
 pip install -e ".[dev]"
 ```
 
----
+***
 
 ## Documentation
 
-| Document | Link |
-|---|---|
-| Contributing Guide | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| Security Policy | [SECURITY.md](SECURITY.md) |
-| Support | [SUPPORT.md](SUPPORT.md) |
-| Roadmap | [ROADMAP.md](ROADMAP.md) |
-| Code of Conduct | [CODE_OF_CONDUCT.md](https://github.com/agenthatch/.github/blob/main/CODE_OF_CONDUCT.md) |
-| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+| Document           | Link                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| Contributing Guide | [CONTRIBUTING.md](CONTRIBUTING.md)                                                         |
+| Security Policy    | [SECURITY.md](SECURITY.md)                                                                 |
+| Support            | [SUPPORT.md](SUPPORT.md)                                                                   |
+| Roadmap            | [ROADMAP.md](ROADMAP.md)                                                                   |
+| Code of Conduct    | [CODE\_OF\_CONDUCT.md](https://github.com/agenthatch/.github/blob/main/CODE_OF_CONDUCT.md) |
+| Changelog          | [CHANGELOG.md](CHANGELOG.md)                                                               |
 
----
+***
 
 ## Community
 
@@ -256,7 +257,7 @@ pip install -e ".[dev]"
 - [GitHub Issues](https://github.com/agenthatch/agenthatch/issues) — bugs and feature requests
 - [X (Twitter)](https://x.com/EterRights)
 
----
+***
 
 ## Contributing
 
@@ -269,7 +270,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the quality gate
 AI-assisted contributions are welcome. Run the quality gate before submitting —
 that's all that matters.
 
----
+***
 
 ## FAQ
 
@@ -296,12 +297,12 @@ runtime.
 No. SKILL.md is the input format. agenthatch is the compiler. You still write
 skills in markdown — agenthatch turns them into agents.
 
----
+***
 
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
 
----
+***
 
-<sub>📖 简体中文版请见 [README_CN.md](README_CN.md)</sub>
+<sub>📖 简体中文版请见 [README\_CN.md](README_CN.md)</sub>

@@ -4,6 +4,50 @@ All notable changes to agenthatch will be documented in this file.
 
 ---
 
+## [v0.9.22] — Unreleased
+
+### Added
+
+- **PlanLayer state machine test suite** — 82 tests covering all 6 states (STARTING/PLANNING/EXECUTING/VERIFYING/REPLANNING/DONE), state transitions, failure keyword detection, MAX_CONSECUTIVE_FAILURES threshold, VERIFY_EVERY_N_STEPS checkpoint, nag_limit (plan_guided=4/conversation=2), to_context_text rendering (☐▶✓✗), serialization
+- **SkillhouseIndex test suite** — 54 tests covering hybrid search (BM25 α=0.7 + embedding), lazy init, embedding degradation, topological sort (Kahn's algorithm + circular dependency), atomic save, _compute_ahs_hash, find_provider, CRUD operations
+- **Engine orchestrator test suite** — 36 tests covering HARNESS_CONFIG (temperatures, thinking, reasons), HARNESS_LABELS mapping, MODEL_TIER_MAP (skill type → model tier, pure_instruction skips D), should_skip_reflection confidence thresholds (A/F ≥ 0.9, E ≥ 0.95, never skip with errors)
+- **Post-generation review design document** — `docs/agenthatch-v0.9.22-postgen-review-design.md`. Designs Phase 3.5 post-gen review: inspection checks, tool self-test strategy, iteration loop (max 3 rounds), quality gate definition. Implementation deferred — stub frequency 0% in real hatch measurement.
+- **Timeout mechanism evaluation document** — `docs/v0.9.22-timeout-evaluation.md`. Evaluates three alternatives (multiprocessing, asyncio, keep current) for `_route_with_timeout()`. Recommendation: keep current ThreadPoolExecutor + document limitation for v0.9.22; re-evaluate asyncio for v2.0.
+
+### Changed
+
+- **sentence-transformers is now an optional dependency** — `pip install agenthatch` no longer pulls PyTorch. Core install includes BM25 keyword search only. For semantic (embedding) search: `pip install agenthatch[semantic]`. `_ensure_embedder()` handles ImportError gracefully, falling back to keyword-only mode.
+
+### Fixed
+
+- **Documented edge case: empty plan is_complete** — `StructuredPlan.is_complete` returns True for empty plan due to vacuous truth (`all([]) == True` in Python). Test documents this as expected behavior.
+- **Documented limitation: _update_topology retroactive update** — `_update_topology` only records requires at `add_entry` time if the provider already exists. Does not retroactively update existing entries when a new provider is added. Circular dependency test uses manual topology construction to test Kahn's algorithm directly.
+
+---
+
+## [v0.9.21] — 2026-06-29
+
+### Added
+
+- **hatch report: harness temperatures** — report now displays per-harness temperature values alongside confidence and reasoning traces
+- **zero critic-role temperature** — reflection/critic harness temperature set to 0.0 for deterministic validation output
+
+### Fixed
+
+- **fix: match harness .name in should_skip_reflection** — `should_skip_reflection()` compared harness keys against `.name` attribute but harness identifiers are stored as dict keys ("A", "B", etc.), not `.name`. Caused reflection to run on harnesses that should have been skipped (e.g., Harness A/F with confidence ≥ 0.9), wasting tokens. Now matches against dict keys consistently.
+
+---
+
+## [v0.9.20] — 2026-06-25
+
+### Added
+
+- **reflection loop wired into orchestrator** — v0.9.20 connects the `reflect_and_correct_harness()` function (previously standalone) into the engine orchestrator at two points: Step 5.5 (A/B/C/D/F harnesses reflect against SKILL.md and peer outputs) and Step 6.5 (Harness E reflects on the assembled AHSSPEC). Completes the "self-review" half of ROADMAP Phase 1.
+- **fidelity checkpoint** — `run_fidelity_checkpoint()` added at post-assembly stage, scoring AHSSPEC fidelity against source SKILL.md
+- **hardened apply_corrections** — `apply_corrections()` now uses dot-path field targeting (e.g., `"intent.triggers"`) for precise correction application, avoiding full-spec regeneration
+
+---
+
 ## [v0.6.0] — 2026-06-05
 
 ### Architecture Transformation: "Agent Factory"
