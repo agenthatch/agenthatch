@@ -100,6 +100,14 @@ strict = true
 module = "numpy"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "sentence_transformers"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "click.shell_completion"
+ignore_missing_imports = true
+
 [tool.coverage.run]
 branch = true
 source = ["agenthatch"]

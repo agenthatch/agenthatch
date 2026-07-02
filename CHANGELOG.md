@@ -20,6 +20,8 @@ All notable changes to agenthatch will be documented in this file.
 
 ### Fixed
 
+- **CI mypy: sentence_transformers import-not-found** — After moving sentence-transformers to optional dependency, CI's mypy --strict could not find the module. Added `[[tool.mypy.overrides]] module = "sentence_transformers" ignore_missing_imports = true` to pyproject.toml. Works in both CI (module absent) and local (module present) without unused-ignore errors.
+- **CI mypy: click.shell_completion import-not-found** — Pre-existing mypy error surfaced after CI environment change. Added mypy override for `click.shell_completion`. Replaced `# type: ignore[no-any-return]` on `completer.source()` with explicit `str()` conversion for environment-agnostic type safety.
 - **Documented edge case: empty plan is_complete** — `StructuredPlan.is_complete` returns True for empty plan due to vacuous truth (`all([]) == True` in Python). Test documents this as expected behavior.
 - **Documented limitation: _update_topology retroactive update** — `_update_topology` only records requires at `add_entry` time if the provider already exists. Does not retroactively update existing entries when a new provider is added. Circular dependency test uses manual topology construction to test Kahn's algorithm directly.
 

@@ -80,7 +80,7 @@ def _generate_completion_script(shell: str) -> str | None:
             prog_name="agenthatch",
             complete_var="_AGENTHATCH_COMPLETE",
         )
-        return completer.source()
+        return str(completer.source())
     except Exception:
         return None
 
