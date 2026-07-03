@@ -1,10 +1,7 @@
 identity:
   id: minimal-skill
   display_name: My Simple Skill
-  version: 0.1.0
-  license: null
-  author: null
-  meta: {}
+  version: ''
 intent:
   triggers:
   - format
@@ -16,11 +13,14 @@ intent:
   - transform
   - style text
   - text output
+  - layout
+  - prettify
   satisfies:
   - format {text}
   - format text output
   - apply formatting to {content}
-  - transform text
+  - transform text into {format}
+  - style text as {style}
   summary: A minimal skill that helps format and transform text output for various
     purposes.
 interface:
@@ -28,11 +28,13 @@ interface:
   - capability: text_format
     type: transform
     input_schema: {}
+    output_schema: {}
   requires: []
   compatible_with: []
+  mcp_servers: []
+  api_templates: []
 base:
-  runtime: python
-  sandbox: true
+  runtime: null
   timeout: 60s
   env: []
   dependencies: []
@@ -45,10 +47,20 @@ instructions:
     max_rows_default: null
     parameterized_only: false
   output_template: null
+  raw_body: '# My Simple Skill
+
+
+    This is a minimal skill that helps format text output. Just a few words here.'
 resources:
   scripts: []
-  references: []
+  references:
+  - name: agenthatch.yaml
+    hash: 11a9b33820f5321a8fdba3614081ea88e2414c4a16db2cb1329171753520fee0
   assets: []
 modes: null
 composition:
   event_listeners: []
+agent:
+  status: hatched
+  hatched_at: 2026-07-03 09:50:18.600289+00:00
+  generated_at: null

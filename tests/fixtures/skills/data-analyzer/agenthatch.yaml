@@ -14,8 +14,11 @@ intent:
   - normalize
   - dataset
   - CSV
+  - JSON
   - data analysis
   - statistical
+  - quartiles
+  - data transformation
   satisfies:
   - analyze dataset {file}
   - compute statistics for {column}
@@ -25,8 +28,7 @@ intent:
   - transform {data} by {method}
   - perform statistical analysis on {csv}
   summary: Performs statistical analysis on datasets, computing descriptive statistics,
-    identifying data types, missing values, and detecting outliers; also supports
-    data transformation.
+    detecting outliers, and supporting data transformation for CSV and JSON files.
 interface:
   provides:
   - capability: compute_stats
@@ -150,12 +152,12 @@ resources:
     hash: df21ccc087280ace74445d611faac7f5a5461fc761dccaa0c31ca44f6cb41b34
   references:
   - name: agenthatch.yaml
-    hash: 1d0230b213128abc7c404b0de70ad36877335f5b7f38ec7275b75c7ee1f66c88
+    hash: 18a455d7ad4e831f2dafcd9d26c3a7fe626d778e006bf5d050a4ad426bdbb9e2
   assets: []
 modes: null
 composition:
   event_listeners: []
 agent:
   status: hatched
-  hatched_at: 2026-07-02 07:20:35.170006+00:00
+  hatched_at: 2026-07-03 10:00:50.743637+00:00
   generated_at: null

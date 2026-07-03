@@ -183,6 +183,55 @@ def _run_phase3_generate(
     return len(written), agent_output_dir, t3_elapsed
 
 
+def _run_postgen_review(
+    *,
+    agent_output_dir: Path,
+    ahs_spec: Any,
+    skill_dir: Path,
+    ai_chat_fn: Any | None,
+    quiet: bool,
+    archetype: str | None = None,
+) -> Any:
+    """v0.9.22: Run Phase 3.5 post-generation self-review (B2/B3/B4).
+
+    Calls ``iterate_until_gate()`` to inspect → test → repair the generated
+    agent package. Never blocks — returns a PostGenReport with READY/WARN
+    verdict. Any exception is swallowed (advisory only).
+    """
+    from agenthatch.skill.postgen_review import iterate_until_gate
+
+    if not quiet:
+        console.print(
+            "[dim]▸ Phase 3.5/3[/dim]  Post-Generation Review "
+            "[dim](inspect → test → repair)[/dim]"
+        )
+
+    try:
+        report = iterate_until_gate(
+            output_dir=agent_output_dir,
+            ahsspec=ahs_spec,
+            context=None,
+            chat_fn=ai_chat_fn,
+            skill_dir=skill_dir,
+            archetype=archetype,
+        )
+    except Exception as e:
+        logger.warning("Post-generation review failed: %s", e)
+        return None
+
+    if not quiet and report is not None:
+        verdict_style = "ok" if report.verdict == "READY" else "warn"
+        verdict_icon = "✓" if report.verdict == "READY" else "⚠"
+        console.print(
+            f"[{verdict_style}]{verdict_icon}[/{verdict_style}]  "
+            f"postgen review: {report.verdict} "
+            f"({report.iterations} rounds, "
+            f"{report.tools_with_issues}/{report.tools_total} tools with issues)"
+        )
+
+    return report
+
+
 # ── CLI rendering helpers ───────────────────────────────────────────────────
 
 
@@ -385,6 +434,13 @@ def hatch_command(
     no_ai_tools: Annotated[
         bool,
         typer.Option("--no-ai-tools", help="Skip AI-driven tool implementation generation"),
+    ] = False,
+    no_postgen_review: Annotated[
+        bool,
+        typer.Option(
+            "--no-postgen-review",
+            help="Skip Phase 3.5 post-generation self-review (B2/B3/B4 self-healing)",
+        ),
     ] = False,
     report: Annotated[
         bool,
@@ -786,6 +842,27 @@ def hatch_command(
         written_files=list(agent_output_dir.glob("**/*")) if trace and not dry_run else None,
     )
 
+    # ── 13.5. Phase 3.5: Post-generation self-review (v0.9.22) ─────────
+    # B2/B3/B4 self-healing: inspect → test → repair → re-inspect loop.
+    # Never blocks — produces READY/WARN verdict, agent is generated regardless.
+    # archetype is passed explicitly because AHSSpec Pydantic model does not
+    # persist archetype (computed at runtime by classify_skill); without this,
+    # the repair LLM's AGENT CONTEXT block would never show archetype.
+    postgen_report: Any = None
+    if not dry_run and not no_postgen_review:
+        _arch_attr = getattr(classification, "archetype", None)
+        _archetype_str = (
+            _arch_attr.value if hasattr(_arch_attr, "value") else str(_arch_attr)
+        ) if _arch_attr is not None else None
+        postgen_report = _run_postgen_review(
+            agent_output_dir=agent_output_dir,
+            ahs_spec=ahs_spec,
+            skill_dir=skill_dir,
+            ai_chat_fn=ai_chat_fn,
+            quiet=quiet_for_json,
+            archetype=_archetype_str,
+        )
+
     # ── Update skillhouse index with agent output path ──────────────────
     if not dry_run:
         _update_skillhouse_agent_output(ahs_spec.identity.id, agent_output_dir, config)
@@ -821,6 +898,7 @@ def hatch_command(
             model_display=model_display,
             classification=classification,
             json_output=json_output,
+            postgen_review=postgen_report,
         )
 
     # ── 16. Next step ───────────────────────────────────────────────────
@@ -949,6 +1027,7 @@ def _emit_hatch_report(
     model_display: str,
     classification: Any,
     json_output: bool,
+    postgen_review: Any | None = None,
 ) -> None:
     """v0.9.17: Build and emit the HatchReport (terminal or JSON).
 
@@ -992,6 +1071,7 @@ def _emit_hatch_report(
         archetype=archetype_str,
         archetype_confidence=float(archetype_conf) if archetype_conf is not None else None,
         temperature_range=temperature_range,
+        postgen_review=postgen_review,
     )
 
     if json_output:

@@ -66,6 +66,34 @@ class ReadinessSummary(BaseModel):
     all_credentials_present: bool = True
 
 
+class PostGenFindingSummary(BaseModel):
+    """One finding from post-generation review (B2/B3/B4)."""
+
+    severity: Literal["error", "warning", "info"] = "info"
+    file: str = ""
+    line: int = 0
+    category: str = ""
+    message: str = ""
+    tool_name: str | None = None
+    suggested_fix: str | None = None
+
+
+class PostGenReviewSummary(BaseModel):
+    """Phase 3.5 post-generation review summary (advisory only — never blocks).
+
+    v0.9.22: Records the outcome of ``iterate_until_gate()`` —
+    inspect → test → repair → re-inspect loop. Verdict is READY or WARN
+    only; the agent is always generated.
+    """
+
+    verdict: Literal["READY", "WARN"] = "READY"
+    iterations: int = 0
+    tools_total: int = 0
+    tools_with_issues: int = 0
+    findings: list[PostGenFindingSummary] = Field(default_factory=list)
+    token_usage: dict[str, int] = Field(default_factory=dict)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Top-level report
 # ─────────────────────────────────────────────────────────────────────────
@@ -88,6 +116,10 @@ class HatchReport(BaseModel):
     phases: list[PhaseReport] = Field(default_factory=list)
     harnesses: list[HarnessReport] = Field(default_factory=list)
     readiness: ReadinessSummary = Field(default_factory=ReadinessSummary)
+    # v0.9.22: Phase 3.5 post-generation review (B2/B3/B4 self-healing).
+    # Advisory only — never blocks. None when --no-postgen-review is set
+    # or generation is skipped (--dry-run / --no-generate).
+    postgen_review: PostGenReviewSummary | None = None
     verdict: Literal["PASS", "WARN"] = "PASS"
     agent_output_dir: str | None = None
     file_count: int = 0
@@ -102,12 +134,13 @@ class HatchReport(BaseModel):
     # ── Verdict computation ───────────────────────────────────────────
 
     def compute_verdict(self) -> Literal["PASS", "WARN"]:
-        """Compute verdict from harness + readiness signals.
+        """Compute verdict from harness + readiness + postgen signals.
 
         Rules (v0.9.17 — no FAIL, no blocking):
         - WARN if any harness has degradation_applied
         - WARN if any harness self_check_passed is False
         - WARN if readiness.status == "WARN"
+        - v0.9.22: WARN if postgen_review.verdict == "WARN"
         - PASS otherwise
         """
         for h in self.harnesses:
@@ -116,6 +149,8 @@ class HatchReport(BaseModel):
             if not h.self_check_passed:
                 return "WARN"
         if self.readiness.status == "WARN":
+            return "WARN"
+        if self.postgen_review is not None and self.postgen_review.verdict == "WARN":
             return "WARN"
         return "PASS"
 
@@ -327,6 +362,58 @@ class HatchReport(BaseModel):
                 )
             )
 
+        # 7. Post-generation review (v0.9.22 — Phase 3.5 self-healing)
+        if self.postgen_review is not None:
+            pg = self.postgen_review
+            pg_style = "ok" if pg.verdict == "READY" else "warn"
+            pg_icon = "✓" if pg.verdict == "READY" else "⚠"
+            pg_lines: list[str] = [
+                f"Verdict:    [{pg_style}]{pg_icon} {pg.verdict}[/{pg_style}]",
+                f"Iterations: {pg.iterations}",
+                f"Tools:      {pg.tools_with_issues}/{pg.tools_total} with issues",
+            ]
+            pg_tok = pg.token_usage.get("total_tokens", 0)
+            if pg_tok:
+                pg_lines.append(f"Repair tokens: {pg_tok:,}")
+            # Show up to 8 findings (most relevant first: errors, then warnings)
+            if pg.findings:
+                pg_lines.append("")
+                pg_lines.append("[bold]Findings:[/bold]")
+                sorted_findings = sorted(
+                    pg.findings,
+                    key=lambda f: (
+                        0 if f.severity == "error" else 1 if f.severity == "warning" else 2,
+                        f.line,
+                    ),
+                )
+                for f in sorted_findings[:8]:
+                    sev_icon = {
+                        "error": "[error]✗[/error]",
+                        "warning": "[warn]⚠[/warn]",
+                        "info": "[dim]ℹ[/dim]",
+                    }.get(f.severity, "[dim]•[/dim]")
+                    tool_str = f" [dim]{f.tool_name}[/dim]" if f.tool_name else ""
+                    line_str = f":{f.line}" if f.line else ""
+                    pg_lines.append(
+                        f"  {sev_icon} [{f.category}]{f.file}{line_str}{tool_str}"
+                    )
+                if len(sorted_findings) > 8:
+                    pg_lines.append(
+                        f"  [dim]… {len(sorted_findings) - 8} more[/dim]"
+                    )
+            pg_lines.append("")
+            pg_lines.append(
+                "[dim]Note: self-review is advisory. "
+                "Agent is generated regardless of verdict.[/dim]"
+            )
+            renderables.append(
+                Panel(
+                    "\n".join(pg_lines),
+                    title="[accent]Post-Generation Review[/accent]",
+                    border_style="yellow" if pg.verdict == "WARN" else "dim",
+                )
+            )
+
         return Group(*renderables)
 
 
@@ -349,6 +436,7 @@ def build_hatch_report(
     archetype: str | None,
     archetype_confidence: float | None,
     temperature_range: tuple[float, float] | None = None,
+    postgen_review: Any | None = None,
 ) -> HatchReport:
     """Construct a HatchReport from hatch telemetry.
 
@@ -367,6 +455,8 @@ def build_hatch_report(
         temperature_range: v0.9.20 — Provider's official temperature range
             (e.g. (0.0, 2.0) for OpenAI/DeepSeek). Displayed in Harness Detail
             table to contextualize each harness's configured temperature.
+        postgen_review: v0.9.22 — PostGenReport from ``iterate_until_gate()``,
+            or None when --no-postgen-review / --dry-run / --no-generate.
     """
     # Build harness reports in canonical order A→B→C→D→E→F
     harness_reports: list[HarnessReport] = []
@@ -417,6 +507,14 @@ def build_hatch_report(
     else:
         readiness_summary = ReadinessSummary()
 
+    # v0.9.22: Build postgen review summary if provided
+    postgen_summary: PostGenReviewSummary | None = None
+    if postgen_review is not None:
+        postgen_summary = _coerce_postgen_summary(postgen_review)
+        if postgen_summary is not None:
+            for k in total_tokens:
+                total_tokens[k] += postgen_summary.token_usage.get(k, 0)
+
     report = HatchReport(
         skill_id=skill_id,
         skill_name=skill_name,
@@ -426,6 +524,7 @@ def build_hatch_report(
         phases=phases,
         harnesses=harness_reports,
         readiness=readiness_summary,
+        postgen_review=postgen_summary,
         agent_output_dir=agent_output_dir,
         file_count=file_count,
         archetype=archetype,
@@ -435,3 +534,67 @@ def build_hatch_report(
     )
     report.verdict = report.compute_verdict()
     return report
+
+
+def _coerce_postgen_summary(postgen: Any) -> PostGenReviewSummary | None:
+    """Coerce a PostGenReport (dataclass), dict, or PostGenReviewSummary.
+
+    Tolerant of either input shape so the CLI doesn't need to know which.
+    """
+    try:
+        # Already a PostGenReviewSummary — return as-is
+        if isinstance(postgen, PostGenReviewSummary):
+            return postgen
+
+        if isinstance(postgen, dict):
+            data = postgen
+        elif hasattr(postgen, "to_dict"):
+            data = postgen.to_dict()
+        elif hasattr(postgen, "model_dump"):
+            data = postgen.model_dump()
+        else:
+            return None
+
+        verdict_raw = data.get("verdict", "WARN")
+        verdict = "READY" if verdict_raw == "READY" else "WARN"
+
+        findings_data = data.get("findings", []) or []
+        findings: list[PostGenFindingSummary] = []
+        for f in findings_data:
+            if not isinstance(f, dict):
+                continue
+            severity_raw = f.get("severity", "info")
+            severity = (
+                severity_raw
+                if severity_raw in ("error", "warning", "info")
+                else "info"
+            )
+            findings.append(
+                PostGenFindingSummary(
+                    severity=severity,  # type: ignore[arg-type]
+                    file=str(f.get("file", "")),
+                    line=int(f.get("line", 0) or 0),
+                    category=str(f.get("category", "")),
+                    message=str(f.get("message", "")),
+                    tool_name=f.get("tool_name"),
+                    suggested_fix=f.get("suggested_fix"),
+                )
+            )
+
+        token_usage = data.get("token_usage", {}) or {}
+        token_usage_clean = {
+            k: int(v or 0)
+            for k, v in token_usage.items()
+            if k in ("prompt_tokens", "completion_tokens", "total_tokens")
+        }
+
+        return PostGenReviewSummary(
+            verdict=verdict,  # type: ignore[arg-type]
+            iterations=int(data.get("iterations", 0) or 0),
+            tools_total=int(data.get("tools_total", 0) or 0),
+            tools_with_issues=int(data.get("tools_with_issues", 0) or 0),
+            findings=findings,
+            token_usage=token_usage_clean,
+        )
+    except Exception:
+        return None
