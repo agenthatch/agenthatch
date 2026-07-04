@@ -9,15 +9,16 @@ unordered — the order may shift based on feedback and contribution.
 
 ### AI self-review loop — ✅ Shipped in v0.9.22
 
-The post-generation self-review loop is now live. After Phase 3 generation,
-the hatched agent inspects its own `tools.py` for undefined variables,
-None-attribute bugs, and semantic stubs; sandbox-tests each tool with mock
-parameters; and iterates via LLM repair until the quality gate passes. See
+The post-generation self-review loop ships in v0.9.22. After Phase 3
+generation, the hatched agent inspects its own `tools.py` for undefined
+variables, None-attribute bugs, and semantic stubs. Each tool runs once
+with mock parameters to catch runtime errors. When bugs are found, the LLM
+regenerates the broken function body and re-inspects (up to 3 rounds). See
 the "Post-generation self-review" row in the table below.
 
-*What's next for Phase 1:* more observability hooks (per-round token
-accounting, iteration traces, repair diffs) surfaced in `--report` and
-`--json`. Open a Discussion if there's a specific signal you want exposed.
+*What's next for Phase 1:* more observability hooks in `--report` and
+`--json`, like per-round token counts, iteration traces, and repair diffs.
+Open a Discussion if there's a specific signal you want exposed.
 
 ---
 

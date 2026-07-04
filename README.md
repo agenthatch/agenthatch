@@ -152,6 +152,15 @@ hatched-agent/
     └── references.py       # AI-extracted structured data
 ```
 
+### Phase 3.5: Post-generation self-review
+
+After generation, the agent inspects its own `tools.py` for undefined
+variables, None-attribute crashes, and semantic stubs. Each tool runs once
+with mock parameters to catch runtime errors. When bugs are found, the LLM
+regenerates the broken function body and re-inspects (up to 3 rounds). The
+verdict (READY / WARN) shows up in `--report` and `--json`. Use
+`--no-postgen-review` to skip.
+
 ### Runtime: PlanLayer
 
 Generated agents use the **PlanLayer state machine** — a 6-state planning
