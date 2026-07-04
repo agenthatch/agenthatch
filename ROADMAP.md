@@ -7,12 +7,17 @@ unordered — the order may shift based on feedback and contribution.
 
 ## Phase 1: Quality & Observability
 
-### AI self-review loop
+### AI self-review loop — ✅ Shipped in v0.9.22
 
-Harnesses already run Analyze → Infer → Self-Validate → Correct internally.
-Extend this to a post-generation review phase: the hatched agent inspects its
-own code, tests its own tools, and iterates until the quality gate passes
-autonomously.
+The post-generation self-review loop is now live. After Phase 3 generation,
+the hatched agent inspects its own `tools.py` for undefined variables,
+None-attribute bugs, and semantic stubs; sandbox-tests each tool with mock
+parameters; and iterates via LLM repair until the quality gate passes. See
+the "Post-generation self-review" row in the table below.
+
+*What's next for Phase 1:* more observability hooks (per-round token
+accounting, iteration traces, repair diffs) surfaced in `--report` and
+`--json`. Open a Discussion if there's a specific signal you want exposed.
 
 ---
 
@@ -91,6 +96,7 @@ Some items people commonly ask about are already implemented:
 | **MCP auto-detection** (Harness F) | ✅ Since v0.7 |
 | **Context auto-compaction** | ✅ In `agenthatch-core` context manager |
 | **Hatch report** (`--report` / `--json`) | ✅ Since v0.9.17 |
+| **Post-generation self-review** (inspect → test → repair loop) | ✅ Since v0.9.22 |
 
 ---
 

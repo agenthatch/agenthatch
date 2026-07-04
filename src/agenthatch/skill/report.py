@@ -302,7 +302,7 @@ class HatchReport(BaseModel):
                 lo, hi = self.temperature_range
                 h_table.caption = (
                     f"Temp column: configured value "
-                    f"[dim](provider range 0–{hi:g})[/dim]"
+                    f"[dim](provider range {lo:g}–{hi:g})[/dim]"
                 )
             renderables.append(h_table)
 
