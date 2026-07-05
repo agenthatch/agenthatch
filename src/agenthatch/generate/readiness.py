@@ -264,10 +264,14 @@ def _check_credential_present(key: str) -> bool:
 
 
 def _probe_mcp_server(mcp: dict[str, str]) -> bool:
-    """Optional: probe MCP server reachability via mcporter.
+    """Probe MCP server reachability via mcporter.
 
-    v0.8.1: Also validate that tools have usable inputSchema (non-empty properties).
-    Returns False if server unreachable OR if any tool has empty schema.
+    Returns True only when the server responds to ``list_tools`` with a
+    parseable tool list. v0.8.1: tools with empty ``inputSchema`` are
+    logged as warnings but do NOT affect reachability — schema quality
+    is a separate dimension from network reachability, and per v0.8.10
+    design philosophy neither dimension ever blocks hatching (both are
+    surfaced as advisory WARN in :class:`ReadinessVerdict`).
     """
     if not shutil.which("mcporter"):
         return False  # Can't probe without mcporter
@@ -278,7 +282,8 @@ def _probe_mcp_server(mcp: dict[str, str]) -> bool:
         )
         if result.returncode != 0:
             return False
-        # v0.8.1: Check tool schema quality
+        # v0.8.1: Log tools with empty inputSchema (advisory only — does
+        # not affect reachability verdict; surfaced via logger.warning).
         data = json.loads(result.stdout)
         tools = data.get("result", {}).get("tools", [])
         empty_schema_tools = [
