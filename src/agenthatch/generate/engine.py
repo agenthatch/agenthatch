@@ -31,10 +31,15 @@ TEMPLATE_MAP: dict[str, str] = {
 
 
 def _json_type_to_python(json_type: str) -> str:
-    """Map JSON Schema type to Python type annotation."""
+    """Map JSON Schema type to Python type annotation.
+
+    Per JSON Schema spec: ``number`` is any numeric value (including
+    floats) and ``integer`` is a subset of number. Mapping ``number``
+    to ``int`` would lose float precision in generated tool signatures.
+    """
     mapping = {
         "string": "str",
-        "number": "int",
+        "number": "float",
         "float": "float",
         "integer": "int",
         "boolean": "bool",
