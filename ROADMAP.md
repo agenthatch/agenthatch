@@ -5,7 +5,7 @@ unordered — the order may shift based on feedback and contribution.
 
 ---
 
-## Phase 1: Quality & Observability
+## Phase 1: Quality & Observability — ✅ Concluded in v0.9.23
 
 ### AI self-review loop — ✅ Shipped in v0.9.22
 
@@ -16,13 +16,17 @@ with mock parameters to catch runtime errors. When bugs are found, the LLM
 regenerates the broken function body and re-inspects (up to 3 rounds). See
 the "Post-generation self-review" row in the table below.
 
-*What's next for Phase 1:* more observability hooks in `--report` and
-`--json`, like per-round token counts, iteration traces, and repair diffs.
-Open a Discussion if there's a specific signal you want exposed.
+### Phase 1 wrap-up — ✅ v0.9.23
+
+Phase 1 is concluded. The post-generation self-review loop was the final
+planned Phase 1 deliverable. Proposed observability extensions (per-round
+token counts, iteration traces, repair diffs) are deferred — they're nice
+to have but not on the critical path. Open a Discussion if a specific
+signal is needed.
 
 ---
 
-## Phase 2: Intelligence
+## Phase 2: Intelligence — 🚧 Next active focus (v0.9.23+)
 
 ### Knowledge-backed agents (RAG-native skillagent)
 

@@ -4,7 +4,12 @@ All notable changes to agenthatch will be documented in this file.
 
 ---
 
-## [v0.9.22] — Unreleased
+## [v0.9.23] — 2026-07-04
+
+### Roadmap
+
+- **Phase 1 (Quality & Observability) concluded.** The post-generation self-review loop shipped in v0.9.22 was the final planned Phase 1 deliverable. Remaining observability hooks (per-round token counts, iteration traces, repair diffs) are deferred — open a Discussion if a specific signal is needed.
+- **Phase 2 (Intelligence) is the next active focus.** Knowledge-backed agents (RAG-native skillagent) — agents that ship with their own vector index and retrieve relevant references per query — is now the primary roadmap target. See `ROADMAP.md`.
 
 ### Added
 
@@ -41,6 +46,9 @@ All notable changes to agenthatch will be documented in this file.
 - **CI mypy: click.shell_completion import-not-found** — Pre-existing mypy error surfaced after CI environment change. Added mypy override for `click.shell_completion`. Replaced `# type: ignore[no-any-return]` on `completer.source()` with explicit `str()` conversion for environment-agnostic type safety.
 - **Documented edge case: empty plan is_complete** — `StructuredPlan.is_complete` returns True for empty plan due to vacuous truth (`all([]) == True` in Python). Test documents this as expected behavior.
 - **Documented limitation: _update_topology retroactive update** — `_update_topology` only records requires at `add_entry` time if the provider already exists. Does not retroactively update existing entries when a new provider is added. Circular dependency test uses manual topology construction to test Kahn's algorithm directly.
+- **`HatchReport.to_terminal` temperature-range caption hardcoded lower bound** — The Harness Detail table caption read `(provider range 0–{hi:g})` with a hardcoded `0` instead of the actual `lo` from `temperature_range`. The `lo` variable was unpacked but never used (dead code). Fixed by formatting `{lo:g}–{hi:g}`. Latent because all current providers (OpenAI/DeepSeek/Anthropic) have `lo=0.0`; would surface if a provider with a non-zero lower bound is added.
+- **`_probe_mcp_server` docstring/implementation mismatch** — Docstring claimed "Returns False if server unreachable OR if any tool has empty schema", but the implementation logged empty-schema tools as warnings and still returned `True`. Two fix directions considered: (A) make implementation match docstring by returning `False` on empty schema — rejected because it would conflate schema quality with network reachability, surfacing misleading "check VPN" warnings for what is actually a schema issue; (B) fix docstring to match implementation — adopted. `mcp_reachable` now documents that it reflects network reachability only; schema quality is a separate advisory dimension logged via `logger.warning`. Both dimensions remain advisory per v0.8.10 "never block" philosophy.
+- **`_json_type_to_python` mapped JSON Schema `number` to `int`** — Per JSON Schema spec, `number` is any numeric value (including floats) and `integer` is a subset. The mapping `"number": "int"` caused generated tool signatures to annotate float parameters (e.g. `threshold: number` for IQR outlier detection, commonly `1.5`) as `int`, losing float precision and misleading IDE/mypy. Fixed to `"number": "float"`. Verified against `tests/fixtures/skills/data-analyzer/agenthatch.yaml` which uses `type: number` for 11 statistical fields.
 
 ---
 
