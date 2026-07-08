@@ -1183,7 +1183,7 @@ class Orchestrator:
 
         reflection_targets = [k for k in ("A", "B", "C", "D", "F") if k in outputs]
         for name in reflection_targets:
-            peers = {
+            peers: dict[str, Any] = {
                 k: v.result
                 for k, v in outputs.items()
                 if k != name and k in reflection_targets
