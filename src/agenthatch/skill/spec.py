@@ -222,6 +222,8 @@ class BaseSpec(BaseModel):
     @classmethod
     def _coerce_timeout(cls, v: Any) -> str:
         """Coerce int/float timeout values to string format."""
+        if isinstance(v, bool):
+            return "60s"
         if isinstance(v, (int, float)):
             return f"{int(v)}s"
         if isinstance(v, str):
@@ -250,7 +252,9 @@ def _coerce_base_data(base_data: dict[str, Any]) -> dict[str, Any]:
     # timeout: int 60 → "60s", str "45" → "45s", None/{}/[] → "60s"
     if "timeout" in data:
         val = data["timeout"]
-        if isinstance(val, (int, float)):
+        if isinstance(val, bool):
+            data["timeout"] = "60s"
+        elif isinstance(val, (int, float)):
             data["timeout"] = f"{int(val)}s"
         elif isinstance(val, str):
             cleaned = val.strip()
