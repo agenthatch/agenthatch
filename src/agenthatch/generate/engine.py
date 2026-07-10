@@ -540,8 +540,12 @@ class GenerateEngine:
                         params.append((param_name, py_type, "None"))
                     elif isinstance(param_type, dict) and "type" in param_type:
                         py_type = _json_type_to_python(param_type["type"])
-                        default = param_type.get("default", "None")
-                        params.append((param_name, py_type, str(default)))
+                        default = param_type.get("default")
+                        # repr() quotes strings so they render as valid Python
+                        # literals in the generated function signature; other
+                        # types (int, float, bool, None) already str() correctly.
+                        default_str = repr(default) if isinstance(default, str) else str(default)
+                        params.append((param_name, py_type, default_str))
                 has_inputs = len(params) > 0
             else:
                 params = []
