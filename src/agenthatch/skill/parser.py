@@ -271,7 +271,9 @@ def extract_python_signatures(file_path: Path) -> list[ToolSchema]:
 
     functions: list[ToolSchema] = []
     for node in _ast.walk(tree):
-        if isinstance(node, _ast.FunctionDef) and not node.name.startswith("_"):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and not node.name.startswith(
+            "_"
+        ):
             args: list[dict[str, str | None]] = []
             for arg in node.args.args:
                 arg_type: str | None = None
@@ -368,7 +370,9 @@ def analyze_scripts_from_manifest(file_manifest: FileManifest) -> ScriptManifest
             except SyntaxError:
                 continue
             for node in _ast.walk(tree):
-                if isinstance(node, _ast.FunctionDef) and not node.name.startswith("_"):
+                if isinstance(
+                    node, (_ast.FunctionDef, _ast.AsyncFunctionDef)
+                ) and not node.name.startswith("_"):
                     args: list[dict[str, str | None]] = []
                     for arg in node.args.args:
                         arg_type: str | None = None

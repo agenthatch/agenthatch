@@ -1178,7 +1178,7 @@ class GenerateEngine:
                 continue
 
             for node in _ast.walk(tree):
-                if isinstance(node, _ast.FunctionDef):
+                if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
                     # Check if the function body contains the stub message
                     body_text = _ast.get_source_segment(content, node)
                     if body_text and stub_signature in body_text:

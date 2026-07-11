@@ -241,7 +241,9 @@ def inspect_generated_package(output_dir: Path) -> PostGenReport:
 
         # Count top-level functions (skip configure_mcp_auth helper)
         for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name != "configure_mcp_auth":
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                node.name != "configure_mcp_auth"
+            ):
                 report.tools_total += 1
 
         # ── Check 3: Undefined variable detection ──────────────────────
@@ -630,10 +632,11 @@ def test_tool_signatures(
             continue
 
         # Identify all tool functions (skip MCP auth helper)
-        tool_funcs: list[ast.FunctionDef] = [
+        tool_funcs: list[ast.FunctionDef | ast.AsyncFunctionDef] = [
             node
             for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name != "configure_mcp_auth"
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name != "configure_mcp_auth"
         ]
 
         for func_node in tool_funcs:
