@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -253,9 +254,10 @@ def _check_credential_present(key: str) -> bool:
     try:
         config_path = Path.cwd() / "runtime.toml"
         if config_path.exists():
-            # Simple INI-style TOML check without full parser
+            # Match key as a TOML key definition (key = ...) rather than
+            # substring, so "KEY" won't match inside "api_key" or comments.
             content = config_path.read_text(encoding="utf-8")
-            if key in content:
+            if re.search(rf"^\s*{re.escape(key)}\s*=", content, re.MULTILINE):
                 return True
     except Exception:
         pass
