@@ -7,33 +7,51 @@ unordered — the order may shift based on feedback and contribution.
 
 ## Phase 1: Quality & Observability — ✅ Concluded in v0.9.23
 
-### AI self-review loop — ✅ Shipped in v0.9.22
-
-The post-generation self-review loop ships in v0.9.22. After Phase 3
+The post-generation self-review loop shipped in v0.9.22. After Phase 3
 generation, the hatched agent inspects its own `tools.py` for undefined
 variables, None-attribute bugs, and semantic stubs. Each tool runs once
 with mock parameters to catch runtime errors. When bugs are found, the LLM
-regenerates the broken function body and re-inspects (up to 3 rounds). See
-the "Post-generation self-review" row in the table below.
+regenerates the broken function body and re-inspects (up to 3 rounds).
 
-### Phase 1 wrap-up — ✅ v0.9.23
-
-Phase 1 is concluded. The post-generation self-review loop was the final
-planned Phase 1 deliverable. Proposed observability extensions (per-round
-token counts, iteration traces, repair diffs) are deferred — they're nice
-to have but not on the critical path. Open a Discussion if a specific
-signal is needed.
+Phase 1 is concluded. Proposed observability extensions (per-round token
+counts, iteration traces, repair diffs) are deferred. They're nice to have
+but not on the critical path. Open a Discussion if a specific signal is
+needed.
 
 ---
 
-## Phase 2: Intelligence — 🚧 Next active focus (v0.9.23+)
+## Phase 2: Intelligence — ✅ Shipped in v1.0.0
 
-### Knowledge-backed agents (RAG-native skillagent)
+### Knowledge-backed agents
 
-Agents that ship with their own vector index. A medical SKILL.md doesn't just
-describe a diagnosis workflow — the hatched agent embeds a full knowledge base,
-retrieves relevant references per query, and can be shared as a self-contained
-package ready for production.
+Agents that ship with their own knowledge base. A medical SKILL.md doesn't
+just describe a diagnosis workflow. The hatched agent embeds a full knowledge
+base at hatch time, retrieves relevant references per query at runtime, and
+can be shared as a self-contained package ready for production.
+
+v1.0.0 ships the first cut:
+
+- SQLite FTS5 + BM25 keyword retrieval, with thread-local connections to
+  keep cross-thread access safe.
+- `knowledge_base.py.j2` template generates a runtime `retrieve()` function
+  whose `WHEN_TO_RETRIEVE`, `QUERY_TEMPLATES`, and `SYSTEM_PROMPT_SECTION`
+  are inferred by the LLM from the skill at hatch time.
+- `KnowledgeBaseBrick` assembles the retrieve tool into CapBus at agent
+  startup; the system prompt gets a KB section.
+- Optional semantic (embedding) search behind `pip install agenthatch[semantic]`.
+  Core install keeps BM25 only, so `pip install agenthatch` no longer pulls
+  PyTorch.
+
+v1.0.1 stabilizes the KB agent runtime. A bare `yield from` in generated
+`chat_stream` was discarding the subgenerator's return value, so callers
+got an empty string even though the answer had streamed to the terminal.
+`kb_max_text` had a typo in the streaming path that silently disabled
+meta-narration stripping. Both fixed, plus a wider pattern list for the
+trailing meta-narration the LLM tends to append before `task_complete`.
+
+What's not done yet: LLM re-rank of retrieved chunks, cross-agent shared
+KB memory, and a maintenance loop that flags stale entries. The hybrid
+search is BM25 + embeddings; re-ranking is still on the to-do list.
 
 ---
 
@@ -49,9 +67,9 @@ and deployment pipelines, without leaking instructions between them.
 ### Meta-agent (`agenthatch all`)
 
 A top-level agent that knows about every agent in your skillhouse. You talk
-to one interface — it routes tasks to the right hatched agent, collects results,
-and synthesizes a response. Think of it as Claude Code, but backed by an army
-of specialized agents instead of one monolithic system prompt.
+to one interface; it routes tasks to the right hatched agent, collects
+results, and synthesizes a response. Think of it as Claude Code, but backed
+by an army of specialized agents instead of one monolithic system prompt.
 
 ---
 
@@ -66,14 +84,14 @@ should work like `pip install`.
 ### Multi-channel communication
 
 Hatched agents that connect to WhatsApp, Telegram, Slack, Discord, and other
-messaging platforms — similar to OpenClaw's channel model. An agent doesn't
+messaging platforms, similar to OpenClaw's channel model. An agent doesn't
 just run in a terminal; it lives where your team already communicates.
 
 ### Docker sandbox mode
 
 The current sandbox runs subprocesses directly with a command whitelist.
-Add an optional Docker-backed execution layer for full filesystem and network
-isolation — safe enough to run untrusted tool code in production.
+Add an optional Docker-backed execution layer for full filesystem and
+network isolation, safe enough to run untrusted tool code in production.
 
 ---
 
@@ -83,9 +101,10 @@ isolation — safe enough to run untrusted tool code in production.
 agenthatch hatch "monitor this repo and open an issue when CI fails"
 ```
 
-No SKILL.md required. A single sentence → full pipeline → runnable agent. The
-harness infers identity, intent, interface, and base from a natural language
-description. This is the north star — everything in Phases 1–4 builds toward it.
+No SKILL.md required. A single sentence goes through the full pipeline and
+produces a runnable agent. The harness infers identity, intent, interface,
+and base from a natural language description. This is the north star;
+everything in Phases 1 through 4 builds toward it.
 
 ---
 
@@ -95,17 +114,18 @@ Some items people commonly ask about are already implemented:
 
 | Feature | Status |
 |---|---|
-| **PlanLayer state machine** (STARTING → DONE) | ✅ In `agenthatch-core` since v0.9.8 |
-| **Subprocess sandbox** with command whitelist | ✅ In `agenthatch-core` (STANDARD + EXTENDED tiers) |
-| **6-Harness LLM pipeline** with self-validation | ✅ Core pipeline since v0.6 |
-| **MCP auto-detection** (Harness F) | ✅ Since v0.7 |
-| **Context auto-compaction** | ✅ In `agenthatch-core` context manager |
-| **Hatch report** (`--report` / `--json`) | ✅ Since v0.9.17 |
-| **Post-generation self-review** (inspect → test → repair loop) | ✅ Since v0.9.22 |
+| PlanLayer state machine (STARTING → DONE) | ✅ In `agenthatch-core` since v0.9.8 |
+| Subprocess sandbox with command whitelist | ✅ In `agenthatch-core` (STANDARD + EXTENDED tiers) |
+| 6-Harness LLM pipeline with self-validation | ✅ Core pipeline since v0.6 |
+| MCP auto-detection (Harness F) | ✅ Since v0.7 |
+| Context auto-compaction | ✅ In `agenthatch-core` context manager |
+| Hatch report (`--report` / `--json`) | ✅ Since v0.9.17 |
+| Post-generation self-review (inspect → test → repair loop) | ✅ Since v0.9.22 |
+| KnowledgeBaseBrick (RAG retrieval, SQLite FTS5 + BM25) | ✅ Since v1.0.0 |
 
 ---
 
 ## Contributing to the roadmap
 
-This is a living document. If something here matters to you — or if something
-missing should be here — open a [GitHub Discussion](https://github.com/agenthatch/agenthatch/discussions).
+This is a living document. If something here matters to you, or if something
+missing should be here, open a [GitHub Discussion](https://github.com/agenthatch/agenthatch/discussions).
