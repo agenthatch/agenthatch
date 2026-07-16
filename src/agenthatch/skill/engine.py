@@ -1083,6 +1083,17 @@ class Orchestrator:
         tier_map = MODEL_TIER_MAP.get(skill_type, MODEL_TIER_MAP["pure_instruction"])
         logger.info(f"Orchestrator: skill_type={skill_type}, tiers={tier_map}")
 
+        # v1.0.0: Notify progress callback for skipped harnesses up front.
+        # Without this, a skipped harness (e.g. D for pure_instruction skills)
+        # leaves its spinner stuck forever — ``_state["current"]`` points at
+        # the skipped key but its callback never fires, so it never gets
+        # marked completed.  F and E run and complete afterwards, leaving
+        # the user with a misleading "D still running" display.
+        if progress_callback:
+            for _key in ("A", "B", "C", "D", "F", "E"):
+                if tier_map.get(_key) == "skip":
+                    progress_callback(_key)
+
         # Step 1: Build harness instances
         harnesses = self._build_harnesses(tier_map)
 

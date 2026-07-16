@@ -66,8 +66,15 @@ class ContextManager:
     # v0.9.8: Micro-compaction — lightweight in-process truncation of old
     # tool results to prevent context bloat between full LLM compactions.
     # Inspired by Claude Code's microCompact.ts.
-    MICRO_COMPACT_MAX_TOOL_RESULTS: int = 30
-    MICRO_COMPACT_KEEP_RECENT: int = 15
+    # v1.0.1 (R4-V15): Lower thresholds so KB retrieve results (often
+    # 4KB+ each) get truncated sooner.  Previously 30/15 let 6+ full
+    # retrieve chunks accumulate in the conversation history, drowning
+    # out the current user question and causing the LLM to produce
+    # "summary" responses about prior topics instead of answering the
+    # current question.  5/2 keeps the current + previous retrieve
+    # intact and reduces older ones to a 200-char extract.
+    MICRO_COMPACT_MAX_TOOL_RESULTS: int = 5
+    MICRO_COMPACT_KEEP_RECENT: int = 2
     MICRO_COMPACT_TRUNCATE_CHARS: int = 200
     ANCHOR_RULES: list[str] = []
     _skill_dir: Path | None = None
@@ -101,6 +108,7 @@ class ContextManager:
         self._capbus: Any = None
         self._rich_prompt: bool = False
         self._memory: Any = None  # v0.7.6: MemoryBrick reference
+        self._kb_system_prompt: str = ""  # v1.0.0: KnowledgeBaseBrick prompt
         self._workflow_note: str = ""  # v0.7.6: current step note from CompiledWorkflow
 
         self._apply_compact_config()
@@ -259,6 +267,40 @@ class ContextManager:
                     "Use the `recall` tool to search your memory for "
                     "specific information from past sessions."
                 )
+
+        # v1.0.0: Inject KnowledgeBaseBrick section into system prompt
+        # v1.0.1 (L5): The injected prompt is now FULL_SYSTEM_PROMPT
+        # (B4 + B3 composed).  Strip whitespace and gate on non-empty
+        # to avoid emitting a stray "## Knowledge Base" header when
+        # the LLM produced an empty SYSTEM_PROMPT_SECTION AND no
+        # WHEN_TO_RETRIEVE / QUERY_TEMPLATES were inferred.
+        # v1.0.1 (R3-H2): Hard-cap the KB prompt to a fixed char budget
+        # so a runaway B4 generation (10KB+ of LLM prose) can't push
+        # the system prompt past the model's context window.  8KB ≈
+        # 2K tokens, leaving ample room for the rest of the prompt
+        # and conversation history.  Truncation is logged so users
+        # can spot misbehaving B4 outputs.
+        _KB_PROMPT_MAX_CHARS: int = 8192
+        kb_prompt = (self._kb_system_prompt or "").strip()
+        if kb_prompt:
+            if len(kb_prompt) > _KB_PROMPT_MAX_CHARS:
+                logger.warning(
+                    "ContextManager: KB prompt %d chars exceeds %d cap "
+                    "— truncating. Check B4 prompt generation output.",
+                    len(kb_prompt), _KB_PROMPT_MAX_CHARS,
+                )
+                kb_prompt = (
+                    kb_prompt[:_KB_PROMPT_MAX_CHARS]
+                    + "\n\n...(KB prompt truncated due to size cap)"
+                )
+            parts.append("")
+            parts.append("## Knowledge Base")
+            parts.append(kb_prompt)
+            parts.append("")
+            parts.append(
+                "Use the `retrieve` tool to query the knowledge base "
+                "before answering questions it may cover."
+            )
 
         # Language directive is now at the TOP of the system prompt (see above)
 

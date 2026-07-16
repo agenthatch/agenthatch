@@ -118,6 +118,18 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
     _logger.setLevel(level)
     _logger.propagate = False
 
+    # v1.0.1 (R4-V19): Also configure the agenthatch_core logger so its
+    # warnings (e.g. "task_complete called alongside N other tools")
+    # respect the same verbosity as agenthatch.  Without this, those
+    # warnings leaked to stderr via the root logger's default WARNING
+    # level, polluting the TUI output during normal ``agenthatch run``.
+    # NOTE: We keep propagate=True so pytest's caplog fixture can still
+    # capture records (it hooks into the root logger via propagation).
+    # Our RichHandler on agenthatch_core is the only handler, so
+    # records are emitted once to the console and once to caplog.
+    _core_logger = logging.getLogger("agenthatch_core")
+    _core_logger.setLevel(level)
+
     if not _logger.handlers:
         from rich.logging import RichHandler
 
@@ -130,6 +142,19 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
         )
         handler.setFormatter(logging.Formatter("%(message)s"))
         _logger.addHandler(handler)
+
+    if not _core_logger.handlers:
+        from rich.logging import RichHandler
+
+        core_handler = RichHandler(
+            show_time=False,
+            show_path=False,
+            markup=True,
+            rich_tracebacks=True,
+            console=console,
+        )
+        core_handler.setFormatter(logging.Formatter("%(message)s"))
+        _core_logger.addHandler(core_handler)
 
 
 app.command(name="hello")(hello_command)

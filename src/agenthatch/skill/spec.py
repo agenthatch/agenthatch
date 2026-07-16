@@ -419,10 +419,139 @@ class AgentConfig(BaseModel):
     generated_at: datetime | None = None   # set when Phase 3 completes
 
 
+# ─── v1.0.0 Knowledge Base Models ───────────────────────────────────────
+
+class KnowledgeBaseSource(BaseModel):
+    """A single knowledge base source declaration (v1.0.0).
+
+    Sources are resolved from the CLI ``<knowledgebase>`` argument.
+    A local path points to a directory of files; a URL may point to a
+    downloadable archive or a single document.
+    """
+    type: Literal["local_path", "url"]
+    path: str | None = None       # for local_path (resolved absolute)
+    url: str | None = None        # for url
+    # File patterns to include/exclude when scanning a directory source
+    include_patterns: list[str] = Field(default_factory=lambda: ["*.md", "*.txt", "*.rst"])
+    exclude_patterns: list[str] = Field(default_factory=list)
+
+
+class KBUsageStrategy(BaseModel):
+    """LLM-inferred or skill-declared strategy for KB usage (v1.0.0).
+
+    Produced by KB_Usage_Inferencer when the skill does not explicitly
+    describe how to use the knowledge base.  Drives both the generated
+    system-prompt section and the ``retrieve`` tool description.
+    """
+    when_to_retrieve: list[str] = Field(default_factory=list)
+    query_templates: list[str] = Field(default_factory=list)
+    integration_pattern: Literal[
+        "tool_call_then_answer",  # LLM proactively calls retrieve tool
+        "prepend_context",        # retrieved context prepended to system prompt
+        "auto_inject_on_keyword",  # keyword-triggered auto-injection
+    ] = "tool_call_then_answer"
+    max_results_per_query: int = 5
+    citation_required: bool = True
+    fallback_when_no_match: Literal["inform_user", "proceed_without_kb"] = "inform_user"
+
+
+class KBPromptArtifact(BaseModel):
+    """Generated prompt artifacts for KB integration (v1.0.0).
+
+    Produced by KB_Prompt_Generator.  The ``system_prompt_section`` is
+    injected into the agent's system prompt at runtime so the LLM
+    knows the KB exists and how to use it.
+    """
+    system_prompt_section: str = ""
+    retrieve_tool_description: str = ""
+    integration_instructions: str = ""
+
+
+class KnowledgeBaseConfig(BaseModel):
+    """Full KB configuration compiled during Phase 2.5 (v1.0.0).
+
+    Aggregates sources, LLM-inferred usage strategy, and generated prompt
+    artifacts.  Persisted into ``agenthatch.yaml`` so the runtime can
+    rebuild the KnowledgeBaseBrick without re-invoking the LLM.
+    """
+    sources: list[KnowledgeBaseSource] = Field(default_factory=list)
+    usage_strategy: KBUsageStrategy = Field(default_factory=KBUsageStrategy)
+    prompt_artifact: KBPromptArtifact = Field(default_factory=KBPromptArtifact)
+    # Index build parameters (OpenClaw-inspired small chunks)
+    chunk_size: int = 800           # 500-1000 char range; 800 is the sweet spot
+    chunk_overlap: int = 100
+    embedding_model: str = "all-MiniLM-L6-v2"
+    retrieval_top_k: int = 5
+    retrieval_alpha: float = 0.7    # BM25 weight (vs embedding)
+    # v1.0.1: LLM rerank infrastructure exists (set_rerank_fn) but no
+    # rerank_fn is injected at runtime yet.  Default False to avoid
+    # misleading users — flip to True once runtime injection lands.
+    enable_llm_rerank: bool = False
+    # Build-time metadata (filled by Phase 3.5 KB builder)
+    total_documents: int = 0
+    total_chunks: int = 0
+    index_size_bytes: int = 0
+    # v1.0.1 (R2b-M25): ``enabled`` flag written by engine.py when KB
+    # build produces 0 chunks (R3-M11).  Without this field, Pydantic's
+    # default ``extra='ignore'`` silently drops the flag when the
+    # config is re-parsed at runtime, making the runtime agent think
+    # KB is still active and try to import a non-existent module.
+    enabled: bool = True
+
+    # v1.0.1 (R2b-M26): Validate chunk_size/overlap at spec parse time
+    # so misconfigurations are caught early (frontmatter authoring
+    # error → clear error message at Phase 2.5) instead of surfacing
+    # as a ValueError deep in KBChunker.__init__ during Phase 3.5.
+    @field_validator("chunk_size")
+    @classmethod
+    def _validate_chunk_size(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(
+                f"chunk_size must be positive (got {v}) — check "
+                f"frontmatter knowledge_base.chunk_size"
+            )
+        return v
+
+    @field_validator("chunk_overlap")
+    @classmethod
+    def _validate_chunk_overlap(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(
+                f"chunk_overlap must be non-negative (got {v}) — "
+                f"check frontmatter knowledge_base.chunk_overlap"
+            )
+        return v
+
+    @field_validator("retrieval_top_k")
+    @classmethod
+    def _validate_retrieval_top_k(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(
+                f"retrieval_top_k must be >= 1 (got {v}) — "
+                f"check frontmatter knowledge_base.retrieval_top_k"
+            )
+        return v
+
+    # v1.0.1 (R2b-M27): retrieval_alpha must be in [0.0, 1.0].
+    # Outside this range the fusion formula
+    # ``alpha * keyword + (1-alpha) * embedding`` produces nonsense
+    # scores (negative or >1).
+    @field_validator("retrieval_alpha")
+    @classmethod
+    def _validate_retrieval_alpha(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(
+                f"retrieval_alpha must be in [0.0, 1.0] (got {v}) — "
+                f"check frontmatter knowledge_base.retrieval_alpha"
+            )
+        return v
+
+
 class AHSSpec(BaseModel):
     """Complete AHSSPEC v1.1 — the single middleware artifact.
 
     This is what v0.3 outputs and v0.4 SkillAgent.from_ahspec() consumes.
+    v1.0.0: ``knowledge_base`` field added for RAG-native skillagent.
     """
     identity: Identity
     intent: Intent
@@ -433,6 +562,7 @@ class AHSSpec(BaseModel):
     modes: Modes | None = None
     composition: Composition = Composition()
     agent: AgentConfig | None = None   # added in v0.4
+    knowledge_base: KnowledgeBaseConfig | None = None  # v1.0.0
 
     confidence_report: ConfidenceReport | None = None
     harness_traces: list[HarnessOutput] = []

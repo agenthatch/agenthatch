@@ -9,10 +9,7 @@ intent:
   - temperature
   - humidity
   - wind
-  - precipitation
-  - climate
   - conditions
-  - meteorological
   - check
   - report
   satisfies:
@@ -123,12 +120,13 @@ resources:
     hash: 513ec12a4857b0770a0362cd8268b08556119e3544e6dedc7de48c62ebd4f2c9
   references:
   - name: agenthatch.yaml
-    hash: 3607f3a3b4803649a0bc340cc59eb49aeaca76933fe943f44fc991de0407f676
+    hash: 8f39277c03e38bcd84c49e009f5a5f9a123cf7ad27c8f0d15eba2a43198a7969
   assets: []
 modes: null
 composition:
   event_listeners: []
 agent:
   status: hatched
-  hatched_at: 2026-06-25 09:37:09.733195+00:00
+  hatched_at: 2026-07-14 02:49:48.799397+00:00
   generated_at: null
+knowledge_base: null

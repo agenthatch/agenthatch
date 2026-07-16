@@ -10,6 +10,7 @@ import concurrent.futures
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import Callable, Generator
 from typing import Any, cast
@@ -89,6 +90,143 @@ class RichToolCallEvent:
 # repeatedly.  No token budget, no round limit.  The agent runs freely.
 _MAX_CONSECUTIVE_TEXT_ONLY = 13
 
+# v1.0.1 (R4-V21): Trailing meta-narration patterns for KB agents.
+# Despite B4 (e) explicitly forbidding meta-commentary, the LLM often
+# appends sentences like "已完整解答…无剩余步骤" or "用户的问题…已在
+# 上一轮完整解答" before calling task_complete.  These patterns are
+# deterministic enough to strip safely at the code layer.
+#
+# Each pattern matches a phrase that typically begins a meta-narration
+# sentence.  We find the earliest such pattern in the last 600 chars
+# and strip everything from that point to the end of the text.
+#
+# Safety: stripping is aborted if it would remove more than 40% of
+# the response (guard against false positives on short answers).
+_TRAILING_META_NARRATION_PATTERNS: tuple[str, ...] = (
+    # "用户的问题/提问/请求...已..."
+    r"用户.{0,12}(?:问题|提问|请求).{0,40}已",
+    # "已完整/逐一...解答/说明/呈现/呈上/作答"
+    r"已(?:完整|逐一|详细).{0,4}(?:解答|说明|呈现|呈上|作答)",
+    # "前已..." (前已完整作答 / 前已答 / 前已说明)
+    r"前已(?:完整|逐一|详细?).{0,4}(?:作答|解答|说明|呈现|呈上|答)",
+    # v1.0.1 (R4-V22): "前问已答毕" / "前问已答" — LLM 变体
+    r"前问已答",
+    # v1.0.1 (R4-V22): "已答毕" — 通用 meta-narration 闭合
+    r"已答毕",
+    # "无/没有剩余步骤/任务"
+    r"(?:无|没有)剩余.{0,4}(?:步骤|任务)",
+    # "任务已完成"
+    r"任务已完成",
+    # "当前无剩余"
+    r"当前无剩余",
+    # "无需继续处理"
+    r"无需继续处理",
+    # "本次回答完毕" / "回答完毕"
+    r"(?:本次)?回答完毕",
+    # "所有问题均已..."
+    r"所有问题均已",
+    # "已为您解答"
+    r"已为您解答",
+    # "已在上轮" / "已在前一轮"
+    r"已在前?一轮",
+    # "没有未完成的步骤"
+    r"没有未完成的步骤",
+    # "已逐一解答"
+    r"已逐一",
+    # v1.0.1 (R4-V22): "前文已..." / "上文已..." — 多轮历史污染
+    r"前文已(?:完整|逐一|详细)?.{0,4}(?:作答|解答|说明|呈现|呈上|答)",
+    r"上文已(?:完整|逐一|详细)?.{0,4}(?:作答|解答|说明|呈现|呈上|答)",
+    # v1.0.1 (R4-V22): "已详答" / "已作答" — 简短变体
+    r"已详答",
+    r"已作答",
+    # English: "The request has been fully addressed"
+    r"[Tt]he (?:request|question|user).{0,40}(?:addressed|delivered|answered|resolved)",
+    # English: "has been fully delivered/addressed"
+    r"has been (?:fully )?(?:delivered|addressed|resolved)",
+    # English: "No remaining steps"
+    r"[Nn]o remaining steps",
+    # English: "Task complete" / "Task completed"
+    r"[Tt]ask (?:is )?(?:complete|completed|done)",
+)
+
+
+def _strip_trailing_meta_narration(text: str) -> str:
+    """Strip trailing meta-narration from a KB agent response.
+
+    v1.0.1 (R4-V21): The LLM often appends meta-commentary before
+    calling task_complete, despite B4 (e) explicitly forbidding it.
+    This function finds meta-narration patterns in the last 600 chars
+    and removes the *entire sentence* containing each match — so
+    meta-narration embedded mid-response (with real content after it)
+    is removed while the surrounding content is preserved.
+
+    v1.0.1 (R4-V22): Rewrote from "truncate at earliest match" to
+    "delete whole sentence" — the truncate approach removed real
+    content that followed the meta-narration (e.g. the closing
+    "阁下若欲探询…" sentence), and the 40% safety guard would then
+    abort stripping entirely, leaking the meta-narration through.
+
+    Safety: stripping is aborted if it would remove more than 50% of
+    the response (guard against false positives on short answers).
+    """
+    if not text or len(text) < 20:
+        return text
+
+    # Search for meta-narration patterns in the last 600 chars
+    tail_start = max(0, len(text) - 600)
+    tail = text[tail_start:]
+
+    # Find all matches with their absolute positions
+    matches: list[tuple[int, int]] = []
+    for pat in _TRAILING_META_NARRATION_PATTERNS:
+        for m in re.finditer(pat, tail):
+            matches.append((tail_start + m.start(), tail_start + m.end()))
+
+    if not matches:
+        return text
+
+    # Expand each match to the full sentence boundary
+    # (sentence terminators: 。！？\n)
+    _TERMINATORS = set("。！？\n")
+    ranges_to_delete: list[tuple[int, int]] = []
+    for abs_start, abs_end in matches:
+        # Walk backward to find sentence start
+        sent_start = 0
+        for i in range(abs_start - 1, -1, -1):
+            if text[i] in _TERMINATORS:
+                sent_start = i + 1
+                break
+        # Walk forward to find sentence end (inclusive of terminator)
+        sent_end = len(text)
+        for i in range(abs_end, len(text)):
+            if text[i] in _TERMINATORS:
+                sent_end = i + 1
+                break
+        ranges_to_delete.append((sent_start, sent_end))
+
+    # Merge overlapping ranges
+    ranges_to_delete.sort()
+    merged: list[tuple[int, int]] = []
+    for s, e in ranges_to_delete:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    # Build result by skipping deleted ranges
+    parts: list[str] = []
+    last = 0
+    for s, e in merged:
+        parts.append(text[last:s])
+        last = e
+    parts.append(text[last:])
+    stripped = "".join(parts).rstrip()
+
+    # Safety: don't strip if it removes more than 50% of the text
+    if len(stripped) >= max(1, int(len(text) * 0.5)):
+        return stripped
+    return text
+
 
 class ConversationLoop:
     """Drives the User -> LLM -> Tool -> LLM -> Response cycle.
@@ -109,6 +247,8 @@ class ConversationLoop:
         memory_brick: Any = None,  # v0.7.11: MemoryBrick for persistent memory
         checkpoint_mgr: Any = None,  # v0.7.12: CheckpointManager for conversation persistence
         plan_layer: Any = None,  # v0.9.8: PlanLayer for state-machine planning
+        max_consecutive_text_only: int | None = None,  # v1.0.1 (R4-V17)
+        nudge_grace: int | None = None,  # v1.0.1 (R4-V17)
     ):
         self.llm = llm
         self.capbus = capbus
@@ -119,6 +259,23 @@ class ConversationLoop:
         self._memory_brick = memory_brick  # v0.7.11
         self._checkpoint_mgr = checkpoint_mgr  # v0.7.12: FROM PARAMETER
         self._plan_layer = plan_layer  # v0.9.8: PlanLayer for plan-guided agents
+
+        # v1.0.1 (R4-V17): Per-agent auto-continuation tuning.
+        # KB agents retrieve once and produce a single answer; the default
+        # _MAX_CONSECUTIVE_TEXT_ONLY=13 + _NUDGE_GRACE=2 lets the loop
+        # auto-continue after the first text response, producing duplicate
+        # answers and meta-summaries ("已回答…").  When max_consecutive_text_only
+        # is passed (e.g. 1 for KB agents), the loop breaks after the first
+        # text-only response following tool execution, returning the answer
+        # immediately.
+        self._max_consecutive_text_only: int = (
+            max_consecutive_text_only
+            if max_consecutive_text_only is not None
+            else _MAX_CONSECUTIVE_TEXT_ONLY
+        )
+        self._nudge_grace: int = (
+            nudge_grace if nudge_grace is not None else _NUDGE_GRACE
+        )
 
         # v0.9: Interruptable execution — set by EarlyInputReader on Ctrl+C
         self._interrupted = False
@@ -253,19 +410,33 @@ class ConversationLoop:
                         summary = response.tool_calls[
                             tc_names.index(_TASK_COMPLETE_TOOL)
                         ].arguments.get("summary", "Done.")
+                        # v1.0.1 (R4-V20): For KB agents, the real answer
+                        # is in response.text (the LLM emits it alongside
+                        # the task_complete call).  Use response.text when
+                        # available; fall back to the task_complete summary.
+                        # Previously the summary was always returned, which
+                        # for KB agents was a meta-summary like "已回答…"
+                        # rather than the substantive answer.
+                        final_text = response.text or summary
+                        # v1.0.1 (R4-V21): Strip trailing meta-narration
+                        # for KB agents.  The LLM often appends sentences
+                        # like "已完整解答…无剩余步骤" before calling
+                        # task_complete, despite B4 (e) forbidding it.
+                        if self._max_consecutive_text_only == 0:
+                            final_text = _strip_trailing_meta_narration(final_text)
                         self.ctx.add_to_history("user", user_input)
-                        self.ctx.add_to_history("assistant", summary)
+                        self.ctx.add_to_history("assistant", final_text)
                         # v0.7.11: Record turn to memory
                         if self._memory_brick:
                             self._memory_brick.record_turn("user", user_input)
-                            self._memory_brick.record_turn("assistant", summary)
+                            self._memory_brick.record_turn("assistant", final_text)
                         if self._hooks:
                             _ = self._hooks.execute(HookPoint.POST_TURN, {
                                 "turn_count": self.ctx._turn_count,
-                                "final_text": summary,
+                                "final_text": final_text,
                             })
                         self._checkpoint()
-                        return cast("str", summary)
+                        return cast("str", final_text)
                     logger.warning(
                         "task_complete called alongside %d other tools — "
                         "executing work tools, deferring completion",
@@ -281,12 +452,12 @@ class ConversationLoop:
                 # v0.8.14: Limit consecutive text-only to prevent
                 # infinite auto-continuation loops.
                 _consecutive_text_only += 1
-                if _consecutive_text_only > _MAX_CONSECUTIVE_TEXT_ONLY:
+                if _consecutive_text_only > self._max_consecutive_text_only:
                     break
                 # v0.9.6: Grace period — allow the agent to report
                 # progress naturally (e.g. "Page opened, search box visible")
                 # before nudging it to continue or complete.
-                if _consecutive_text_only < _NUDGE_GRACE:
+                if _consecutive_text_only < self._nudge_grace:
                     messages.append({
                         "role": "assistant",
                         "content": response.text,
@@ -453,6 +624,10 @@ class ConversationLoop:
 
         self.ctx.add_to_history("user", user_input)
         final_text = response.text if response and response.text else ""
+        # v1.0.1 (R4-V21): Strip trailing meta-narration for KB agents
+        # on the non-task_complete exit path too.
+        if self._max_consecutive_text_only == 0:
+            final_text = _strip_trailing_meta_narration(final_text)
         if final_text:
             self.ctx.add_to_history("assistant", final_text)
         # v0.7.11: Record turn to memory
@@ -685,6 +860,18 @@ class ConversationLoop:
         # ── v0.6: Autonomous task completion ──
         has_executed_tools = False
         accumulated_text = ""
+        # v1.0.1 (R4-V20): Track whether any text was yielded to the
+        # user during this turn.  When the LLM calls task_complete
+        # after already streaming the real answer, we must NOT yield
+        # the task_complete summary (which is typically a meta-summary
+        # like "已回答…") — the real answer is already in front of
+        # the user.  Previously the check was
+        # ``yield summary if not full_response_text else ""`` but
+        # ``full_response_text`` is only assigned at loop break points
+        # (lines 808/814), so it was always ``""`` inside the loop
+        # and the summary was always yielded — producing the trailing
+        # "已回答…" meta-summary users see in KB agent responses.
+        has_yielded_text = False
         tool_stats: dict[str, int] = {}
         _consecutive_text_only = 0  # v0.8.15
         while True:
@@ -714,8 +901,28 @@ class ConversationLoop:
                     break
 
                 if delta.type == "text":
-                    accumulated_text += delta.content or ""
-                    yield delta.content
+                    # v1.0.1 (R4-V18): For KB agents, suppress pre-tool-call
+                    # narration.  DeepSeek often emits a brief "let me check
+                    # the knowledge base…" sentence before calling retrieve,
+                    # then emits the real answer after.  Both get yielded
+                    # to the TUI, producing a visually disjointed response
+                    # ("先检索…据典籍所载…").  When has_executed_tools is
+                    # still False AND the agent is in KB mode (max_text=0),
+                    # buffer the text instead of yielding — if a tool call
+                    # follows, the buffered text is discarded; if no tool
+                    # call ever comes, it is yielded as the final answer
+                    # via accumulated_text / full_response_text below.
+                    if (
+                        self._max_consecutive_text_only == 0
+                        and not has_executed_tools
+                    ):
+                        accumulated_text += delta.content or ""
+                    else:
+                        accumulated_text += delta.content or ""
+                        yield delta.content
+                        # v1.0.1 (R4-V20): Mark that we've yielded text
+                        # so task_complete knows not to yield its summary.
+                        has_yielded_text = True
 
                 elif delta.type == "reasoning":
                     # v0.7.11: Reasoning content emitted as ThinkingDelta, not visible text
@@ -744,20 +951,37 @@ class ConversationLoop:
                         summary = response.tool_calls[idx].arguments.get(
                             "summary", "Done."
                         )
-                        yield summary if not full_response_text else ""
+                        # v1.0.1 (R4-V20): If we already streamed the real
+                        # answer to the user (has_yielded_text=True), use
+                        # accumulated_text as the final text — do NOT yield
+                        # the task_complete summary, which is typically a
+                        # meta-summary like "已回答…".  Only yield the
+                        # summary when no text was streamed (e.g. the LLM
+                        # called task_complete without any prior answer).
+                        if has_yielded_text:
+                            final_text = accumulated_text
+                        else:
+                            final_text = summary
+                            yield summary
+                        # v1.0.1 (R4-V21): Strip trailing meta-narration
+                        # for KB agents.  The LLM often appends sentences
+                        # like "已完整解答…无剩余步骤" before calling
+                        # task_complete, despite B4 (e) forbidding it.
+                        if self._max_consecutive_text_only == 0:
+                            final_text = _strip_trailing_meta_narration(final_text)
                         self.ctx.add_to_history("user", user_input)
-                        self.ctx.add_to_history("assistant", summary)
+                        self.ctx.add_to_history("assistant", final_text)
                         # v0.7.11: Record turn to memory
                         if self._memory_brick:
                             self._memory_brick.record_turn("user", user_input)
-                            self._memory_brick.record_turn("assistant", summary)
+                            self._memory_brick.record_turn("assistant", final_text)
                         if self._hooks:
                             _ = self._hooks.execute(HookPoint.POST_TURN, {
                                 "turn_count": self.ctx._turn_count,
-                                "final_text": summary,
+                                "final_text": final_text,
                             })
                         self._checkpoint()
-                        return cast("str", summary)
+                        return cast("str", final_text)
                     logger.warning(
                         "task_complete called alongside %d other tools — "
                         "executing work tools, deferring completion",
@@ -772,15 +996,16 @@ class ConversationLoop:
                     full_response_text = response.text or accumulated_text
                     break
                 # v0.8.14: Limit consecutive text-only
+                # v1.0.1 (R4-V17): Use instance vars (per-agent tuning).
                 _consecutive_text_only += 1
-                if _consecutive_text_only > _MAX_CONSECUTIVE_TEXT_ONLY:
+                if _consecutive_text_only > self._max_consecutive_text_only:
                     full_response_text = response.text or accumulated_text
                     break
                 # v0.9.8: Grace period — allow the agent to report
                 # progress naturally (e.g. "Page opened, search box visible")
                 # before nudging it to continue or complete.
                 # This matches the run() method's grace period logic.
-                if _consecutive_text_only < _NUDGE_GRACE:
+                if _consecutive_text_only < self._nudge_grace:
                     accumulated_text = ""
                     continue
                 messages.append({
@@ -882,6 +1107,11 @@ class ConversationLoop:
                     })
                 has_executed_tools = True
                 _consecutive_text_only = 0  # v0.8.14: reset on tool execution
+                # v1.0.1 (R4-V18): Discard any pre-tool-call narration
+                # buffered for KB agents — only the post-retrieve answer
+                # should reach the user.
+                if self._max_consecutive_text_only == 0:
+                    accumulated_text = ""
 
                 # v0.9.8: Collect for PlanLayer
                 stream_plan_results.append({
@@ -898,6 +1128,10 @@ class ConversationLoop:
 
         self.ctx.add_to_history("user", user_input)
         final_text = full_response_text or accumulated_text
+        # v1.0.1 (R4-V21): Strip trailing meta-narration for KB agents
+        # on the non-task_complete exit path too.
+        if self._max_consecutive_text_only == 0:
+            final_text = _strip_trailing_meta_narration(final_text)
         if final_text:
             self.ctx.add_to_history("assistant", final_text)
         # v0.7.11: Record turn to memory

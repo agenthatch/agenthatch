@@ -66,6 +66,11 @@ class BrickManifest:
     # v0.7.6: memory — enable persistent MemoryBrick (default-on, opt-out)
     memory: bool = True
 
+    # v1.0.0: knowledge_base — enable KnowledgeBaseBrick with pre-built
+    # vector index + retrieve tool for RAG queries.  Set True when the
+    # user passes a knowledgebase source via CLI (``agenthatch <skill> <kb>``).
+    knowledge_base: bool = False
+
     # v0.9.7: task_complete — injected as a virtual tool so the LLM
     # can signal completion.  Set False for interactive REPL agents
     # where the user controls when the session ends.

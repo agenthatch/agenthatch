@@ -72,7 +72,8 @@ class {{ agent_class }}(AHCoreAgent):
             memory={{ brick_manifest.memory | pybool }},
             archetype="{{ brick_manifest.archetype }}",
             task_complete_enabled={{ brick_manifest.task_complete_enabled | pybool }},
-        )
+{% if brick_manifest.knowledge_base %}            knowledge_base=True,
+{% endif %}        )
 {% else %}
         manifest = None
 {% endif %}
@@ -375,6 +376,13 @@ class {{ agent_class }}(AHCoreAgent):
         return super().chat(user_input)
 
     def chat_stream(self, user_input: str):
-        """Streaming chat with workflow support."""
+        """Streaming chat with workflow support.
+
+        v1.0.1 (R4-V23): ``return (yield from ...)`` propagates the
+        subgenerator's return value (the final answer text).  Bare
+        ``yield from`` discards it, so callers that rely on
+        ``StopIteration.value`` see an empty response even though the
+        real answer was streamed to the user.
+        """
         self._pre_turn_workflow(user_input)
-        yield from super().chat_stream(user_input)
+        return (yield from super().chat_stream(user_input))

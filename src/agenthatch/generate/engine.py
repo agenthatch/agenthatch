@@ -29,6 +29,12 @@ TEMPLATE_MAP: dict[str, str] = {
     "README.md.j2": "README.md",
 }
 
+# v1.0.0: Templates that only render when knowledge_base is enabled.
+# These produce the runtime KnowledgeBaseBrick shim + retrieve tool.
+KB_TEMPLATE_MAP: dict[str, str] = {
+    "knowledge_base.py.j2": "src/{package_name}/knowledge_base.py",
+}
+
 
 def _json_type_to_python(json_type: str) -> str:
     """Map JSON Schema type to Python type annotation.
@@ -47,6 +53,22 @@ def _json_type_to_python(json_type: str) -> str:
         "object": "dict",
     }
     return mapping.get(json_type, "Any")
+
+
+def _matches_pattern(path: str, pattern: str) -> bool:
+    """Match ``path`` against a glob-style ``pattern`` (v1.0.1 R2-H2).
+
+    Supports ``draft/*``, ``*.tmp``, ``**/secret/**`` style patterns.
+    Uses :func:`fnmatch.fnmatch` on both the full relative path and the
+    basename so users can write either ``draft/*`` (path match) or
+    ``*.tmp`` (basename match).
+    """
+    import fnmatch
+    from os.path import basename
+    return (
+        fnmatch.fnmatch(path, pattern)
+        or fnmatch.fnmatch(basename(path), pattern)
+    )
 
 
 class GenerateEngine:
@@ -75,8 +97,37 @@ class GenerateEngine:
 
         # Custom filters for safe Python string embedding
         def python_escape(value: str) -> str:
-            """Escape for safe triple-quoted string literal."""
-            return value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+            """Escape for safe triple-quoted string literal.
+
+            v1.0.1 (R2-H4 regression): Previously only escaped backslashes
+            and triple-quotes.  But LLM-generated text may contain:
+              - **null bytes** (``\\x00``): Python source files cannot
+                contain null bytes — ``compile()`` raises ``SyntaxError:
+                source code string cannot contain null bytes``.
+              - **other control chars** (``\\x01``–``\\x1f`` except
+                ``\\t``, ``\\n``, ``\\r``): not fatal but produce
+                invisible garbage in docstrings / system prompts.
+            Now we escape all control chars to their ``\\xNN`` form
+            (after backslash and triple-quote escaping) so the rendered
+            source always compiles cleanly.
+            """
+            # Step 1: Escape backslashes first so we don't double-escape
+            # the backslashes we're about to add.
+            v = value.replace("\\", "\\\\")
+            # Step 2: Escape triple-quotes (would terminate the
+            # triple-quoted docstring / constant literal).  We use the
+            # char-by-char form to avoid embedding a literal triple-quote
+            # in this very docstring (which would terminate it).
+            v = v.replace('"""', "\\" + "\\" + "\\" + '"' + '"' + '"')
+            # Step 3: Escape null bytes and control chars (except
+            # common whitespace \t, \n, \r which are valid in source).
+            # Use a regex sub for compactness.
+            v = re.sub(
+                r"[\x00-\x08\x0b\x0c\x0e-\x1f]",
+                lambda m: f"\\x{ord(m.group()):02x}",
+                v,
+            )
+            return v
 
         def python_repr(value: Any) -> str:
             """Generate Python-compatible literal via json.dumps.
@@ -169,6 +220,10 @@ class GenerateEngine:
         # v0.7: Brick manifest from skill classification
         brick_manifest = self._build_brick_manifest(ahspec, skill_dir=skill_dir)
 
+        # v1.0.0: Knowledge base variables (only present when user passed <kb>)
+        kb_config = ahspec.get("knowledge_base")
+        kb_vars = self._extract_kb_variables(kb_config) if kb_config else None
+
         return {
             "agent_name": agent_name,
             "agent_class": agent_class,
@@ -197,7 +252,217 @@ class GenerateEngine:
             "ai_references": {},  # populated by AI reference extraction
             # v0.8.19: Pass dependencies for CLI tool fallback in template
             "dependencies": base.get("dependencies", []) if base else [],
+            # v1.0.0: Knowledge base — None when no KB declared
+            "kb": kb_vars,
+            "kb_enabled": kb_vars is not None,
         }
+
+    @staticmethod
+    def _extract_kb_variables(kb_config: dict[str, Any]) -> dict[str, Any]:
+        """Flatten KnowledgeBaseConfig into template-friendly variables.
+
+        Returns a dict with keys prefixed ``kb_`` for direct template use.
+        """
+        usage = kb_config.get("usage_strategy", {}) or {}
+        prompt = kb_config.get("prompt_artifact", {}) or {}
+        sources = kb_config.get("sources", []) or []
+        return {
+            "sources": sources,
+            "source_paths": [s.get("path", "") for s in sources if s.get("path")],
+            "usage_strategy": usage,
+            "when_to_retrieve": usage.get("when_to_retrieve", []),
+            "query_templates": usage.get("query_templates", []),
+            "integration_pattern": usage.get("integration_pattern", "tool_call_then_answer"),
+            "max_results_per_query": usage.get("max_results_per_query", 5),
+            "citation_required": usage.get("citation_required", True),
+            "fallback_when_no_match": usage.get("fallback_when_no_match", "inform_user"),
+            "system_prompt_section": prompt.get("system_prompt_section", ""),
+            "retrieve_tool_description": prompt.get("retrieve_tool_description", ""),
+            "integration_instructions": prompt.get("integration_instructions", ""),
+            "chunk_size": kb_config.get("chunk_size", 800),
+            "chunk_overlap": kb_config.get("chunk_overlap", 100),
+            "embedding_model": kb_config.get("embedding_model", "all-MiniLM-L6-v2"),
+            "retrieval_top_k": kb_config.get("retrieval_top_k", 5),
+            "retrieval_alpha": kb_config.get("retrieval_alpha", 0.7),
+            # v1.0.1 (R2-M1): Default False to match KnowledgeBaseConfig
+            # and the runtime KnowledgeStore.  Round 1's C5 fix changed
+            # the schema default but missed this extraction site —
+            # older KB configs without the field would have rendered
+            # ``ENABLE_LLM_RERANK = True`` despite no rerank_fn being
+            # injected at runtime, misleading users.
+            "enable_llm_rerank": kb_config.get("enable_llm_rerank", False),
+            "total_documents": kb_config.get("total_documents", 0),
+            "total_chunks": kb_config.get("total_chunks", 0),
+            "index_size_bytes": kb_config.get("index_size_bytes", 0),
+        }
+
+    @staticmethod
+    def _build_knowledge_index(
+        *, output_dir: Path, kb_vars: dict[str, Any]
+    ) -> dict[str, int]:
+        """v1.0.0 Phase 3.5: Build the KB SQLite index into ``output_dir/knowledge/``.
+
+        Walks each ``source_paths`` entry, chunks files via KBChunker
+        (800-char chunks at paragraph boundaries), and writes a single
+        ``kb_index.db`` that the runtime KnowledgeBaseBrick opens via
+        ``KnowledgeStore.load()``.
+
+        Returns ``{total_chunks, index_size_bytes}``.  On any failure,
+        returns zeros — never blocks generation (the agent runtime will
+        fall back to a no-KB experience).
+        """
+        try:
+            from agenthatch_core.bricks.knowledge.chunker import KBChunker
+            from agenthatch_core.bricks.knowledge.store import (
+                KBDocument,
+                KnowledgeStore,
+            )
+        except ImportError as e:
+            logger.warning("KB index build skipped (import failed): %s", e)
+            return {"total_chunks": 0, "index_size_bytes": 0}
+
+        knowledge_dir = output_dir / "knowledge"
+        knowledge_dir.mkdir(parents=True, exist_ok=True)
+
+        chunk_size = int(kb_vars.get("chunk_size", 800))
+        chunk_overlap = int(kb_vars.get("chunk_overlap", 100))
+        chunker = KBChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+        # Collect chunks from all sources
+        # v1.0.1 (R2-C1): Pass a path-unique source_label (relative path
+        # from the user-provided source root) so two files with the same
+        # basename in different subdirectories don't collide on doc_id
+        # and silently overwrite each other via INSERT OR REPLACE.
+        # v1.0.1 (R2-H2): Respect each source's ``include_patterns``
+        # and ``exclude_patterns`` from frontmatter.  Previously these
+        # were hardcoded to ``("*.md", "*.txt", "*.rst", "*.markdown")``
+        # and frontmatter overrides were silently ignored — user-set
+        # ``include_patterns: ["*.json"]`` or ``exclude_patterns: ["draft/*"]``
+        # had no effect.
+        _DEFAULT_INCLUDE_PATTERNS: tuple[str, ...] = (
+            "*.md", "*.txt", "*.rst", "*.markdown",
+        )
+        all_chunks: list[Any] = []
+        for source in kb_vars.get("sources", []):
+            if not isinstance(source, dict):
+                continue
+            source_path_str = source.get("path", "")
+            if not source_path_str:
+                continue
+            source_path = Path(source_path_str)
+            if not source_path.exists():
+                logger.warning("KB source not found: %s", source_path)
+                continue
+
+            include_patterns = source.get("include_patterns") or _DEFAULT_INCLUDE_PATTERNS
+            exclude_patterns = source.get("exclude_patterns") or []
+
+            if source_path.is_file():
+                # v1.0.1 (R2-C1 regression): Single-file source — pass
+                # an explicit, path-unique ``source_label`` (absolute
+                # path) so two same-basename files in different
+                # directories don't collide on doc_id and silently
+                # overwrite each other via ``INSERT OR REPLACE``.
+                # The full path is stored as ``source`` in metadata;
+                # the chunker also keeps ``file_path`` (absolute) for
+                # debugging.
+                all_chunks.extend(
+                    chunker.chunk_file(source_path, source_label=str(source_path))
+                )
+                continue
+
+            # v1.0.1 (R2b-M10): Collect files into a set first to
+            # deduplicate across patterns.  Previously a file named
+            # ``notes.markdown`` matched both ``*.md`` (no — only
+            # ``.md`` suffix) and ``*.markdown`` patterns... actually
+            # fnmatch ``*.md`` won't match ``notes.markdown``, but a
+            # file like ``README.md`` could match if user-supplied
+            # patterns overlap (e.g. ``["*.md", "*.MD"]`` on a
+            # case-insensitive FS, or ``["*", "*.md"]``).  Without
+            # dedup the file would be chunked twice, producing duplicate
+            # chunks (deduped at DB layer via INSERT OR REPLACE, but
+            # wasting CPU and inflating the chunk count log).
+            seen_files: set[Path] = set()
+            matched_files: list[Path] = []
+            for pattern in include_patterns:
+                for f in source_path.rglob(pattern):
+                    if f in seen_files:
+                        continue
+                    seen_files.add(f)
+                    matched_files.append(f)
+            for f in sorted(matched_files):
+                # Apply exclude_patterns (matched against the path
+                # relative to the source root).
+                try:
+                    rel = f.relative_to(source_path)
+                    rel_str = str(rel)
+                except ValueError:
+                    rel_str = f.name
+                if any(_matches_pattern(rel_str, p) for p in exclude_patterns):
+                    continue
+                all_chunks.extend(
+                    chunker.chunk_file(f, source_label=rel_str)
+                )
+
+        if not all_chunks:
+            logger.warning("KB index build: no chunks produced (empty sources?)")
+            return {"total_chunks": 0, "index_size_bytes": 0}
+
+        # Build the SQLite index
+        # v1.0.1 (L6): Removed redundant `store._get_db(); store._init_schema()`
+        # calls — `_get_db()` already initializes schema for the main
+        # thread via `_init_schema_for_conn`, and `add_documents()` calls
+        # `_get_db()` internally, so the explicit calls were no-ops.
+        # v1.0.1 (C5): Default `enable_llm_rerank` to False to match
+        # `KnowledgeBaseConfig` — rerank infra exists but no rerank_fn
+        # is injected at runtime yet.
+        store = KnowledgeStore(
+            knowledge_dir,
+            embedding_model=kb_vars.get("embedding_model", "all-MiniLM-L6-v2"),
+            enable_llm_rerank=kb_vars.get("enable_llm_rerank", False),
+        )
+        try:
+            # v1.0.1 (R3-H3): Clear stale data from previous builds so
+            # removed sources don't linger.  Previously ``add_documents``
+            # used ``INSERT OR REPLACE`` keyed on ``doc_id`` — if the
+            # user removed a source file between builds, its chunks
+            # (and FTS5 entries) stayed in the DB, causing the runtime
+            # ``retrieve()`` to return stale content from a deleted file.
+            #
+            # The index FILE is preserved (per the project constraint
+            # ``--force must not erase KB index during build``); only
+            # table CONTENTS are cleared because we're rebuilding from
+            # current sources.  The ``kb_ad`` AFTER DELETE trigger
+            # cleans up the corresponding ``kb_fts`` rows automatically.
+            db = store._get_db()
+            db.execute("DELETE FROM kb_documents")
+            db.commit()
+
+            store.add_documents([
+                KBDocument(
+                    doc_id=c.doc_id,
+                    content=c.content,
+                    metadata=c.metadata,
+                )
+                for c in all_chunks
+            ])
+            store.build_index()
+            stats = store.get_stats()
+            logger.info(
+                "KB index built: %d documents → %d chunks, %.1f KB index",
+                len(all_chunks),
+                stats["total_documents"],
+                stats["index_size_bytes"] / 1024,
+            )
+            return {
+                "total_chunks": int(stats["total_documents"]),
+                "index_size_bytes": int(stats["index_size_bytes"]),
+            }
+        except Exception as e:
+            logger.warning("KB index build failed: %s", e)
+            return {"total_chunks": 0, "index_size_bytes": 0}
+        finally:
+            store.close()
 
     @staticmethod
     def _humanize_display_name(display_name: str, agent_id: str) -> str:
@@ -1004,6 +1269,88 @@ class GenerateEngine:
         else:
             self._prepare_output_dir(output_dir, force)
 
+        # v1.0.0 Phase 3.5: Build the KB vector index *after* output_dir is
+        # prepared (so --force doesn't wipe it) but *before* template
+        # rendering (so knowledge_base.py.j2 sees correct stats).
+        if (
+            not dry_run
+            and variables.get("kb_enabled")
+            and variables.get("kb", {}).get("source_paths")
+        ):
+            # v1.0.1 (R4-V2): Surface KB index build activity via a
+            # logger.info call — the call site is library code (no
+            # console access), so we use logger which the CLI's
+            # RichHandler picks up.  Without this the user sees
+            # "▸ Phase 3/3 Agent Generation" followed by a 5-90s silent
+            # gap (sentence-transformers downloads ~80MB on first run).
+            import logging as _logging
+            _log = _logging.getLogger("agenthatch")
+            _log.info(
+                "Phase 3.5: building KB index (chunking + embedding + FTS5)..."
+            )
+            kb_stats = self._build_knowledge_index(
+                output_dir=output_dir,
+                kb_vars=variables["kb"],
+            )
+            _log.info(
+                "Phase 3.5: KB index built — %d chunks, %d bytes",
+                kb_stats["total_chunks"],
+                kb_stats["index_size_bytes"],
+            )
+            # Mutate both the variables dict (for template rendering) and
+            # the AHSSPEC dict (for agenthatch.yaml persistence).
+            variables["kb"]["total_chunks"] = kb_stats["total_chunks"]
+            variables["kb"]["index_size_bytes"] = kb_stats["index_size_bytes"]
+            kb_cfg = ahspec.get("knowledge_base")
+            if isinstance(kb_cfg, dict):
+                kb_cfg["total_chunks"] = kb_stats["total_chunks"]
+                kb_cfg["index_size_bytes"] = kb_stats["index_size_bytes"]
+
+            # v1.0.1 (R3-M11): If KB build produced zero chunks (empty
+            # sources, all-binary files, all-too-large files, etc.),
+            # DISABLE KB at the template/manifest level instead of
+            # generating a ``knowledge_base.py`` that points at an empty
+            # index.  Previously the empty-DB ``knowledge_base.py`` was
+            # still rendered and the manifest still advertised
+            # ``knowledge_base: True`` — at runtime the agent would
+            # import the module, register a ``retrieve`` tool that
+            # always returned "no matching chunks", and inject a KB
+            # system-prompt section that promised retrieval would work.
+            #
+            # Disabling here ensures:
+            #   - ``KB_TEMPLATE_MAP`` rendering is skipped (no
+            #     ``knowledge_base.py`` written).
+            #   - ``brick_manifest.knowledge_base`` reflects reality (False)
+            #     so ``agent.py.j2`` doesn't emit ``knowledge_base=True``
+            #     to the runtime BrickManifest.
+            #   - The runtime AHCoreAgent doesn't try to import a
+            #     non-existent module (which would log a warning).
+            if kb_stats["total_chunks"] == 0:
+                logger.warning(
+                    "KB build produced 0 chunks — disabling KB at "
+                    "manifest/template level (no knowledge_base.py "
+                    "will be generated). Check your source paths "
+                    "and include/exclude patterns."
+                )
+                variables["kb_enabled"] = False
+                # Clear AHSSPEC's knowledge_base config so the
+                # generated ``agenthatch.yaml`` doesn't advertise KB.
+                # ``variables["kb"]`` is left intact for debugging
+                # (template rendering can still surface the build stats)
+                # but ``kb_enabled=False`` gates all rendering branches.
+                if isinstance(kb_cfg, dict):
+                    kb_cfg["enabled"] = False
+                # Flip ``brick_manifest.knowledge_base`` to False so
+                # ``agent.py.j2`` skips emitting ``knowledge_base=True``
+                # to the runtime BrickManifest.  Without this, the
+                # generated agent would instantiate with KB enabled,
+                # try to import ``knowledge_base.py`` (which we did NOT
+                # render), and surface the ImportError as a startup
+                # warning.
+                bm = variables.get("brick_manifest")
+                if isinstance(bm, dict):
+                    bm["knowledge_base"] = False
+
         for template_name, output_rel in TEMPLATE_MAP.items():
             output_path_str = output_rel.format(
                 package_name=variables["package_name"]
@@ -1029,7 +1376,33 @@ class GenerateEngine:
 
             written.append(output_path)
 
-        # Copy agenthatch.yaml to output root
+        # v1.0.0: Render KB-specific templates (only when kb_enabled)
+        if variables.get("kb_enabled"):
+            for template_name, output_rel in KB_TEMPLATE_MAP.items():
+                output_path_str = output_rel.format(
+                    package_name=variables["package_name"]
+                )
+                output_path = output_dir / output_path_str
+
+                try:
+                    template = self._env.get_template(template_name)
+                    rendered = template.render(**variables)
+                except jinja2.TemplateNotFound:
+                    logger.warning("Template not found: %s — skipping", template_name)
+                    continue
+                except Exception as e:
+                    logger.error("Failed to render %s: %s", template_name, e)
+                    raise
+
+                if dry_run:
+                    logger.info("Would write: %s (%d chars)", output_path, len(rendered))
+                else:
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(rendered, encoding="utf-8")
+                    logger.info("Written: %s", output_path)
+                written.append(output_path)
+
+        # Copy agenthatch.yaml to output root (picks up any KB stats mutations)
         if not dry_run:
             self._write_ahspec_copy(ahspec, output_dir, variables)
 

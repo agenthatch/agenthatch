@@ -13,12 +13,18 @@ from typing import Any
 
 
 class SkillArchetype(str, Enum):
-    """Five mutually-exclusive skill archetypes."""
+    """Six mutually-exclusive skill archetypes.
+
+    v1.0.0: KNOWLEDGE_BASE added — agents that ship with a pre-built
+    vector index for RAG retrieval.  Classified when the user passes
+    a knowledgebase source via CLI (``agenthatch <skill> <kb>``).
+    """
     PROMPT_ONLY = "prompt-only"         # no tools, no scripts
     TOOL_WRAPPER = "tool-wrapper"       # 1-2 simple tools
     MULTI_STEP = "multi-step"           # 3+ tools, scripts
     MCP_CONNECTOR = "mcp-connector"     # MCP server integration
     EXTERNAL_TOOL = "external-tool"     # wraps external CLI/binary
+    KNOWLEDGE_BASE = "knowledge-base"   # v1.0.0: ships with vector index
 
 
 @dataclass
@@ -30,9 +36,10 @@ class ClassificationResult:
 
 
 def classify_skill(spec: dict[str, Any] | Any) -> ClassificationResult:
-    """Classify a skill into one of five archetypes.
+    """Classify a skill into one of six archetypes.
 
     Decision order (first match wins):
+    0. Knowledge base declared via CLI → knowledge-base  (v1.0.0)
     1. MCP servers in interface → mcp-connector
     2. External binary/tool requires with no script → external-tool
     3. API templates only, no scripts → tool-wrapper
@@ -58,6 +65,18 @@ def classify_skill(spec: dict[str, Any] | Any) -> ClassificationResult:
     n_provides = len(provides)
     n_requires = len(requires)
     n_scripts = len(scripts)
+
+    # Rule 0: Knowledge base declared (v1.0.0)
+    # Checked first because KB presence fundamentally changes the agent's
+    # runtime needs (KnowledgeBaseBrick + retrieve tool).
+    kb_config = _get_knowledge_base(spec)
+    if kb_config is not None:
+        kb_sources = kb_config.get("sources") or []
+        return ClassificationResult(
+            archetype=SkillArchetype.KNOWLEDGE_BASE,
+            confidence=0.90,
+            reasons=[f"knowledge base declared: {len(kb_sources)} source(s)"],
+        )
 
     # Rule 1: MCP servers
     if mcp_servers:
@@ -143,6 +162,26 @@ def _get_resources(spec: dict[str, Any] | Any) -> dict[str, Any]:
     return {}
 
 
+def _get_knowledge_base(spec: dict[str, Any] | Any) -> dict[str, Any] | None:
+    """Extract knowledge_base config from any spec format (v1.0.0).
+
+    Returns None when no KB was declared (the common case — most skills
+    have no KB).  A non-None return triggers KNOWLEDGE_BASE archetype.
+    """
+    if isinstance(spec, dict):
+        return spec.get("knowledge_base")
+    if hasattr(spec, "knowledge_base"):
+        kb = spec.knowledge_base
+        if kb is None:
+            return None
+        if hasattr(kb, "model_dump"):
+            return kb.model_dump()
+        if hasattr(kb, "dict"):
+            return kb.dict()
+        return kb
+    return None
+
+
 def archetype_to_brick_config(
     archetype: SkillArchetype,
     api_templates: list[Any] | None = None,
@@ -166,7 +205,8 @@ def archetype_to_brick_config(
         "loop_engine": (
             LoopKind.DIRECT if archetype == SkillArchetype.PROMPT_ONLY
             else LoopKind.PLAN_GUIDED if archetype in (
-                SkillArchetype.MULTI_STEP, SkillArchetype.MCP_CONNECTOR
+                SkillArchetype.MULTI_STEP, SkillArchetype.MCP_CONNECTOR,
+                SkillArchetype.KNOWLEDGE_BASE,  # v1.0.0: RAG needs multi-step planning
             )
             else LoopKind.CONVERSATION
         ),
@@ -179,6 +219,8 @@ def archetype_to_brick_config(
             SkillArchetype.TOOL_WRAPPER, SkillArchetype.MULTI_STEP
         ),
         "guard_active": bool(rules) and archetype != SkillArchetype.PROMPT_ONLY,
+        # v1.0.0: knowledge_base — enable KnowledgeBaseBrick + retrieve tool
+        "knowledge_base": archetype == SkillArchetype.KNOWLEDGE_BASE,
         # v0.9.8: task_complete_enabled — interactive REPL agents
         # (browser, shell, etc.) set this False so the user controls
         # when the session ends.  Default True for task-oriented agents.

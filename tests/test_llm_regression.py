@@ -110,6 +110,12 @@ class TestBaseURLFallback:
     def client_factory(self, caplog):
         """Factory fixture — creates LLMClient with mocked OpenAI."""
         import logging
+        # v1.0.1 (R4-V19): caplog.set_level only affects the root logger.
+        # Since main.py configures ``agenthatch_core`` with its own
+        # handler and level (ERROR by default), warnings emitted by
+        # ``agenthatch_core.loop.agent_loop`` / ``agenthatch_core.llm.client``
+        # wouldn't be captured unless we explicitly set the level here.
+        caplog.set_level(logging.WARNING, logger="agenthatch_core")
         caplog.set_level(logging.WARNING)
 
         def _make(**kwargs):

@@ -278,7 +278,26 @@ def _launch(
         module = _importlib_util.module_from_spec(spec)
         # Set __package__ so relative imports (from .tools import ...) work
         module.__package__ = agent_pkg
-        spec.loader.exec_module(module)
+        # v1.0.1 (R4-V16): Register ONLY the agent module itself in
+        # sys.modules BEFORE exec_module so that runtime lookups (e.g.
+        # KnowledgeBaseBrick's package detection in
+        # agenthatch_core.agent) can find it via
+        # ``sys.modules.get(type(self).__module__)``.  Without this,
+        # spec_from_file_location + exec_module leaves the module
+        # unregistered, and the KB init code falls back to deriving the
+        # package from ``__module__`` (which works but is fragile).
+        # Do NOT register the parent package — that would shadow the
+        # real ``yinghuo_starlore`` package (loaded lazily by Python
+        # during ``from .tools import ...``) and break relative imports
+        # with "yinghuo_starlore is not a package".
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            # Clean up partial registration on failure to avoid
+            # masking the real error with a stale module entry.
+            sys.modules.pop(spec.name, None)
+            raise
 
         # Get Agent class from the AGENT_CLASS constant
         agent_class_name = getattr(module, "AGENT_CLASS", None)

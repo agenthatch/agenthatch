@@ -8,6 +8,7 @@ ContextManager into a ready-to-run agent.
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,152 @@ class AHCoreAgent:
             except ImportError:
                 logger.warning("MemoryBrick not available; memory disabled for this session.")
 
+        # KnowledgeBaseBrick (v1.0.0) — RAG retrieval, opt-in via manifest
+        #
+        # The retrieve function lives in the *generated* agent package
+        # (``src/<package>/knowledge_base.py``) because it carries the
+        # LLM-inferred usage strategy (QUERY_TEMPLATES, SYSTEM_PROMPT_SECTION,
+        # integration_pattern, etc.) that varies per skill.
+        #
+        # ``agenthatch-core`` therefore stays framework-agnostic: we only
+        # hold a callable reference + a few prompt constants.  This mirrors
+        # the OpenClaw/Claude Code split — runtime mechanics here, skill
+        # intelligence in the generated package.
+        self._kb: Any = None
+        self._kb_system_prompt: str = ""
+        # v1.0.1 (R3-M10): Track KB init failures so the agent can
+        # surface them as a user-visible notification on startup.
+        # ``logger.warning`` alone is insufficient because:
+        #   - Many deployments route logs to a file the user never sees.
+        #   - The TUI/console may suppress INFO/WARN logs entirely.
+        #   - A user starting an agent that expects KB-backed answers
+        #     would silently get degraded behavior with no clue why.
+        # The notification is emitted on stderr (visible in interactive
+        # sessions) AND logged for log-aggregation pipelines.
+        self._kb_init_warning: str | None = None
+        if self._manifest.knowledge_base:
+            try:
+                import importlib
+
+                # v1.0.1 (R4-V16): Resolve the agent's package name
+                # robustly.  ``type(self).__module__`` is normally
+                # ``<pkg>.agent`` (e.g. "yinghuo_starlore.agent") and
+                # the module is in ``sys.modules`` when loaded via
+                # ``import`` or via ``agenthatch run`` (which now
+                # registers the module before exec).  We do NOT walk
+                # the MRO — that would pick up the base class
+                # ``agenthatch_core.agent`` (whose ``__package__`` is
+                # "agenthatch_core") and cause a misleading
+                # "No module named 'agenthatch_core.knowledge_base'"
+                # error.  If sys.modules lookup fails, fall back to
+                # deriving the package from ``__module__`` directly.
+                mod_name = type(self).__module__
+                agent_module = sys.modules.get(mod_name)
+                if agent_module is not None:
+                    pkg = getattr(agent_module, "__package__", "") or ""
+                elif mod_name and "." in mod_name and not mod_name.startswith("__"):
+                    pkg = mod_name.rsplit(".", 1)[0]
+                else:
+                    pkg = ""
+                if pkg:
+                    try:
+                        kb_mod = importlib.import_module(f"{pkg}.knowledge_base")
+                        retrieve_fn = getattr(kb_mod, "retrieve", None)
+                        # Prefer the LLM-generated description (B4) over the
+                        # default — it carries skill-specific guidance.
+                        kb_description = getattr(
+                            kb_mod, "RETRIEVE_TOOL_DESCRIPTION", None
+                        )
+                        if retrieve_fn is not None:
+                            from agenthatch_core.bricks.knowledge.tools import (
+                                retrieve_tool,
+                            )
+                            rt = retrieve_tool(
+                                retrieve_fn=retrieve_fn,
+                                description=kb_description,
+                            )
+                            self.capbus.inject_builtin("retrieve", rt)
+                            self._kb = kb_mod
+                            # v1.0.1: Prefer FULL_SYSTEM_PROMPT (composed
+                            # by knowledge_base.py at import time — B4's
+                            # SYSTEM_PROMPT_SECTION + B3's WHEN_TO_RETRIEVE
+                            # + QUERY_TEMPLATES).  Falls back to plain
+                            # SYSTEM_PROMPT_SECTION for older agents
+                            # generated before v1.0.1.
+                            self._kb_system_prompt = getattr(
+                                kb_mod, "FULL_SYSTEM_PROMPT", None
+                            ) or getattr(
+                                kb_mod, "SYSTEM_PROMPT_SECTION", ""
+                            )
+                            logger.info(
+                                "KnowledgeBaseBrick assembled: "
+                                "retrieve tool registered via CapBus builtins."
+                            )
+                        else:
+                            self._kb_init_warning = (
+                                f"KnowledgeBaseBrick: knowledge_base module "
+                                f"in package '{pkg}' has no retrieve() "
+                                f"function — KB disabled. Re-run hatch with "
+                                f"a valid knowledge base path to fix."
+                            )
+                            logger.warning(self._kb_init_warning)
+                    except ImportError as ie:
+                        self._kb_init_warning = (
+                            f"KnowledgeBaseBrick: knowledge_base module not "
+                            f"found in package '{pkg}' — KB disabled. "
+                            f"This may indicate a corrupted install or a "
+                            f"mismatched manifest; re-run hatch to regenerate. "
+                            f"ImportError: {ie}"
+                        )
+                        logger.warning(self._kb_init_warning)
+                else:
+                    self._kb_init_warning = (
+                        "KnowledgeBaseBrick: manifest declares KB enabled "
+                        "but the agent's package name is empty — KB disabled. "
+                        "This usually means the agent module is being imported "
+                        "as a top-level script rather than as part of a "
+                        "package; check your entrypoint."
+                    )
+                    logger.warning(self._kb_init_warning)
+            except Exception as e:
+                # v1.0.1 (M4): Include traceback so assembly failures
+                # are debuggable.  Previously only the exception message
+                # was logged, hiding the originating frame.
+                self._kb_init_warning = (
+                    f"KnowledgeBaseBrick assembly failed: {e} — KB disabled. "
+                    f"Check the traceback in the log for details."
+                )
+                logger.warning(
+                    "KnowledgeBaseBrick assembly failed: %s — KB disabled.",
+                    e,
+                    exc_info=True,
+                )
+
+        # v1.0.1 (R3-M10 + R4-V8 + R2b-M15): Surface KB init failures via
+        # ``warnings.warn`` rather than ``print(..., file=sys.stderr)``.
+        # ``agenthatch-core`` is framework-agnostic and must NOT bypass the
+        # caller's I/O layer — ``print`` to stderr:
+        #   - Skips the project's rich console (no theme, no markup)
+        #   - Breaks Live panel rendering in TUI mode (text lands inside
+        #     the Live frame, causing flicker)
+        #   - Goes to stderr while the rest of the agent's output goes to
+        #     stdout — log redirection drops it
+        # ``warnings.warn`` is the standard library contract:
+        #   - Callers can route via ``warnings.catch_warnings()`` or the
+        #     ``PYTHONWARNINGS`` env var
+        #   - The TUI registers a custom showwarning hook to render via
+        #     the project's rich console
+        #   - Tests can suppress via ``pytest.warns`` / filterwarnings
+        # We use ``RuntimeWarning`` (not ``UserWarning``) because a KB
+        # init failure indicates a runtime configuration problem.
+        if self._kb_init_warning:
+            import warnings
+            warnings.warn(
+                self._kb_init_warning,
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
         # Build raw spec from yaml or fallback constants
         self._raw_spec = self._build_raw_spec(identity, spec_path)
 
@@ -151,6 +298,12 @@ class AHCoreAgent:
         # v0.7.6: Wire memory brick into context manager for system prompt injection
         if self._memory is not None:
             self.ctx._memory = self._memory
+
+        # v1.0.0: Wire KB system prompt into context manager
+        # The LLM-generated SYSTEM_PROMPT_SECTION (B4) is injected into
+        # the system prompt so the LLM knows when to call `retrieve`.
+        if self._kb_system_prompt:
+            self.ctx._kb_system_prompt = self._kb_system_prompt
 
         # Apply runtime config (creates LLM client)
         if runtime_config:
@@ -521,6 +674,13 @@ class AHCoreAgent:
             # v0.9.8: All non-DIRECT agents use ConversationLoop with
             # PlanLayer (created in __init__).  The `plan` tool is
             # available at runtime; agents opt in by calling it.
+            # v1.0.1 (R4-V17): For KB agents, cap consecutive text-only
+            # responses at 0 so the loop returns the answer immediately
+            # after retrieve → answer, without producing duplicate
+            # answers or meta-summaries.  With 0, the FIRST text-only
+            # response after tool execution breaks the loop (1 > 0).
+            kb_max_text = 0 if self._manifest.knowledge_base else None
+            kb_nudge = 0 if self._manifest.knowledge_base else None
             loop = ConversationLoop(
                 self.llm, self.capbus, self.sandbox, self.ctx,
                 hooks=self.hooks,
@@ -528,6 +688,8 @@ class AHCoreAgent:
                 memory_brick=self._memory,
                 checkpoint_mgr=self._checkpoint_mgr,
                 plan_layer=self._plan_layer,
+                max_consecutive_text_only=kb_max_text,
+                nudge_grace=kb_nudge,
             )
             loop._interrupted = self._interrupted
             result = loop.run(user_input)
@@ -565,6 +727,15 @@ class AHCoreAgent:
             # v0.9.8: All non-DIRECT agents use ConversationLoop with
             # PlanLayer (created in __init__).  The `plan` tool is
             # available at runtime; agents opt in by calling it.
+            # v1.0.1 (R4-V17): Same KB auto-continuation cap as chat().
+            # v1.0.1 (R4-V22): Fix typo — was ``1``, but chat() uses ``0``.
+            # With ``1``, ``self._max_consecutive_text_only == 0`` never
+            # holds in the streaming path, so ``_strip_trailing_meta_narration``
+            # is never called and meta-narration ("前已详答" / "前问已答毕")
+            # leaks through to the user.  Align with chat() (``0``) so KB
+            # agents in streaming mode also get meta-narration stripping.
+            kb_max_text = 0 if self._manifest.knowledge_base else None
+            kb_nudge = 0 if self._manifest.knowledge_base else None
             loop = ConversationLoop(
                 self.llm, self.capbus, self.sandbox, self.ctx,
                 hooks=self.hooks,
@@ -572,6 +743,8 @@ class AHCoreAgent:
                 memory_brick=self._memory,
                 checkpoint_mgr=self._checkpoint_mgr,
                 plan_layer=self._plan_layer,
+                max_consecutive_text_only=kb_max_text,
+                nudge_grace=kb_nudge,
             )
             # v0.9: Propagate interrupt flag
             loop._interrupted = self._interrupted

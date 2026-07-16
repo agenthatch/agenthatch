@@ -1,0 +1,401 @@
+"""Runtime KnowledgeBaseBrick shim — RAG retrieval for the {{ agent_name }} agent.
+
+v1.0.0: Generated when the user passes a knowledge base path to
+``agenthatch <skill> <knowledgebase>``.  This module opens the
+pre-built SQLite index at ``../knowledge/kb_index.db`` and exposes
+a ``retrieve(query, top_k)`` tool for the agent's CapBus.
+
+The index was built at hatch time by ``GenerateEngine._build_knowledge_index``
+using ``KBChunker`` ({{ kb.chunk_size }}-char chunks, {{ kb.chunk_overlap }}-char
+overlap) and ``KnowledgeStore`` (BM25 + embedding fusion).
+
+Three-layer retrieval (OpenClaw-inspired):
+  1. BM25 via SQLite FTS5 (always available)
+  2. BM25 + embedding fusion (alpha={{ kb.retrieval_alpha }})
+  3. LLM re-rank (optional, enabled={{ kb.enable_llm_rerank }})
+"""
+from __future__ import annotations
+
+import logging
+import threading
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# ── Path to the pre-built index ─────────────────────────────────────────
+# Generated at hatch time into {agent_dir}/knowledge/kb_index.db
+_KB_INDEX_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge"
+
+# ── LLM-inferred usage strategy (B3) ────────────────────────────────────
+WHEN_TO_RETRIEVE: list[str] = [
+{% for trigger in kb.when_to_retrieve %}
+    {{ trigger | python_repr }},
+{% endfor %}
+]
+
+QUERY_TEMPLATES: list[str] = [
+{% for tpl in kb.query_templates %}
+    {{ tpl | python_repr }},
+{% endfor %}
+]
+
+INTEGRATION_PATTERN: str = {{ kb.integration_pattern | python_repr }}
+MAX_RESULTS_PER_QUERY: int = {{ kb.max_results_per_query }}
+CITATION_REQUIRED: bool = {{ kb.citation_required | pybool }}
+FALLBACK_WHEN_NO_MATCH: str = {{ kb.fallback_when_no_match | python_repr }}
+
+# ── LLM-generated prompt artifacts (B4) ─────────────────────────────────
+SYSTEM_PROMPT_SECTION: str = {{ kb.system_prompt_section | python_repr }}
+RETRIEVE_TOOL_DESCRIPTION: str = {{ kb.retrieve_tool_description | python_repr }}
+INTEGRATION_INSTRUCTIONS: str = {{ kb.integration_instructions | python_repr }}
+
+# ── Retrieval parameters ───────────────────────────────────────────────
+RETRIEVAL_TOP_K: int = {{ kb.retrieval_top_k }}
+RETRIEVAL_ALPHA: float = {{ kb.retrieval_alpha }}
+EMBEDDING_MODEL: str = {{ kb.embedding_model | python_repr }}
+ENABLE_LLM_RERANK: bool = {{ kb.enable_llm_rerank | pybool }}
+
+# ── Build-time stats ────────────────────────────────────────────────────
+TOTAL_DOCUMENTS: int = {{ kb.total_documents }}
+TOTAL_CHUNKS: int = {{ kb.total_chunks }}
+INDEX_SIZE_BYTES: int = {{ kb.index_size_bytes }}
+
+
+# ── Composed system prompt (v1.0.1) ─────────────────────────────────────
+# B4's SYSTEM_PROMPT_SECTION alone doesn't tell the LLM *when* to retrieve
+# or *how* to phrase queries.  Append WHEN_TO_RETRIEVE and QUERY_TEMPLATES
+# (B3 output) so they reach the runtime LLM via ContextManager injection.
+# Previously these constants were dead code — generated but never read.
+FULL_SYSTEM_PROMPT: str = SYSTEM_PROMPT_SECTION
+if WHEN_TO_RETRIEVE:
+    FULL_SYSTEM_PROMPT += "\n\n## When to Retrieve\n"
+    FULL_SYSTEM_PROMPT += "\n".join(f"- {w}" for w in WHEN_TO_RETRIEVE)
+if QUERY_TEMPLATES:
+    FULL_SYSTEM_PROMPT += "\n\n## Query Templates\n"
+    FULL_SYSTEM_PROMPT += "\n".join(f"- {t}" for t in QUERY_TEMPLATES)
+
+
+# ── Lazy-loaded KnowledgeStore singleton ────────────────────────────────
+
+_store: Any = None
+# v1.0.1 (R2-H1): Renamed from ``_store_loaded`` to
+# ``_store_load_complete`` and only set AFTER the load finishes
+# (success or failure).  Previously ``_store_loaded = True`` was set
+# BEFORE the load logic, so a concurrent thread entering the fast
+# path during the 30-60s embedder download would see
+# ``_store is None`` + ``_store_loaded is True`` and return None
+# permanently — losing KB access for that thread's entire session.
+_store_load_complete: bool = False
+_store_lock = threading.Lock()
+
+
+def _get_store() -> Any:
+    """Open the KnowledgeStore on first use (lazy init).
+
+    v1.0.1 (R2-H1): Thread-safe via double-checked locking — concurrent
+    first-call threads block on ``_store_lock`` until the loader thread
+    completes, then see the populated ``_store`` (or None on failure)
+    via the fast path.  Previously the "loaded" flag was set before the
+    actual load, racing concurrent threads into permanently returning
+    None.
+
+    Returns None if the index is missing or load failed — the agent
+    should fall back to answering without KB context.
+    """
+    global _store, _store_load_complete
+    # Fast path: load already completed (no lock needed)
+    if _store is not None:
+        return _store
+    if _store_load_complete:
+        # Load was attempted and finished, but _store is None —
+        # the load failed (missing dir or init error).
+        return None
+
+    # Slow path: acquire lock to perform the load
+    with _store_lock:
+        # Re-check after acquiring lock — another thread may have
+        # completed initialization while we waited for the lock.
+        if _store is not None:
+            return _store
+        if _store_load_complete:
+            return None
+
+        # v1.0.1 (R3-M1): Track whether we've handled the exception so
+        # the ``finally`` block can distinguish between caught exceptions
+        # (where the relevant branch already set ``_store_load_complete``
+        # appropriately) and uncaught ``BaseException`` propagation
+        # (where we must mark complete to prevent retry loops).
+        handled = False
+        try:
+            if not _KB_INDEX_DIR.exists():
+                logger.warning(
+                    "KnowledgeBase: index directory not found at %s — "
+                    "retrieve() will return empty results.",
+                    _KB_INDEX_DIR,
+                )
+                # v1.0.1 (R3-M1): Missing directory is a *permanent*
+                # failure — the user almost certainly needs to re-run
+                # hatch.  Mark complete so we don't re-stat the dir on
+                # every retrieve() call.
+                handled = True
+                _store_load_complete = True
+                return None
+
+            from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+            # v1.0.1 (R2-H1 regression): Use a local ``store`` variable
+            # and only publish to ``_store`` AFTER ``load()`` succeeds.
+            # Previously ``_store = KnowledgeStore(...)`` was assigned
+            # before ``load()``, so if ``load()`` raised
+            # ``BaseException`` (``SystemExit`` / ``KeyboardInterrupt``
+            # — not caught by ``except Exception``), ``_store`` was
+            # left pointing at a half-initialized ``KnowledgeStore``
+            # whose ``_index_built`` was still False.  Subsequent
+            # ``_get_store()`` calls would see ``_store is not None``
+            # on the fast path and return the broken instance.
+            store = KnowledgeStore(
+                _KB_INDEX_DIR,
+                embedding_model=EMBEDDING_MODEL,
+                enable_llm_rerank=ENABLE_LLM_RERANK,
+            )
+            store.load()
+            _store = store  # Publish only after successful load
+            logger.info(
+                "KnowledgeBase: loaded %d chunks from %s",
+                TOTAL_CHUNKS, _KB_INDEX_DIR,
+            )
+            return _store
+        except (FileNotFoundError, NotADirectoryError) as e:
+            # v1.0.1 (R3-M1): Permanent failures — mark complete so
+            # we don't keep retrying on every retrieve() call.
+            logger.warning(
+                "KnowledgeBase: index permanently unavailable: %s", e
+            )
+            handled = True
+            _store = None
+            _store_load_complete = True
+            return None
+        except (OSError, PermissionError) as e:
+            # v1.0.1 (R3-M1): Transient I/O failures (disk full,
+            # permission race during init) — do NOT mark complete so
+            # the next retrieve() call can retry.  Without this, a
+            # single transient error would permanently disable KB
+            # for the process's lifetime.
+            logger.warning(
+                "KnowledgeBase: transient load error (will retry): %s", e
+            )
+            handled = True
+            _store = None
+            return None
+        except Exception as e:
+            # v1.0.1 (R3-M1): Generic errors (e.g. corrupted SQLite,
+            # FTS5 schema mismatch) — treat as permanent to avoid
+            # tight retry loops on genuinely broken indexes.
+            logger.warning("KnowledgeBase: failed to load index: %s", e)
+            handled = True
+            _store = None
+            _store_load_complete = True
+            return None
+        finally:
+            # v1.0.1 (R2-H1 + R3-M1): If we got here via an uncaught
+            # ``BaseException`` (``SystemExit`` / ``KeyboardInterrupt``
+            # — not caught by any ``except`` branch above), mark the
+            # load complete to prevent other waiting threads from
+            # retrying the same failing load and causing a retry storm.
+            # Caught exception branches already set the flag (or not,
+            # for transient errors) and set ``handled = True``.
+            if not handled:
+                _store_load_complete = True
+
+
+def retrieve(query: str, top_k: int = MAX_RESULTS_PER_QUERY) -> Any:
+    """Retrieve relevant knowledge chunks from the knowledge base.
+
+    {{ kb.retrieve_tool_description | python_escape }}
+
+    Args:
+        query: Natural-language search query.  For best results, use one
+               of these query templates:
+{% for tpl in kb.query_templates %}
+               - {{ tpl | python_escape }}
+{% endfor %}
+        top_k: Maximum number of chunks to return (default {{ kb.max_results_per_query }}).
+
+    Returns:
+        A list of dicts, each with keys:
+          - ``content``: The retrieved text chunk
+          - ``source``: Source filename
+          - ``chunk_index``: Index within the source file
+          - ``heading``: Optional nearest markdown heading
+          - ``score``: Relevance score (0.0–1.0, higher = more relevant)
+          - ``match_source``: How this result was found
+            ("keyword" | "embedding" | "hybrid" | "reranked")
+
+        Returns an empty list only when no chunks match or when the
+        index is unavailable (missing directory or load failure).
+
+    Raises:
+        RuntimeError: If the store is loaded but the underlying search
+            raises a transient error (e.g. SQLite "database is locked",
+            I/O error).  v1.0.1: previously these were silently swallowed
+            and returned as ``[]``, making transient failures
+            indistinguishable from "no match".  Re-raising lets the
+            LLM see a real tool error and decide whether to retry.
+
+    Integration instructions:
+        {{ kb.integration_instructions | python_escape }}
+    """
+    store = _get_store()
+    if store is None:
+        return []
+    if not query or not query.strip():
+        return []
+
+    try:
+        results = store.search(
+            query=query,
+            top_k=min(top_k, RETRIEVAL_TOP_K),
+            alpha=RETRIEVAL_ALPHA,
+            enable_rerank=ENABLE_LLM_RERANK,
+        )
+    except Exception as e:
+        # v1.0.1 (C3): Re-raise so transient SQLite/IO errors don't get
+        # silently masked as "no matching chunks".  The LLM gets a real
+        # tool error and can choose to retry or proceed without KB.
+        logger.warning("KnowledgeBase retrieve failed: %s", e)
+        raise RuntimeError(f"KnowledgeBase retrieve failed: {e}") from e
+
+    return [
+        {
+            "content": r.content,
+            "source": r.metadata.get("source", "unknown"),
+            "chunk_index": r.metadata.get("chunk_index", 0),
+            "heading": r.metadata.get("heading", ""),
+            "score": round(r.score, 4),
+            "match_source": r.match_source,
+        }
+        for r in results
+    ]
+
+
+def get_kb_stats() -> dict[str, Any]:
+    """Return build-time stats for the knowledge base.
+
+    v1.0.1 (L4): Returns ONLY build-time stats to avoid triggering
+    lazy store initialization.  A diagnostic ``/status`` call should
+    not load the full KB index into memory just to report its size.
+
+    Use ``get_kb_runtime_stats()`` if you need runtime stats — that
+    function triggers lazy init.
+    """
+    return {
+        "build_time": {
+            "total_documents": TOTAL_DOCUMENTS,
+            "total_chunks": TOTAL_CHUNKS,
+            "index_size_bytes": INDEX_SIZE_BYTES,
+            "embedding_model": EMBEDDING_MODEL,
+            "chunk_size": {{ kb.chunk_size }},
+            "chunk_overlap": {{ kb.chunk_overlap }},
+        },
+        "index_path": str(_KB_INDEX_DIR),
+        "index_exists": _KB_INDEX_DIR.exists(),
+    }
+
+
+def get_kb_runtime_stats() -> dict[str, Any]:
+    """Return runtime stats (triggers lazy store init).
+
+    Separate from ``get_kb_stats()`` so callers must explicitly opt in
+    to the cost of loading the index.
+    """
+    store = _get_store()
+    return store.get_stats() if store is not None else {}
+
+
+def format_retrieved_chunks(chunks: list[dict[str, Any]]) -> str:
+    """Format retrieved chunks into a single context string for the LLM.
+
+    Called by the agent after ``retrieve()`` when integration_pattern is
+    ``tool_call_then_answer`` — the LLM sees this formatted block in the
+    tool result.
+    """
+    if not chunks:
+        return "(no relevant knowledge base entries found)"
+
+    parts: list[str] = []
+    for i, c in enumerate(chunks, 1):
+        source = c.get("source", "unknown")
+        idx = c.get("chunk_index", 0)
+        heading = c.get("heading", "")
+        score = c.get("score", 0.0)
+        content = c.get("content", "")
+        header = f"[{i}] source={source} chunk={idx}"
+        if heading:
+            header += f" heading={heading}"
+        header += f" score={score}"
+        parts.append(f"{header}\n{content}")
+    # v1.0.1 (R4-V7): Use plain text boundary instead of Markdown ``---``
+    # (which would render as a horizontal rule when the LLM echoes
+    # retrieve results into its response).
+    return "\n\n*** chunk boundary ***\n\n".join(parts)
+
+
+# ── Shutdown hook (v1.0.1 R3-M8) ─────────────────────────────────────────
+# ``KnowledgeStore`` opens SQLite connections lazily on first ``retrieve()``
+# call, one per worker thread.  Without an explicit ``close()``, those
+# connections get GC'd whenever CPython's reference counter decides to —
+# which may be never during a long-running session, leaving WAL/SHM
+# sidecar files and open file descriptors behind.
+#
+# We register an ``atexit`` handler so the process teardown calls
+# ``store.close()`` deterministically.  Combined with ``KnowledgeStore.__del__``
+# (the safety net for GC), this guarantees resources are released even if
+# the agent process is killed via SIGTERM (Python's atexit runs for
+# normal exits and KeyboardInterrupt; for SIGTERM, see the signal handler
+# in agent.py).
+import atexit
+
+
+def shutdown() -> None:
+    """Close the lazily-loaded KnowledgeStore, if any.
+
+    Safe to call multiple times — second call sees ``_store is None`` and
+    no-ops.  Registered via ``atexit`` so process exit triggers cleanup
+    automatically.  Swallows all errors because atexit handlers run during
+    interpreter shutdown where modules may already be torn down.
+    """
+    global _store
+    if _store is not None:
+        try:
+            _store.close()
+        except Exception:
+            pass  # Interpreter shutdown tolerant
+        finally:
+            _store = None
+
+
+atexit.register(shutdown)
+
+
+__all__: list[str] = [
+    "retrieve",
+    "get_kb_stats",
+    "get_kb_runtime_stats",
+    "format_retrieved_chunks",
+    "shutdown",
+    "WHEN_TO_RETRIEVE",
+    "QUERY_TEMPLATES",
+    "INTEGRATION_PATTERN",
+    "SYSTEM_PROMPT_SECTION",
+    "FULL_SYSTEM_PROMPT",
+    "RETRIEVE_TOOL_DESCRIPTION",
+    "INTEGRATION_INSTRUCTIONS",
+    "MAX_RESULTS_PER_QUERY",
+    "CITATION_REQUIRED",
+    "FALLBACK_WHEN_NO_MATCH",
+    "RETRIEVAL_TOP_K",
+    "RETRIEVAL_ALPHA",
+    "TOTAL_DOCUMENTS",
+    "TOTAL_CHUNKS",
+]

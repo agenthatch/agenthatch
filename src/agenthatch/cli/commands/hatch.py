@@ -152,7 +152,7 @@ def _run_phase3_generate(
     spec_dict = ahs_spec.model_dump()
 
     with Status(
-        "[accent]▸ Phase 3/3[/accent]  Agent Generation",
+        "[dim]Generating agent files...[/dim]",
         spinner="dots",
         console=console,
     ) as _gen_status:
@@ -202,19 +202,28 @@ def _run_postgen_review(
 
     if not quiet:
         console.print(
-            "[dim]▸ Phase 3.5/3[/dim]  Post-Generation Review "
+            "[accent]▸ Phase 3.5/3[/accent]  Post-Generation Review "
             "[dim](inspect → test → repair)[/dim]"
         )
 
     try:
-        report = iterate_until_gate(
-            output_dir=agent_output_dir,
-            ahsspec=ahs_spec,
-            context=None,
-            chat_fn=ai_chat_fn,
-            skill_dir=skill_dir,
-            archetype=archetype,
-        )
+        # v1.0.1 (R4-V3): Wrap postgen review in a status spinner so
+        # the user sees activity during the (potentially long) inspect →
+        # test → repair loop.  Without this, the console goes silent
+        # for up to 300s (3 rounds × (10s/tool + 90s LLM repair)),
+        # which users misread as a hang.
+        with console.status(
+            "[accent]Running post-generation review[/accent]",
+            spinner="dots",
+        ):
+            report = iterate_until_gate(
+                output_dir=agent_output_dir,
+                ahsspec=ahs_spec,
+                context=None,
+                chat_fn=ai_chat_fn,
+                skill_dir=skill_dir,
+                archetype=archetype,
+            )
     except Exception as e:
         logger.warning("Post-generation review failed: %s", e)
         return None
@@ -245,10 +254,29 @@ def _format_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
-def _render_confidence(ahs_spec: Any) -> None:
-    """Render confidence panel with bar chart for each harness."""
+def _render_confidence(ahs_spec: Any, harness_outputs: dict[str, Any] | None = None) -> None:
+    """Render confidence panel with bar chart for each harness.
+
+    v1.0.1 (R4-V14): Previously this panel read only
+    ``cr.per_harness`` (E's cross-checked report) — so E itself never
+    appeared (E doesn't cross-check itself) while skipped harnesses
+    that E still scored (e.g. D for pure_instruction skills) did
+    appear.  The adjacent Hatch Summary table did the opposite
+    (iterated ``harness_outputs``, skipping D but showing E via
+    self-eval fallback).  The two panels disagreed on which rows
+    appeared, which was confusing.  Now both iterate the union of
+    ``cr.per_harness`` and ``harness_outputs`` in display order
+    [A,B,C,D,F,E]; per-row score prefers E's cross-checked value and
+    falls back to the harness's own ``self.confidence``.
+    """
     cr = ahs_spec.confidence_report
-    if not cr or not cr.per_harness:
+    cross_checked: dict[str, float] = (
+        dict(cr.per_harness) if cr and cr.per_harness else {}
+    )
+    outputs = harness_outputs or {}
+    # Display any harness that either ran OR was scored by E.
+    visible = set(cross_checked) | set(outputs)
+    if not visible:
         return
 
     from agenthatch.skill.spec import HARNESS_LABELS
@@ -261,11 +289,23 @@ def _render_confidence(ahs_spec: Any) -> None:
     )
 
     lines: list[Text] = []
-    for key in ["A", "B", "C", "D", "E", "F"]:
-        if key not in cr.per_harness:
+    # v1.0.1 (R4-V5): Use display order [A,B,C,D,F,E] to match the
+    # Hatch Summary table and Phase 2 Live panel.  E (cross-check
+    # harness) is shown last because it depends on the other harnesses'
+    # outputs; showing it before F broke visual consistency between
+    # the Confidence panel and the adjacent Summary table.
+    for key in ["A", "B", "C", "D", "F", "E"]:
+        if key not in cross_checked and key not in outputs:
             continue
         name = HARNESS_LABELS.get(key, key)
-        score = cr.per_harness[key]
+        # v1.0.1 (R4-V14): Prefer E's cross-checked score; fall back
+        # to the harness's self-eval (e.g. for E itself, which isn't
+        # in its own cross-check report).
+        if key in cross_checked:
+            score = cross_checked[key]
+        else:
+            h = outputs[key]
+            score = h.confidence
         filled = max(1, int(score * BAR_WIDTH))
 
         line = Text()
@@ -323,9 +363,26 @@ def _render_summary(
     agent_output_dir: Path | None,
     dry_run: bool,
     no_generate: bool,
+    ahs_spec: Any = None,
 ) -> None:
-    """Render final summary table with harness confidence and output info."""
+    """Render final summary table with harness confidence and output info.
+
+    v1.0.0: Confidence now sourced from ``confidence_report.per_harness``
+    (Harness E's cross-checked evaluation) with fallback to the
+    harness's own ``self.confidence`` when E's report is missing or
+    lacks the per-harness entry.  Previously this table read the
+    per-harness self-evaluation while the Confidence panel above it
+    read E's cross-checked numbers — the two disagreed on the same
+    column header ("Confidence"), which was confusing.
+    """
     from agenthatch.skill.spec import HARNESS_LABELS
+
+    # v1.0.0: Prefer E's cross-checked confidence_report over self-eval.
+    cross_checked: dict[str, float] = {}
+    if ahs_spec is not None:
+        cr = getattr(ahs_spec, "confidence_report", None)
+        if cr is not None and getattr(cr, "per_harness", None):
+            cross_checked = dict(cr.per_harness)
 
     table = Table(title="Hatch Summary", border_style="cyan")
     table.add_column("Harness", style="accent", justify="center")
@@ -334,12 +391,29 @@ def _render_summary(
     table.add_column("Self-Check", justify="center")
 
     for key in ["A", "B", "C", "D", "F", "E"]:
-        if key not in harness_outputs:
+        # v1.0.1 (R4-V14): Show any harness that either ran (in
+        # harness_outputs) or was scored by E (in cross_checked).
+        # Previously this iterated only harness_outputs, so a skipped
+        # harness that E still scored (e.g. D for pure_instruction
+        # skills) was hidden — the row appeared in the Confidence
+        # panel above but vanished here, an obvious inconsistency.
+        in_outputs = key in harness_outputs
+        in_cross = key in cross_checked
+        if not in_outputs and not in_cross:
             continue
-        h = harness_outputs[key]
         label = HARNESS_LABELS.get(key, key)
-        conf = f"{h.confidence:.2f}"
-        check = "[ok]✓[/ok]" if h.self_check_passed else "[error]✗[/error]"
+        # E's cross-checked score wins; fallback to self-eval.
+        if in_cross:
+            score = cross_checked[key]
+        else:
+            score = harness_outputs[key].confidence
+        conf = f"{score:.2f}"
+        if in_outputs:
+            h = harness_outputs[key]
+            check = "[ok]✓[/ok]" if h.self_check_passed else "[error]✗[/error]"
+        else:
+            # Skipped per tier_map but E still produced a score.
+            check = "[dim]—[/dim]"
         table.add_row(key, label, conf, check)
 
     if archetype:
@@ -397,6 +471,17 @@ def hatch_command(
             autocompletion=_complete_skill_name,
         ),
     ],
+    knowledge_base_path: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Optional path to a knowledge base directory or file. "
+                "When provided, enables RAG-native agent (v1.0.0): "
+                "agenthatch infers usage via LLM if SKILL.md doesn't "
+                "explicitly mention the KB."
+            ),
+        ),
+    ] = None,
     output: Annotated[
         str | None,
         typer.Option(
@@ -462,12 +547,19 @@ def hatch_command(
       Phase 2: 6 AgentHarnesses inference (LLM-driven)
       Phase 3: Agent generation via Jinja2 templates (default on)
 
+    v1.0.0: Optional second positional ``knowledge_base_path`` enables
+      RAG-native agent.  When provided, a Phase 2.5 KB pipeline
+      (B2 detect → B3 infer → B4 generate) runs and the resulting
+      ``KnowledgeBaseConfig`` is attached to AHSSPEC, triggering the
+      ``KNOWLEDGE_BASE`` archetype.
+
     Examples:
         agenthatch hatch ~/skills/weather-reporter/
         agenthatch hatch ./SKILL.md --trace
         agenthatch hatch weather-reporter
         agenthatch hatch . --no-generate        # review mode: yaml only
         agenthatch hatch . --dry-run            # preview without writing
+        agenthatch hatch ~/skills/aetheria-guide ~/kb/aetheria  # v1.0.0: + KB
     """
     from agenthatch.config import Config
     from agenthatch.skill.builder import build_ahspec
@@ -594,12 +686,26 @@ def hatch_command(
         for key in harness_order:
             label = HARNESS_LABELS.get(key, key)
             if key in _state["completed"]:
+                # v1.0.1 (R4-V10): Use single leading space (not 5) so
+                # the ✓ aligns with the Spinner's first column.
                 renderables.append(
-                    Text(f"     ✓ Harness {key}: {label}", style="ok")
+                    Text(f" ✓ Harness {key}: {label}", style="ok")
                 )
             elif key == _state["current"]:
+                # v1.0.1 (R4-V10): Add leading space so the spinner's
+                # first cell aligns with the ✓ above (otherwise the
+                # spinner column jumps from col 1 to col 6 when a
+                # harness completes).
                 renderables.append(
-                    Spinner("dots", text=f"Harness {key}: {label}...")
+                    Spinner("dots", text=f" Harness {key}: {label}...")
+                )
+            else:
+                # v1.0.1 (R4-V11): Render pending harnesses so the user
+                # sees the full queue (✓ done / spinner current / ○ pending)
+                # instead of a list that grows one row at a time.  Helps
+                # estimate remaining work when a harness takes long.
+                renderables.append(
+                    Text(f" [dim]○ Harness {key}: {label}[/dim]")
                 )
         return Group(*renderables)
 
@@ -637,6 +743,64 @@ def hatch_command(
     if trace:
         _render_harness_traces(harness_outputs)
 
+    # ── 7.3. Phase 2.5: KB Inference Pipeline (v1.0.0) ───────────────
+    # B2 (detect) → B3 (infer) → B4 (generate) runs only when the user
+    # passes a knowledge base path via ``agenthatch <skill> <kb>``.
+    # The resulting KnowledgeBaseConfig is attached to AHSSPEC *before*
+    # classify_skill() so that Rule 0 in archetypes.py classifies the
+    # skill as KNOWLEDGE_BASE.
+    kb_config: Any = None
+    if knowledge_base_path:
+        from pathlib import Path as _Path
+
+        kb_resolved = _Path(knowledge_base_path).expanduser().resolve()
+        if not kb_resolved.exists():
+            console.print(
+                f"[yellow]⚠ Knowledge base path not found: {kb_resolved}[/yellow]"
+            )
+            console.print("[dim]Continuing without KB integration.[/dim]")
+        else:
+            console.print(
+                "[accent]▸ Phase 2.5/3[/accent]  KB Inference "
+                "[dim](B2 detect → B3 infer → B4 generate)[/dim]"
+            )
+            kb_chat_fn = None
+            if not no_ai_tools:
+                kb_chat_fn = _create_ai_chat_fn(config)
+            try:
+                from agenthatch.skill.kb_pipeline import run_kb_pipeline
+
+                # v1.0.1 (R4-V1): Wrap the KB inference pipeline in a
+                # status spinner.  B2 is fast (deterministic regex) but
+                # B3/B4 each issue an LLM call (up to 90s timeout each
+                # per R3-M14) — without feedback the user sees a 30-180s
+                # silent window that looks like a hang.
+                with console.status(
+                    "[accent]Inferring KB usage strategy[/accent]",
+                    spinner="dots",
+                ):
+                    kb_config = run_kb_pipeline(
+                        raw_body=context.body,
+                        frontmatter=context.frontmatter,
+                        kb_path=kb_resolved,
+                        skill_id=ahs_spec.identity.id,
+                        skill_summary=ahs_spec.intent.summary,
+                        chat_fn=kb_chat_fn,
+                    )
+                ahs_spec.knowledge_base = kb_config
+                trigger_count = len(kb_config.usage_strategy.when_to_retrieve)
+                prompt_chars = len(kb_config.prompt_artifact.system_prompt_section)
+                console.print(
+                    f"[ok]✓[/ok]  KB pipeline complete "
+                    f"({kb_config.total_documents} sources, "
+                    f"{trigger_count} triggers, "
+                    f"{prompt_chars} chars in prompt)"
+                )
+            except Exception as e:
+                logger.warning("KB pipeline failed: %s", e)
+                console.print(f"[yellow]⚠ KB pipeline failed: {e}[/yellow]")
+                console.print("[dim]Continuing without KB integration.[/dim]")
+
     # ── 7.5. Phase 2.5: Skill Classification (v0.7) ─────────────────
     from agenthatch_core.bricks.archetypes import classify_skill
 
@@ -649,7 +813,7 @@ def hatch_command(
     )
 
     # ── 8. Confidence panel ─────────────────────────────────────────────
-    _render_confidence(ahs_spec)
+    _render_confidence(ahs_spec, harness_outputs)
 
     # ── 9. Dry-run YAML/JSON output ─────────────────────────────────────
     # v0.9.17: When --report is set, the HatchReport (terminal or JSON)
@@ -714,6 +878,7 @@ def hatch_command(
             agent_output_dir=None,
             dry_run=False,
             no_generate=True,
+            ahs_spec=ahs_spec,
         )
         # v0.9.17: Emit report even when generation is skipped.
         if report:
@@ -777,20 +942,31 @@ def hatch_command(
                             _auto_install_dependency(console, pkg)
                 if not result.readiness.mcporter_installed and result._mcp_skill:
                     _auto_install_dependency(console, "mcporter")
-                # v0.9.17: Readiness text report is now part of HatchReport.
-                # Only print standalone if --report is NOT set (legacy behavior).
-                if not report and result.report:
+                # v1.0.0: Readiness text report ("HATCH REPORT: ...") is
+                # only printed when the user explicitly passes --report.
+                # Previously this was gated on ``not report``, which was
+                # backwards — the report showed up by default and was
+                # suppressed when --report was set, contradicting the
+                # --help text and the HatchReport block below.
+                if report and result.report:
                     console.print(result.report)
-            elif not report and result.report:
+            elif report and result.report:
                 console.print(result.report)
         except Exception as e:
             logger.warning("Readiness phase skipped: %s", e)
 
     # ── 13. Phase 3: Agent Generation ────────────────────────────────
+    # v1.0.0: Always print the Phase 3/3 header so the three-phase
+    # progress narrative (1/3 → 2/3 → 3/3) is consistent.  Previously
+    # the header only printed for --dry-run, leaving real hatches
+    # without a Phase 3 marker between "5 harnesses completed" and
+    # "N files generated" — a regression that broke the visual flow.
     if dry_run:
         console.print(
             "[accent]▸ Phase 3/3[/accent]  Agent Generation  [dim](dry-run)[/dim]"
         )
+    else:
+        console.print("[accent]▸ Phase 3/3[/accent]  Agent Generation")
 
     # v0.9: Create AI chat function for tool implementation generation
     # v0.9.17: Wrap to capture Phase 3 token usage for the HatchReport.
@@ -875,6 +1051,7 @@ def hatch_command(
         agent_output_dir=agent_output_dir if not dry_run else None,
         dry_run=dry_run,
         no_generate=False,
+        ahs_spec=ahs_spec,
     )
 
     # ── 15. Hatch Report (v0.9.17) ──────────────────────────────────────
