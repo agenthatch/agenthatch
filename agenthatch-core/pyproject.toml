@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch-core"
-version = "1.0.1"
+version = "1.0.2"
 description = "agenthatch Core — lightweight AI Agent runtime base"
 readme = "README.md"
 license-files = ["LICENSE"]

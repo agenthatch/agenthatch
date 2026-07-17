@@ -161,11 +161,18 @@ class KBChunker:
                     current_parts = [overlap_text, para_text] if overlap_text else [para_text]
                     current_size = sum(len(p) for p in current_parts) + 2 * (len(current_parts) - 1)
                 else:
-                    # Chunk too small to flush — keep accumulating.
+                    # v1.0.1: Chunk too small to flush as a standalone
+                    # chunk — append the new paragraph and keep
+                    # accumulating so we don't lose content.  Previously
+                    # this branch reset current_parts to
+                    # ``[overlap_text, para_text]``, which silently dropped
+                    # everything accumulated before the overlap.  The next
+                    # iteration will flush once the buffer grows past
+                    # ``chunk_size`` (and at that point the chunk_content
+                    # will be large enough to satisfy min_chunk_size).
                     # char_offset is not advanced.
-                    overlap_text = self._get_overlap(current_parts)
-                    current_parts = [overlap_text, para_text] if overlap_text else [para_text]
-                    current_size = sum(len(p) for p in current_parts) + 2 * (len(current_parts) - 1)
+                    current_parts.append(para_text)
+                    current_size += para_len + 2
             else:
                 current_parts.append(para_text)
                 current_size += para_len + 2  # +2 for the join

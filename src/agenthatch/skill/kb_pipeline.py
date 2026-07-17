@@ -10,7 +10,7 @@ Stages:
      Returns ``KBDetectorResult`` with evidence.
   B3 ``infer_kb_usage()`` — LLM-driven inference (temp=0.3) of *when*
      and *how* the agent should retrieve from the KB.  Only runs when
-     B2 reports no explicit mention — this is the "补救" path for
+     B2 reports no explicit mention — this is the "fallback" path for
      skills that don't document their KB usage.
   B4 ``generate_kb_prompt()`` — LLM-driven generation (temp=0.2) of
      the system-prompt section + ``retrieve`` tool description that
@@ -561,13 +561,18 @@ three pieces of text that will be injected into the runtime agent:
        asks about topic X, answer ONLY about X, even if the conversation
        history contains retrieved chunks about other topics;
    (e) your answer must contain ONLY the substantive answer to the
-       user's question — never append a meta-summary or recap like
-       "已回答…", "完整解答了…", "用户的请求…已在前一轮完整回答",
-       "无剩余步骤待执行", or any sentence that describes what you
-       just did.  The runtime loop returns your answer text verbatim,
-       so any meta-commentary will be shown to the user as redundant
-       trailing text.  If you need to call retrieve, do so silently —
-       do NOT narrate "先检索…" or "我需要查阅…".
+       user's question — never append a meta-summary or recap, and
+       never narrate retrieval.  Forbidden patterns include:
+         - Chinese: "已回答…", "完整解答了…", "用户的请求…已在前一轮
+           完整回答", "无剩余步骤待执行", "先检索…", "我需要查阅…".
+         - English: "The request has been fully addressed",
+           "I have answered the question above", "No remaining steps",
+           "Task complete", "Let me search the knowledge base",
+           "I'll retrieve the relevant information first."
+       Any sentence that describes what you just did or are about to
+       do violates this rule.  The runtime loop returns your answer
+       text verbatim, so meta-commentary becomes redundant trailing
+       text the user has to read past.
 
 2. ``retrieve_tool_description`` — A 1-3 sentence description of the
    ``retrieve`` tool for the LLM's tool-use prompt.  Must mention
@@ -676,22 +681,35 @@ def generate_kb_prompt(
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def discover_kb_files(kb_path: Path, include_patterns: list[str] | None = None) -> list[Path]:
+def discover_kb_files(
+    kb_path: Path,
+    include_patterns: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
+) -> list[Path]:
     """Recursively discover KB source files matching include patterns.
 
     Args:
         kb_path: Directory or single file to scan.
         include_patterns: Glob patterns (default: *.md, *.txt, *.rst, *.markdown).
+        exclude_patterns: Glob patterns to exclude (matched against the
+            path relative to ``kb_path`` and the basename).  Applied
+            BEFORE returning so excluded files never reach B3/B4 LLM
+            context (v1.0.1: previously excluded file names were still
+            sent to the LLM, leaking their existence even though they
+            were skipped at index-build time).
 
     Returns:
         Sorted list of file Paths.  Empty if path doesn't exist.
     """
     patterns = include_patterns or list(_DEFAULT_INCLUDE_PATTERNS)
+    excludes = exclude_patterns or []
     if not kb_path.exists():
         logger.warning("KB path does not exist: %s", kb_path)
         return []
 
     if kb_path.is_file():
+        # Single-file mode: skip exclude check (user explicitly passed
+        # this file as the KB target).
         return [kb_path]
 
     files: list[Path] = []
@@ -701,10 +719,41 @@ def discover_kb_files(kb_path: Path, include_patterns: list[str] | None = None) 
     seen: set[Path] = set()
     unique: list[Path] = []
     for f in sorted(files):
-        if f not in seen:
-            seen.add(f)
-            unique.append(f)
+        if f in seen:
+            continue
+        seen.add(f)
+        # v1.0.1: Apply exclude_patterns here (not just in engine.py's
+        # index builder) so excluded files don't leak into B3/B4 LLM
+        # context.  Match logic mirrors engine._matches_pattern: both
+        # the relative path and the basename are tried, so users can
+        # write ``private/*`` (path match) or ``*.secret`` (basename).
+        if excludes:
+            try:
+                rel = f.relative_to(kb_path)
+                rel_str = str(rel)
+            except ValueError:
+                rel_str = f.name
+            if _matches_exclude_pattern(rel_str, excludes):
+                continue
+        unique.append(f)
     return unique
+
+
+def _matches_exclude_pattern(path: str, patterns: list[str]) -> bool:
+    """Match ``path`` against any of the glob-style ``patterns``.
+
+    Mirrors :func:`agenthatch.generate.engine._matches_pattern` so
+    include/exclude semantics stay consistent between discovery and
+    index build.  Tries both the full relative path and the basename
+    so users can write either ``draft/*`` (path match) or ``*.tmp``
+    (basename match).
+    """
+    import fnmatch
+    from os.path import basename
+    return any(
+        fnmatch.fnmatch(path, p) or fnmatch.fnmatch(basename(path), p)
+        for p in patterns
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -798,8 +847,14 @@ def run_kb_pipeline(
     )
 
     # v1.0.1 (R2b-M22): Pass source's include_patterns to discover_kb_files.
+    # v1.0.1: Also pass exclude_patterns so excluded files never reach
+    # B3/B4 LLM context.  Previously discover_kb_files ignored excludes,
+    # leaking file names (e.g. ``private/secret.md``) to the LLM even
+    # though engine.py skipped them at index-build time.
     kb_files = discover_kb_files(
-        resolved, include_patterns=include_patterns
+        resolved,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
     )
     kb_file_names = [f.name for f in kb_files]
     logger.info(
