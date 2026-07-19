@@ -554,7 +554,7 @@ class KnowledgeBaseConfig(BaseModel):
     # "never blocks generation" contract.  Catch it here at Phase 2.5
     # so the user sees a clear frontmatter error instead.
     @model_validator(mode="after")
-    def _validate_chunk_overlap_lt_size(self) -> "KnowledgeBaseConfig":
+    def _validate_chunk_overlap_lt_size(self) -> KnowledgeBaseConfig:
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError(
                 f"chunk_overlap ({self.chunk_overlap}) must be < "
