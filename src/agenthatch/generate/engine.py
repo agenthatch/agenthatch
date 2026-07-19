@@ -326,7 +326,27 @@ class GenerateEngine:
 
         chunk_size = int(kb_vars.get("chunk_size", 800))
         chunk_overlap = int(kb_vars.get("chunk_overlap", 100))
-        chunker = KBChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        # v1.0.1: ``KBChunker.__init__`` raises ``ValueError`` for
+        # invalid configs (e.g. ``chunk_overlap >= chunk_size``).
+        # The spec validator (spec.py ``_validate_chunk_overlap_lt_size``)
+        # catches this at Phase 2.5, but engine.py is also called from
+        # paths that bypass spec validation (tests, programmatic use,
+        # AHSSPEC round-trips from disk).  Catch here too so the
+        # documented "never blocks generation — returns zeros on any
+        # failure" contract holds even when the spec validator is
+        # bypassed.  Previously this construction sat between the
+        # ImportError try (line 314) and the DB Exception try (line
+        # 424), completely unprotected — a ValueError here propagated
+        # out and crashed hatch with a raw traceback.
+        try:
+            chunker = KBChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        except ValueError as e:
+            logger.warning(
+                "KB index build skipped (invalid chunker config: %s) — "
+                "check chunk_size/chunk_overlap in frontmatter",
+                e,
+            )
+            return {"total_chunks": 0, "index_size_bytes": 0}
 
         # Collect chunks from all sources
         # v1.0.1 (R2-C1): Pass a path-unique source_label (relative path

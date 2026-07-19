@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ─── Phase 1 Data Structures (non-middleware) ──────────────────────────
 
@@ -545,6 +545,24 @@ class KnowledgeBaseConfig(BaseModel):
                 f"check frontmatter knowledge_base.retrieval_alpha"
             )
         return v
+
+    # v1.0.1: Cross-field validation — ``chunk_overlap >= chunk_size``
+    # makes no sense (overlap can't be the whole chunk or larger) and
+    # ``KBChunker.__init__`` raises ``ValueError`` for it.  Previously
+    # this slipped past the per-field validators above and crashed hatch
+    # mid-build with a raw traceback, violating _build_knowledge_index's
+    # "never blocks generation" contract.  Catch it here at Phase 2.5
+    # so the user sees a clear frontmatter error instead.
+    @model_validator(mode="after")
+    def _validate_chunk_overlap_lt_size(self) -> "KnowledgeBaseConfig":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError(
+                f"chunk_overlap ({self.chunk_overlap}) must be < "
+                f"chunk_size ({self.chunk_size}) — overlap >= size "
+                f"produces oversized chunks.  Check frontmatter "
+                f"knowledge_base.chunk_overlap / chunk_size."
+            )
+        return self
 
 
 class AHSSpec(BaseModel):
