@@ -578,21 +578,25 @@ class KnowledgeStore:
         Returns:
             Ranked list of KBSearchResult (highest score first).
         """
-        # v1.0.1 (R3-M5): Clamp negative/zero ``top_k`` to 1.  A
-        # negative ``top_k`` would previously produce ``top_k * 2 = -2``
-        # passed as ``LIMIT ?`` — SQLite treats a negative LIMIT as
-        # "no limit", returning every matching row while the final
-        # ``fused[:top_k]`` slice silently dropped everything (empty
-        # list).  Clamping at the entry point keeps the contract
-        # "always returns at most top_k results" intact and surfaces
-        # the bad input via a warning.
+        # v1.0.1 (Bug #8): Return ``[]`` immediately for non-positive
+        # ``top_k``.  Previously this branch clamped ``top_k`` to 1,
+        # which violates the literal contract "at most top_k results"
+        # (returning 1 > 0).  The old comment self-justified with two
+        # contradictory claims — "preserves the contract" (false: 1
+        # exceeds 0) and "surfaces user intent of 'at least one'"
+        # (false: ``top_k=0`` explicitly asks for none).  A user
+        # passing ``top_k=0`` is asking for empty results — return
+        # exactly that, with a warning so the call is traceable.
+        # Negative ``top_k`` previously also hit this clamp; it now
+        # returns ``[]`` too (same justification, plus SQLite would
+        # treat ``LIMIT -1`` as "no limit" without the early return).
         if top_k <= 0:
             logger.warning(
-                "KnowledgeStore.search: top_k=%d clamped to 1 (negative "
-                "or zero top_k would return empty results).",
+                "KnowledgeStore.search: top_k=%d returns [] (non-positive "
+                "top_k means user explicitly asked for zero results).",
                 top_k,
             )
-            top_k = 1
+            return []
 
         if not self._index_built:
             self.load()

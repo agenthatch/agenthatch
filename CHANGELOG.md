@@ -4,6 +4,46 @@ All notable changes to agenthatch will be documented in this file.
 
 ---
 
+## [v1.0.1] — 2026-07-16
+
+### Fixed
+
+- **R4-V23: `chat_stream()` 裸 `yield from` 丢弃子 generator 返回值** — 生成的 agent 在 `chat_stream` 中使用 `yield from super().chat_stream(user_input)`，Python 会把子 generator 的 `return` value 丢弃（`yield from` 表达式的值为 `None`，除非显式写 `return (yield from ...)`）。导致 `ConversationLoop.stream()` 老老实实 return 的 `final_text`（如 466 字符的完整答案）在调用方拿到的却是空字符串。文本已流式输出到终端，但编程接口返回空。修复为 `return (yield from super().chat_stream(user_input))`，同步修复 `agent.py.j2` 模板防止复发。
+- **R4-V22: `chat_stream()` 路径 `kb_max_text` typo** — `agent.py` 中 `chat_stream()` 路径的 `kb_max_text = 1`，注释写着 "Same KB auto-continuation cap as chat()"，但 `chat()` 路径实际是 `0`。这一个数字让流式路径下 `self._max_consecutive_text_only == 0` 永远不成立，`_strip_trailing_meta_narration` 从未被调用，meta-narration（"前已详答,此不赘述"、"前问已答毕"）泄漏到用户。修复为 `0`，与 `chat()` 路径一致。
+- **R4-V22: `_strip_trailing_meta_narration` 旧策略误删正文** — 旧策略"在最早匹配点截断到末尾"会删除 meta-narration 之后的全部正文（如结尾的"阁下若欲探询..."邀请句），触发 40% 安全保护，反而让 meta-narration 泄漏通过。重写为"删除包含匹配的整个句子"策略：找到所有匹配，扩展到完整句子边界（。！？\n），合并重叠区间，只删这些句子。安全阈值从 40% 调整为 50%。
+- **R4-V22: meta-narration 模式列表扩展** — 添加"前问已答"、"已答毕"、"前文已..."、"上文已..."、"已详答"、"已作答"等 LLM 变体；`前已` 模式中 `详细` 改为 `详细?` 使"前已答"也能匹配。
+- **R4-V21: meta-narration 残留在 text stream** — KB agent 在调用 `task_complete` 之前，LLM 常加几句"已完整解答...无剩余步骤"的 meta-commentary，尽管 B4 (e) 明确禁止。引入 `_strip_trailing_meta_narration()` 函数，在最后 600 字符中匹配 meta-narration 模式并删除整句。
+- **R4-V20: `task_complete` 重复 yield meta-summary** — `task_complete` 被调用时，若已流式输出过真实答案（`has_yielded_text=True`），仍会再次 yield `summary` 参数内容（通常是"已回答..."的 meta-summary），导致用户看到答案后又看到一句冗余总结。修复为：`has_yielded_text=True` 时用 `accumulated_text` 作为 `final_text`，不再 yield summary。
+- **R4-V16: KB 包名解析走 MRO 导致 import 失败** — `type(self).__module__` 在某些加载路径下走 MRO 匹配到基类 `agenthatch_core.agent`（其 `__package__` 是 "agenthatch_core"），导致 `importlib.import_module(f"{pkg}.knowledge_base")` 报 `No module named 'agenthatch_core.knowledge_base'`。修复为：直接从 `__module__` 派生包名，并在 `run.py` 中于 `exec_module` 前将 agent module 注册到 `sys.modules[spec.name]`。
+
+### Changed
+
+- **KB agent auto-continuation 抑制** — 引入 `max_consecutive_text_only` 和 `nudge_grace` 参数（R4-V17），KB agent 传 `0` 让循环在首次 text-only 响应后即返回，避免 auto-continuation 产生重复答案和 meta-summary。
+
+---
+
+## [v1.0.0] — 2026-07-14
+
+### Added
+
+- **KnowledgeBaseBrick（RAG 检索）** — agent 工程意义上的工程知识库，区别于 skill 内部的 `references/` 共生知识。用户通过 CLI 第二参数指定 KB 路径，孵化期构建向量索引，运行时通过 `retrieve` 工具检索。
+  - **Phase B（编译期集成）**：KB inference pipeline（B2 检测 → B3 用法策略 → B4 prompt 生成）。`_build_knowledge_index()` 在 `_prepare_output_dir` 之后、模板渲染之前运行。
+  - **Phase C（运行期装配）**：`RetrieveTool` 注册到 CapBus；`AHCoreAgent` KB assembly block；`ContextManager` 注入 KB system prompt。
+  - **`knowledge_base.py.j2` 模板**：生成 runtime `retrieve()` 函数，含 LLM-inferred 的 `WHEN_TO_RETRIEVE`、`QUERY_TEMPLATES`、`SYSTEM_PROMPT_SECTION`。
+  - **SQLite FTS5 索引 + BM25 评分**：FTS5 索引将 `-` 替换为空格避免 NOT 操作符解析；BM25 评分用 `abs(rank)/(1+abs(rank))` 优先相关文档。
+- **HatchReport confidence 来源统一** — Hatch Summary 的 confidence 值改用 E harness cross-evaluation 分数，self-assessment 作为 fallback，修复了 Confidence panel（1.00）与 Hatch Summary（0.50）不一致的问题。
+- **Phase 3/3 标题** — 正常（非 dry-run）hatch 流程在控制台输出 `▸ Phase 3/3 Agent Generation` 标题。
+
+### Fixed
+
+- **`--force` 误删 KB 索引** — `--force` flag 在覆盖输出目录时误删 KB 索引文件。修复为 `--force` 不再清除 KB 索引。
+- **SQLite 跨线程错误** — SQLite 连接改用 thread-local storage，避免跨线程访问错误。
+- **BM25 评分反转** — BM25 评分未取绝对值，负 rank 导致评分异常。修复为 `abs(rank)/(1+abs(rank))`。
+- **FTS5 hyphen 解析** — FTS5 将 hyphen 解析为 NOT 操作符导致查询失败。修复为索引时将 `-` 替换为空格。
+- **B2 detector 误报** — B2 detector 通过目录名匹配误判非 KB skill 为 KB skill。修复为只识别 KB 特定词汇，不匹配目录名。
+
+---
+
 ## [v0.9.23] — 2026-07-04
 
 ### Roadmap

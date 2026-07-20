@@ -1043,6 +1043,37 @@ def hatch_command(
     if not dry_run:
         _update_skillhouse_agent_output(ahs_spec.identity.id, agent_output_dir, config)
 
+        # v1.0.1 (Bug #6): Re-write skill_dir/agenthatch.yaml so it
+        # reflects the post-Phase 3.5 KB stats mutations.  Step 11 at
+        # line 843 wrote this file BEFORE generate() ran; Phase 3.5
+        # (inside generate) then mutated
+        # ``ahs_spec.knowledge_base.{total_chunks, index_size_bytes}``
+        # in-place after building the KB index, but those mutations
+        # only reached ``agent_output_dir/agenthatch.yaml`` (via
+        # ``engine._write_ahspec_copy`` at engine.py:1427).  The
+        # skill_dir copy stayed stale (``total_chunks: 0``,
+        # ``index_size_bytes: 0``), contradicting the runtime
+        # constants in ``knowledge_base.py`` (``TOTAL_CHUNKS = 45``).
+        # Re-dump here so both YAMLs agree — only when KB is enabled,
+        # since non-KB agents have nothing to update.
+        if ahs_spec.knowledge_base is not None:
+            yaml_output_path = _resolve_yaml_path(skill_dir, output)
+            try:
+                fresh_yaml = yaml.dump(
+                    ahs_spec.model_dump(
+                        exclude={"harness_traces", "confidence_report"}
+                    ),
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+                yaml_output_path.write_text(fresh_yaml, encoding="utf-8")
+            except Exception as e:
+                logger.warning(
+                    "Failed to refresh %s with KB stats: %s",
+                    yaml_output_path, e,
+                )
+
     # ── 14. Final summary ───────────────────────────────────────────────
     _render_summary(
         harness_outputs=harness_outputs,

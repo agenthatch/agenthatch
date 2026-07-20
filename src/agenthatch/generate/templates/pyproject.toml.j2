@@ -10,7 +10,37 @@ requires-python = ">=3.11"
 dependencies = [
     "typer>=0.15.0",
     "rich>=13.0",
+{% if kb_enabled %}
+    # v1.0.1 (Bug #7): The generated ``knowledge_base.py`` imports
+    # ``agenthatch_core.bricks.knowledge.store.KnowledgeStore`` at
+    # runtime.  Without this dependency declared, ``pip install -e .``
+    # succeeds but ``retrieve()`` silently returns ``[]`` for every
+    # query (the ImportError is swallowed by ``_get_store()``'s
+    # exception handler).  Adding ``agenthatch-core`` here ensures
+    # the import resolves.
+    "agenthatch-core>=1.0.2",
+    # v1.0.1 (Bug #7): Embedding fusion (BM25 + cosine similarity)
+    # requires ``sentence-transformers``.  KnowledgeStore degrades
+    # to BM25-only if this isn't installed, but for a KB-native agent
+    # the user almost always wants the full hybrid retrieval — list
+    # it as a hard dependency so ``pip install`` ships a working
+    # retrieval stack out of the box.
+    "sentence-transformers>=2.2",
+{% endif %}
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/{{ package_name }}"]
+{% if kb_enabled %}
+# v1.0.1 (Bug #4): Force-include the ``knowledge/`` directory so
+# ``pip install`` ships the pre-built SQLite index
+# (``kb_index.db``).  Without this, only ``src/{{ package_name }}/``
+# is packaged and the runtime ``_KB_INDEX_DIR`` resolves to a
+# non-existent path inside site-packages — ``retrieve()`` returns
+# ``[]`` for every query, with a warning that's easy to miss.
+# ``force-include`` copies the directory verbatim alongside the
+# Python package; the runtime path resolver
+# (``Path(__file__).resolve().parent.parent.parent / "knowledge"``)
+# already points there.
+force-include = { "knowledge" = "knowledge" }
+{% endif %}

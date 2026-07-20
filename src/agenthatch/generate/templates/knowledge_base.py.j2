@@ -25,7 +25,47 @@ logger = logging.getLogger(__name__)
 
 # ── Path to the pre-built index ─────────────────────────────────────────
 # Generated at hatch time into {agent_dir}/knowledge/kb_index.db
-_KB_INDEX_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge"
+#
+# v1.0.1 (Bug #4): Try multiple candidate locations so the agent works
+# in BOTH development layout and pip-installed layout.
+#   - Dev layout:       <agent_dir>/src/<pkg>/knowledge_base.py
+#                       → 2 levels up from <pkg>/ = <agent_dir>/
+#                       (knowledge/ lives here)
+#   - Non-editable pip: <site-packages>/<pkg>/knowledge_base.py
+#                       → 1 level up from <pkg>/ = <site-packages>/
+#                       (knowledge/ ships here via pyproject.toml
+#                       ``force-include``)
+#   - Editable pip:     resolves __file__ to source path, same as dev
+#
+# v1.0.1 (Bug #4 r2): The previous fix had an off-by-one error — it
+# tried ``here.parent.parent / "knowledge"`` (2 levels up) for the
+# pip layout, but ``force-include`` puts ``knowledge/`` at the wheel
+# root which unpacks to ``<site-packages>/knowledge/`` (1 level up
+# from ``<pkg>/``).  Editable installs accidentally worked because
+# 2-levels-up from ``<agent_dir>/src/<pkg>/`` happens to be
+# ``<agent_dir>/`` (where ``knowledge/`` lives in dev layout) —
+# but a true ``pip install <dir>`` (non-editable) failed because
+# 2-levels-up from ``<site-packages>/<pkg>/`` is ``<site-packages>'s
+# parent``, where ``knowledge/`` doesn't exist.
+# Fixed by trying BOTH 1-level-up (pip layout) and 2-levels-up
+# (dev/editable layout) as candidates.
+def _resolve_kb_index_dir() -> Path:
+    """Locate the pre-built KB index directory across dev / pip layouts."""
+    here = Path(__file__).resolve().parent  # <pkg>/
+    candidates = [
+        here.parent / "knowledge",  # non-editable pip layout (site-packages/knowledge/)
+        here.parent.parent / "knowledge",  # dev / editable layout (<agent_dir>/knowledge/)
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    # Fall back to the dev path so the missing-dir warning in
+    # ``_get_store()`` points at the layout the user is most likely
+    # trying to use (development checkout).
+    return candidates[-1]
+
+
+_KB_INDEX_DIR = _resolve_kb_index_dir()
 
 # ── LLM-inferred usage strategy (B3) ────────────────────────────────────
 WHEN_TO_RETRIEVE: list[str] = [
