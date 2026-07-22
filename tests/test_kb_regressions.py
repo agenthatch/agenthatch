@@ -7,6 +7,7 @@ Covers:
 - Bug #6: hatch.py refreshes skill_dir/agenthatch.yaml with post-Phase 3.5 KB stats
 - Bug #7: pyproject.toml.j2 includes agenthatch-core when kb_enabled
 - Bug #8: KnowledgeStore.search(top_k<=0) returns []
+- Bug #9: _fuse_results doesn't leak zero-score results when alpha=1.0 or 0.0
 """
 
 from __future__ import annotations
@@ -460,4 +461,215 @@ class TestBug4ResolverHandlesBothLayouts:
         assert resolved == pip_kb, (
             f"when both layouts exist, resolver should prefer pip-layout "
             f"({pip_kb}), got {resolved}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug #9: _fuse_results doesn't leak zero-score results at alpha extremes
+# ---------------------------------------------------------------------------
+
+class TestBug9FuseResultsNoLeakAtAlphaExtremes:
+    """Bug #9: Pure keyword / pure embedding mode must not leak the off-side.
+
+    When ``alpha=1.0`` (pure keyword), embedding-only documents used to
+    leak into the fused result list with score ``0.0`` — they took up
+    top-k slots that should have gone to genuine keyword matches
+    further down the ranking.  Symmetric bug for ``alpha=0.0`` (pure
+    embedding), where BM25-only docs leaked with score 0.
+
+    The fix: skip the embedding branch entirely when ``alpha >= 1.0``
+    and skip the BM25 branch entirely when ``alpha <= 0.0``.  This
+    matches user intent: choosing ``alpha=1.0`` means "I don't want
+    embedding contributing at all," not "I want embedding padded
+    with zero scores."
+    """
+
+    def _make_results(self) -> tuple[list[Any], list[Any]]:
+        """Build synthetic BM25 and embedding results with partial overlap.
+
+        - BM25: d1, d2, d3 (3 docs)
+        - Embedding: d1, d2, d3, d4, d5 (5 docs, 2 emb-only)
+        """
+        from agenthatch_core.bricks.knowledge.store import KBSearchResult
+
+        bm25 = [
+            KBSearchResult(doc_id="d1", content="bm25-1", score=0.9,
+                           metadata={"source": "s1"}, match_source="keyword"),
+            KBSearchResult(doc_id="d2", content="bm25-2", score=0.8,
+                           metadata={"source": "s2"}, match_source="keyword"),
+            KBSearchResult(doc_id="d3", content="bm25-3", score=0.7,
+                           metadata={"source": "s3"}, match_source="keyword"),
+        ]
+        emb = [
+            KBSearchResult(doc_id="d1", content="emb-1", score=0.6,
+                           metadata={"source": "s1"}, match_source="embedding"),
+            KBSearchResult(doc_id="d2", content="emb-2", score=0.5,
+                           metadata={"source": "s2"}, match_source="embedding"),
+            KBSearchResult(doc_id="d3", content="emb-3", score=0.4,
+                           metadata={"source": "s3"}, match_source="embedding"),
+            KBSearchResult(doc_id="d4", content="emb-only-4", score=0.3,
+                           metadata={"source": "s4"}, match_source="embedding"),
+            KBSearchResult(doc_id="d5", content="emb-only-5", score=0.2,
+                           metadata={"source": "s5"}, match_source="embedding"),
+        ]
+        return bm25, emb
+
+    def test_alpha_one_does_not_leak_embedding_only(self) -> None:
+        """alpha=1.0 must return only BM25 docs (no emb-only d4/d5)."""
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        bm25, emb = self._make_results()
+        fused = KnowledgeStore._fuse_results(bm25, emb, alpha=1.0)
+
+        doc_ids = {r.doc_id for r in fused}
+        assert "d4" not in doc_ids, (
+            f"alpha=1.0 must not leak emb-only d4 (score 0), got {doc_ids}"
+        )
+        assert "d5" not in doc_ids, (
+            f"alpha=1.0 must not leak emb-only d5 (score 0), got {doc_ids}"
+        )
+        # All returned docs should be from BM25.
+        for r in fused:
+            assert r.match_source == "keyword", (
+                f"alpha=1.0 result {r.doc_id} should be keyword-only, "
+                f"got match_source={r.match_source}"
+            )
+
+    def test_alpha_one_no_embedding_results_still_returns_bm25(self) -> None:
+        """alpha=1.0 with no emb results should fall back to BM25."""
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        bm25, _ = self._make_results()
+        fused = KnowledgeStore._fuse_results(bm25, [], alpha=1.0)
+        assert len(fused) == 3, f"expected 3 bm25 docs, got {len(fused)}"
+        for r in fused:
+            assert r.match_source == "keyword"
+
+    def test_alpha_one_empty_bm25_falls_back_to_embedding(self) -> None:
+        """alpha=1.0 with no BM25 results should still return embedding.
+
+        The pre-v1.0.4 code's "if not bm25_results" branch returned
+        embedding results as a fallback.  We preserve that behavior —
+        returning empty would be worse than returning the off-side.
+        """
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        _, emb = self._make_results()
+        fused = KnowledgeStore._fuse_results([], emb, alpha=1.0)
+        assert len(fused) == 5, (
+            f"alpha=1.0 with no bm25 should fall back to emb (5 docs), "
+            f"got {len(fused)}"
+        )
+
+    def test_alpha_zero_does_not_leak_bm25_only(self) -> None:
+        """alpha=0.0 must return only embedding docs (no bm25-only)."""
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        # Build BM25 with 2 bm25-only docs not in emb
+        from agenthatch_core.bricks.knowledge.store import KBSearchResult
+
+        bm25 = [
+            KBSearchResult(doc_id="d1", content="bm25-1", score=0.9,
+                           metadata={"source": "s1"}, match_source="keyword"),
+            KBSearchResult(doc_id="d2", content="bm25-2", score=0.8,
+                           metadata={"source": "s2"}, match_source="keyword"),
+            KBSearchResult(doc_id="d3", content="bm25-3", score=0.7,
+                           metadata={"source": "s3"}, match_source="keyword"),
+            KBSearchResult(doc_id="d6", content="bm25-only-6", score=0.6,
+                           metadata={"source": "s6"}, match_source="keyword"),
+            KBSearchResult(doc_id="d7", content="bm25-only-7", score=0.5,
+                           metadata={"source": "s7"}, match_source="keyword"),
+        ]
+        emb = [
+            KBSearchResult(doc_id="d1", content="emb-1", score=0.6,
+                           metadata={"source": "s1"}, match_source="embedding"),
+            KBSearchResult(doc_id="d2", content="emb-2", score=0.5,
+                           metadata={"source": "s2"}, match_source="embedding"),
+            KBSearchResult(doc_id="d3", content="emb-3", score=0.4,
+                           metadata={"source": "s3"}, match_source="embedding"),
+        ]
+        fused = KnowledgeStore._fuse_results(bm25, emb, alpha=0.0)
+
+        doc_ids = {r.doc_id for r in fused}
+        assert "d6" not in doc_ids, (
+            f"alpha=0.0 must not leak bm25-only d6 (score 0), got {doc_ids}"
+        )
+        assert "d7" not in doc_ids, (
+            f"alpha=0.0 must not leak bm25-only d7 (score 0), got {doc_ids}"
+        )
+        for r in fused:
+            assert r.match_source == "embedding", (
+                f"alpha=0.0 result {r.doc_id} should be embedding-only, "
+                f"got match_source={r.match_source}"
+            )
+
+    def test_alpha_zero_no_bm25_results_still_returns_embedding(self) -> None:
+        """alpha=0.0 with no BM25 results should return embedding."""
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        _, emb = self._make_results()
+        fused = KnowledgeStore._fuse_results([], emb, alpha=0.0)
+        assert len(fused) == 5, f"expected 5 emb docs, got {len(fused)}"
+        for r in fused:
+            assert r.match_source == "embedding"
+
+    def test_alpha_zero_empty_embedding_falls_back_to_bm25(self) -> None:
+        """alpha=0.0 with no emb results should still return BM25.
+
+        Symmetric to the alpha=1.0 fallback: returning empty would be
+        worse than returning the off-side when one side is unavailable.
+        """
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        bm25, _ = self._make_results()
+        fused = KnowledgeStore._fuse_results(bm25, [], alpha=0.0)
+        assert len(fused) == 3, (
+            f"alpha=0.0 with no emb should fall back to bm25 (3 docs), "
+            f"got {len(fused)}"
+        )
+
+    def test_hybrid_alpha_still_fuses_both_sides(self) -> None:
+        """alpha=0.5 (hybrid) should still include docs from both sides.
+
+        This is a regression guard — the Bug #9 fix must not break the
+        normal hybrid mode where both sides contribute.
+        """
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        bm25, emb = self._make_results()
+        fused = KnowledgeStore._fuse_results(bm25, emb, alpha=0.5)
+
+        doc_ids = {r.doc_id for r in fused}
+        # All 5 docs should be present (3 hybrid + 2 emb-only).
+        assert doc_ids == {"d1", "d2", "d3", "d4", "d5"}, (
+            f"alpha=0.5 should fuse both sides, got {doc_ids}"
+        )
+        # d1, d2, d3 are in both — should be "hybrid"
+        # d4, d5 are emb-only — should be "embedding"
+        match_sources = {r.doc_id: r.match_source for r in fused}
+        assert match_sources["d1"] == "hybrid"
+        assert match_sources["d2"] == "hybrid"
+        assert match_sources["d3"] == "hybrid"
+        assert match_sources["d4"] == "embedding"
+        assert match_sources["d5"] == "embedding"
+
+    def test_hybrid_alpha_emb_only_has_nonzero_score(self) -> None:
+        """alpha=0.5 emb-only docs should have non-zero score.
+
+        Before Bug #9 fix, emb-only docs at alpha=1.0 had score 0.
+        At alpha=0.5, they should have score ``0.5 * emb_score``.
+        """
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        bm25, emb = self._make_results()
+        fused = KnowledgeStore._fuse_results(bm25, emb, alpha=0.5)
+
+        by_id = {r.doc_id: r for r in fused}
+        # d4 is emb-only, score=0.3, alpha=0.5 → expected 0.15
+        assert by_id["d4"].score == 0.15, (
+            f"d4 expected 0.5*0.3=0.15, got {by_id['d4'].score}"
+        )
+        # d5 is emb-only, score=0.2, alpha=0.5 → expected 0.10
+        assert by_id["d5"].score == 0.10, (
+            f"d5 expected 0.5*0.2=0.10, got {by_id['d5'].score}"
         )

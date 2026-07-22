@@ -744,9 +744,58 @@ class KnowledgeStore:
         creates new KBSearchResult objects so callers can reuse the
         original lists (e.g. for logging or debugging) without
         seeing normalized scores.
+
+        v1.0.4 (Bug #9): Skip the embedding branch entirely when
+        ``alpha >= 1.0`` (pure keyword mode) and skip the BM25 branch
+        entirely when ``alpha <= 0.0`` (pure embedding mode).  The
+        previous code added the off-side results with score
+        ``(1-alpha)*r.score = 0`` (or ``alpha*norm = 0``), padding
+        the top-k list with zero-relevance noise.  A user explicitly
+        choosing ``alpha=1.0`` to disable embedding contribution
+        should not get embedding-only results back — even with score
+        0, they take up slots that should belong to genuine keyword
+        matches further down the ranking.  Symmetric reasoning for
+        ``alpha=0.0``.
         """
+        # Pure keyword mode — skip embedding branch entirely.
+        if alpha >= 1.0:
+            if not bm25_results:
+                # Both branches would be no-ops; preserve the
+                # pre-v1.0.4 fallback to "the non-empty side".
+                return sorted(emb_results, key=lambda r: r.score, reverse=True)
+            max_bm25 = max((r.score for r in bm25_results), default=1.0) or 1.0
+            fused: dict[str, KBSearchResult] = {
+                r.doc_id: KBSearchResult(
+                    doc_id=r.doc_id,
+                    content=r.content,
+                    score=r.score / max_bm25,
+                    metadata=r.metadata,
+                    match_source="keyword",
+                )
+                for r in bm25_results
+            }
+            return sorted(fused.values(), key=lambda r: r.score, reverse=True)
+
+        # Pure embedding mode — skip BM25 branch entirely.
+        if alpha <= 0.0:
+            if not emb_results:
+                return sorted(bm25_results, key=lambda r: r.score, reverse=True)
+            fused = {
+                r.doc_id: KBSearchResult(
+                    doc_id=r.doc_id,
+                    content=r.content,
+                    score=r.score,
+                    metadata=r.metadata,
+                    match_source="embedding",
+                )
+                for r in emb_results
+            }
+            return sorted(fused.values(), key=lambda r: r.score, reverse=True)
+
+        # Hybrid mode — both branches contribute.  (The original
+        # v1.0.0 implementation; unchanged.)
         if not emb_results:
-            # Keyword-only mode
+            # Keyword-only fallback (no embeddings available)
             return sorted(bm25_results, key=lambda r: r.score, reverse=True)
         if not bm25_results:
             return sorted(emb_results, key=lambda r: r.score, reverse=True)
@@ -758,7 +807,7 @@ class KnowledgeStore:
         }
 
         # Fuse by doc_id
-        fused: dict[str, KBSearchResult] = {}
+        fused = {}
         for r in bm25_results:
             fused[r.doc_id] = KBSearchResult(
                 doc_id=r.doc_id,

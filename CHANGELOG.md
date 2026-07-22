@@ -4,6 +4,14 @@ All notable changes to agenthatch will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Bug #9: `_fuse_results` 在 `alpha` 极端值下泄漏零分结果** — `KnowledgeStore._fuse_results(bm25_results, emb_results, alpha)` 的加权公式为 `final_score = alpha * keyword + (1-alpha) * embedding`。当用户显式设 `alpha=1.0`（纯关键词模式）时，原实现仍遍历 embedding 结果并以 `(1-1.0)*score = 0` 加入 fused dict，导致 emb-only 文档以零分占据 top-k 槽位；`alpha=0.0`（纯 embedding 模式）对称地泄漏 bm25-only 零分结果。修复为在 `alpha >= 1.0` 时直接 early-return 仅含 BM25 归一化结果，`alpha <= 0.0` 时对称 early-return 仅含 embedding 结果；若"纯"侧为空，仍回退到另一侧（比返回空更好）。混合 alpha 区间（0 < alpha < 1）保留原有 v1.0.0 融合逻辑不变。新增 8 个回归测试在 `tests/test_kb_regressions.py::TestBug9FuseResultsNoLeakAtAlphaExtremes`。
+
+---
+
 ## [v1.0.1] — 2026-07-16
 
 ### Fixed
