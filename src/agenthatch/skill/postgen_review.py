@@ -421,6 +421,14 @@ def _detect_undefined_variables(
                         for elt in gen.target.elts:
                             if isinstance(elt, ast.Name):
                                 local_names.add(elt.id)
+            elif isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Name):
+                local_names.add(sub.target.id)
+            elif isinstance(sub, ast.MatchAs) and sub.name is not None:
+                local_names.add(sub.name)
+            elif isinstance(sub, ast.MatchStar) and sub.name is not None:
+                local_names.add(sub.name)
+            elif isinstance(sub, ast.MatchMapping) and sub.rest is not None:
+                local_names.add(sub.rest)
 
         available = param_names | local_names | module_names | _BUILTIN_NAMES
 

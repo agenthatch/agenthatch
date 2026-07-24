@@ -270,10 +270,12 @@ def extract_python_signatures(file_path: Path) -> list[ToolSchema]:
         return []
 
     functions: list[ToolSchema] = []
-    for node in _ast.walk(tree):
-        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and not node.name.startswith(
-            "_"
-        ):
+    for node in tree.body:
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        # Process this top-level function (not nested in class/function)
             args: list[dict[str, str | None]] = []
             for arg in node.args.args:
                 arg_type: str | None = None
@@ -369,10 +371,11 @@ def analyze_scripts_from_manifest(file_manifest: FileManifest) -> ScriptManifest
                 tree = _ast.parse(entry.content)
             except SyntaxError:
                 continue
-            for node in _ast.walk(tree):
-                if isinstance(
-                    node, (_ast.FunctionDef, _ast.AsyncFunctionDef)
-                ) and not node.name.startswith("_"):
+            for node in tree.body:
+                if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    continue
+                if node.name.startswith("_"):
+                    continue
                     args: list[dict[str, str | None]] = []
                     for arg in node.args.args:
                         arg_type: str | None = None

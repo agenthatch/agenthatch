@@ -289,7 +289,7 @@ class {{ agent_class }}(AHCoreAgent):
                     tree = _ast.parse(content)
                     stubs = [
                         node.name for node in _ast.walk(tree)
-                        if isinstance(node, _ast.FunctionDef)
+                        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
                         and _ast.get_source_segment(content, node)
                         and stub_sig in (_ast.get_source_segment(content, node) or "")
                     ]
