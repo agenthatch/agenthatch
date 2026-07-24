@@ -8,6 +8,11 @@ All notable changes to agenthatch will be documented in this file.
 
 ### Fixed
 
+- **Bug #11-#16: KB store/chunker 回归测试补充** — 新增 19 个测试覆盖 KB 核心模块之前零测试的关键路径：`_escape_fts5_query` FTS5 特殊字符转义、`_fuse_results` 边缘情况、`get_stats()` 文档计数、`KBChunker` 边缘情况（空文本/二进制检测/Unicode 错误/overlap=0）、`_split_paragraphs` heading 追踪、`_fallback_search` LIKE 通配符转义。`tests/test_kb_regressions.py` 从 29 测试扩展到 48 测试。
+- **R4-V23/R4-V22/R4-V16 静态守护测试** — 新建 `tests/test_generated_code_regressions.py`（12 测试）：防止模板 `return (yield from` 退化（R4-V23）、`kb_max_text` typo（R4-V22）、`sys.modules[spec.name]` 遗漏（R4-V16）、`python_escape` 空字节/控制字符/三引号处理。
+- **MCP/LLM 回归测试** — 新建 `tests/test_mcp_regressions.py`（3 测试）守护 `split("__", 2)`；追加 `tests/test_llm_regression.py`（2 测试）守护 `ThinkingDelta` 延迟导入和 `reasoning_tokens` getattr。
+
+- **Bug #10: `retrieve(top_k=N)` 被 `RETRIEVAL_TOP_K` 静默截断** — 生成的 `knowledge_base.py.j2` 模板在 `retrieve()` 中调用 `store.search(top_k=min(top_k, RETRIEVAL_TOP_K), ...)`，把调用方显式传入的 `top_k` 静默截断到 frontmatter 配置的 `RETRIEVAL_TOP_K`（默认 5）。这违反了 docstring 声明的"Maximum number of chunks to return"契约：LLM 调 `retrieve(top_k=20)` 期望最多 20 个，实际拿到 5 个，且无 warning、无法从返回值区分"被截断"还是"索引只有 5 条匹配"。修复为移除 `min()` 截断，`top_k` 直接透传给 `store.search()`。`RETRIEVAL_TOP_K` 仍作为 `KnowledgeBaseConfig` 的构建期默认值保留（通过 `MAX_RESULTS_PER_QUERY` 作为 `retrieve()` 签名默认值），但不再限制运行时单次调用。新增 5 个回归测试在 `tests/test_kb_regressions.py::TestBug10RetrieveTopKNotSilentlyClamped`，含 1 个静态源码守护测试，防止未来 refactor 重新引入 `top_k=min(top_k, RETRIEVAL_TOP_K)`。
 - **Bug #9: `_fuse_results` 在 `alpha` 极端值下泄漏零分结果** — `KnowledgeStore._fuse_results(bm25_results, emb_results, alpha)` 的加权公式为 `final_score = alpha * keyword + (1-alpha) * embedding`。当用户显式设 `alpha=1.0`（纯关键词模式）时，原实现仍遍历 embedding 结果并以 `(1-1.0)*score = 0` 加入 fused dict，导致 emb-only 文档以零分占据 top-k 槽位；`alpha=0.0`（纯 embedding 模式）对称地泄漏 bm25-only 零分结果。修复为在 `alpha >= 1.0` 时直接 early-return 仅含 BM25 归一化结果，`alpha <= 0.0` 时对称 early-return 仅含 embedding 结果；若"纯"侧为空，仍回退到另一侧（比返回空更好）。混合 alpha 区间（0 < alpha < 1）保留原有 v1.0.0 融合逻辑不变。新增 8 个回归测试在 `tests/test_kb_regressions.py::TestBug9FuseResultsNoLeakAtAlphaExtremes`。
 
 ---

@@ -293,9 +293,23 @@ def retrieve(query: str, top_k: int = MAX_RESULTS_PER_QUERY) -> Any:
         return []
 
     try:
+        # v1.0.4 (Bug #10): Pass ``top_k`` through verbatim — do NOT
+        # silently clamp with ``min(top_k, RETRIEVAL_TOP_K)``.  The
+        # previous clamp violated the API contract documented in this
+        # function's docstring ("Maximum number of chunks to return"):
+        # a caller asking for ``top_k=20`` with ``RETRIEVAL_TOP_K=5``
+        # silently received 5 chunks, with no warning and no way to
+        # tell from the return value that fewer results were returned
+        # because of the clamp vs. because the index only had 5 matches.
+        # ``RETRIEVAL_TOP_K`` remains the build-time default baked into
+        # ``KnowledgeBaseConfig`` (and surfaced as ``MAX_RESULTS_PER_QUERY``
+        # when the caller omits ``top_k``), but it no longer caps
+        # explicit per-call requests.  If a hard cap is genuinely needed
+        # (e.g. to bound LLM tool-call abuse), it belongs in the system
+        # prompt or in ``KnowledgeStore.search`` itself — not here.
         results = store.search(
             query=query,
-            top_k=min(top_k, RETRIEVAL_TOP_K),
+            top_k=top_k,
             alpha=RETRIEVAL_ALPHA,
             enable_rerank=ENABLE_LLM_RERANK,
         )
