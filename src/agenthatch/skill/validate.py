@@ -254,7 +254,13 @@ def _try_validate(spec_dict: dict[str, Any]) -> tuple[AHSSpec | None, list[dict[
             "_try_validate: unexpected error during Pydantic validation",
             exc_info=True,
         )
-        return None, [{"loc": ["__root__"], "msg": "Unexpected internal error during validation", "type": "parse_error"}]
+        return None, [
+            {
+                "loc": ["__root__"],
+                "msg": "Unexpected internal error during validation",
+                "type": "parse_error",
+            }
+        ]
 
 
 def _map_errors_to_harnesses(errors: list[dict[str, Any]]) -> list[str]:
