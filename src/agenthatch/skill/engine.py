@@ -766,7 +766,14 @@ Cross-check and return the assembled ahs_spec with confidence_report."""
         output = super().run(**inputs)
         ahs_dict = output.result.get("ahs_spec", {})
         structural_confidence = self._compute_structural_confidence(ahs_dict)
-        output.confidence = structural_confidence
+        # Blend structural confidence with retry signal.
+        # Structural checks are the primary metric (objective, not LLM
+        # self-assessment), but internal retries indicate assembly difficulty
+        # and should temper confidence accordingly.
+        retry_penalty = 1.0 - output.internal_retries * 0.05
+        output.confidence = round(
+            structural_confidence * max(retry_penalty, 0.75), 2,
+        )
         return output
 
     def validate_output(self, result: dict[str, Any]) -> tuple[bool, str]:

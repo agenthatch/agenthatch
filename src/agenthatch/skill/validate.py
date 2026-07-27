@@ -338,19 +338,34 @@ def _retarget_harness(
         output = h.run(
             body=context.body,
             file_contents=file_contents,
-            frontmatter_compatibility=(
-                context.frontmatter.get("compatibility") if context.frontmatter else None
-            ),
-            frontmatter_allowed_tools=(
-                context.frontmatter.get("allowed_tools") if context.frontmatter else None
-            ),
+            frontmatter=context.frontmatter or {},
         )
     elif harness_key == "E":
         resources = _build_validate_resources(context.file_manifest)
+        # Build interface_for_e with F's MCP servers merged in,
+        # mirroring the main Orchestrator flow (engine.py Step 5b).
+        interface_for_e = dict(outputs["C"].result) if "C" in outputs else {}
+        if "F" in outputs and "C" in outputs:
+            f_output = outputs["F"]
+            f_mcp = (
+                f_output.result.get("mcp_servers", [])
+                if hasattr(f_output, "result")
+                else []
+            )
+            if f_mcp:
+                from agenthatch.skill.engine import _merge_mcp_configs
+
+                c_mcp = interface_for_e.get("interface", {}).get("mcp_servers", [])
+                mcp_merged = (
+                    _merge_mcp_configs(c_mcp, f_mcp) if c_mcp else f_mcp
+                )
+                if "interface" not in interface_for_e:
+                    interface_for_e["interface"] = {}
+                interface_for_e["interface"]["mcp_servers"] = mcp_merged
         output = h.run(
             identity=outputs["A"].result if "A" in outputs else {},
             intent=outputs["B"].result if "B" in outputs else {},
-            interface=outputs["C"].result if "C" in outputs else {},
+            interface=interface_for_e if "C" in outputs else {},
             base=outputs["D"].result.get("base", {}) if "D" in outputs else {},
             instructions=outputs["D"].result.get("instructions", {}) if "D" in outputs else {},
             resources=resources,
