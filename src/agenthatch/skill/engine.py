@@ -1265,6 +1265,10 @@ class Orchestrator:
                     progress_callback("E")
             except Exception as e2:
                 logger.error(f"Harness E retry also failed: {e2}")
+                # Mark E as "done" on the progress panel so the spinner
+                # doesn't freeze — the caller surfaces the real error.
+                if progress_callback:
+                    progress_callback("E")
                 from agenthatch.exceptions import SchemaValidationError
                 raise SchemaValidationError(f"Harness E failed: {e2}") from e2
 

@@ -35,6 +35,7 @@ from rich.tree import Tree
 
 from agenthatch.cli import console
 from agenthatch.cli.commands._completion import _complete_skill_name
+from agenthatch.exceptions import SchemaValidationError
 from agenthatch.skill.parser import _is_skill_md, assemble_context
 from agenthatch.skill.spec import AgentConfig
 
@@ -719,6 +720,26 @@ def hatch_command(
             Panel(_render_harness_progress(), border_style="cyan", padding=(0, 1))
         )
 
+    def _print_harness_status(
+        state: dict[str, Any],
+        failed_harness: str | None = None,
+    ) -> None:
+        """Print a harness completion summary outside the Live context.
+
+        Called from error handlers to show which harnesses succeeded and which
+        failed before the process exits.
+        """
+        for key in harness_order:
+            label = HARNESS_LABELS.get(key, key)
+            if key in state["completed"]:
+                console.print(f"  [ok]✓[/ok] Harness {key}: {label}")
+            elif failed_harness and key == failed_harness:
+                console.print(f"  [error]✗[/error] Harness {key}: {label} (failed)")
+            elif key == state.get("current"):
+                console.print(f"  [dim]○[/dim] Harness {key}: {label} (in progress)")
+            else:
+                console.print(f"  [dim]○[/dim] Harness {key}: {label}")
+
     with Live(
         Panel(_render_harness_progress(), border_style="cyan", padding=(0, 1)),
         refresh_per_second=8,
@@ -730,7 +751,26 @@ def hatch_command(
                 context, config, large_model=large_model, small_model=small_model,
                 progress_callback=_on_harness_done,
             )
+        except SchemaValidationError as e:
+            # E assembly failed after retry — the assembled spec could not
+            # pass Pydantic validation.  This is a terminal error because no
+            # valid agenthatch.yaml can be produced without a passing spec.
+            # Show which harnesses ran before surfacing the failure.
+            _print_harness_status(_state, failed_harness="E")
+            console.print()
+            console.print(Panel(
+                f"Harness E (assemble_and_validate) failed after retry.\n\n"
+                f"[dim]{e}[/dim]\n\n"
+                f"The LLM was unable to produce a valid assembled spec. "
+                f"This is often transient — try running [bold]agenthatch hatch[/bold] "
+                f"again, or switch to a different model via [bold]agenthatch config[/bold].",
+                title="[error]Assembly Failed[/error]",
+                border_style="red",
+            ))
+            raise typer.Exit(code=e.exit_code) from e
         except Exception as e:
+            _print_harness_status(_state)
+            console.print()
             console.print(f"[error]Inference error: {e}[/error]")
             raise typer.Exit(code=4) from e
 
