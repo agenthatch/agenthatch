@@ -3,12 +3,20 @@
 Layer 1: Pydantic AHSSpec.model_validate() — deterministic schema check.
 Layer 2: Orchestrator targeted retry — only re-run the failing Harness.
 
-Token savings (vs full re-run of all 5 Harnesses, ~8000 tokens):
-  - identity.id format error → only Harness A (~500 tokens, save 94%)
-  - interface.provides empty → only Harness C (~2000 tokens, save 75%)
-  - base.runtime invalid → only Harness D (~1500 tokens, save 81%)
-  - cross-field inconsistency → only Harness E (~1000 tokens, save 87%)
-  - average: ~1250 tokens (~84% savings)
+Token savings (vs full re-run of all 6 Harnesses, ~18,000 tokens):
+  - identity.id format error → only Harness A (~750 tokens, save ~96%)
+  - intent.triggers too few → only Harness B (~2,300 tokens, save ~87%)
+  - interface.provides empty → only Harness C (~4,500 tokens, save ~75%)
+  - base.runtime invalid → only Harness D (~3,000 tokens, save ~83%)
+  - cross-field inconsistency → only Harness E (~5,500 tokens, save ~69%)
+  - average single-Harness: ~3,000 tokens (~83% savings)
+
+These are conservative estimates based on actual prompt template content
+(system prompt + user message + response).  A medium-size SKILL.md with
+~3,000 chars of body text and 2 small script files is assumed.  Harness E
+receives the cumulative output of all prior Harnesses as input, making it
+the most expensive single re-run.  Post-v0.9.20 reflection steps are not
+counted — they add another ~500-1,000 tokens per Harness on top.
 
 Dual-layer targeted retry loop:
 failure context + original inputs → LLM fix → validate → max 2 retries.
@@ -386,14 +394,28 @@ def _retarget_harness(
 
 
 def _estimate_token_savings(harness_key: str) -> int:
-    """Estimate token savings vs full 5-Harness re-run (~8000 tokens)."""
+    """Estimate token savings vs full 6-Harness re-run (~18,000 tokens).
+
+    Per-Harness cost estimates (system prompt + user message + response),
+    assuming a medium-size SKILL.md (~3,000 chars body, 2 small scripts):
+      A: ~750    (identity extraction — dir_name + frontmatter + body preview)
+      B: ~2,300  (intent inference — full body + frontmatter + file contents)
+      C: ~4,500  (interface inference — full body + all file contents + script_manifest)
+      D: ~3,000  (base detection — frontmatter JSON + body + file contents)
+      E: ~5,500  (assembly — cumulative output of A+B+C+D as input)
+      F: ~850    (supplementary — body + references)
+
+    Savings = 18,000 - single_harness_cost.  These are conservative —
+    larger SKILL.md bodies or more script files increase actual costs.
+    Reflection steps (post-v0.9.20) add ~500-1,000 tokens per Harness.
+    """
     estimates = {
-        "A": 7500,   # 94% savings → ~500 tokens
-        "B": 6000,   # 75% savings → ~2000 tokens
-        "C": 6000,   # 75% savings → ~2000 tokens
-        "D": 6500,   # 81% savings → ~1500 tokens
-        "E": 7000,   # 87% savings → ~1000 tokens
-        "F": 7500,   # 94% savings → ~500 tokens
+        "A": 17250,  # 96% savings → ~750 tokens
+        "B": 15700,  # 87% savings → ~2,300 tokens
+        "C": 13500,  # 75% savings → ~4,500 tokens
+        "D": 15000,  # 83% savings → ~3,000 tokens
+        "E": 12500,  # 69% savings → ~5,500 tokens
+        "F": 17150,  # 95% savings → ~850 tokens
     }
     return estimates.get(harness_key, 0)
 
