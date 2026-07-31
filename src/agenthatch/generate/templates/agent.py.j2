@@ -29,6 +29,9 @@ from .tools import (
 {% elif mcp_servers %}
 from .tools import configure_mcp_auth
 {% endif %}
+{% if kb_enabled %}
+from .knowledge_base import retrieve
+{% endif %}
 
 {% if workflow %}
 WORKFLOW = """{{ workflow | python_escape }}"""

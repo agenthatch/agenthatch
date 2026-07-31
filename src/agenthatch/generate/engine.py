@@ -436,12 +436,13 @@ class GenerateEngine:
         # v1.0.1 (C5): Default `enable_llm_rerank` to False to match
         # `KnowledgeBaseConfig` — rerank infra exists but no rerank_fn
         # is injected at runtime yet.
-        store = KnowledgeStore(
-            knowledge_dir,
-            embedding_model=kb_vars.get("embedding_model", "all-MiniLM-L6-v2"),
-            enable_llm_rerank=kb_vars.get("enable_llm_rerank", False),
-        )
+        store = None
         try:
+            store = KnowledgeStore(
+                knowledge_dir,
+                embedding_model=kb_vars.get("embedding_model", "all-MiniLM-L6-v2"),
+                enable_llm_rerank=kb_vars.get("enable_llm_rerank", False),
+            )
             # v1.0.1 (R3-H3): Clear stale data from previous builds so
             # removed sources don't linger.  Previously ``add_documents``
             # used ``INSERT OR REPLACE`` keyed on ``doc_id`` — if the
@@ -482,7 +483,8 @@ class GenerateEngine:
             logger.warning("KB index build failed: %s", e)
             return {"total_chunks": 0, "index_size_bytes": 0}
         finally:
-            store.close()
+            if store is not None:
+                store.close()
 
     @staticmethod
     def _humanize_display_name(display_name: str, agent_id: str) -> str:
