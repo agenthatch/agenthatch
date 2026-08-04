@@ -347,7 +347,7 @@ def _detect_undefined_variables(
     """
     findings: list[tuple[str, str, int]] = []
 
-    # Collect module-level imports and assignments
+    # Collect module-level imports, assignments, and definitions
     module_names: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.Import):
@@ -362,6 +362,13 @@ def _detect_undefined_variables(
                     module_names.add(target.id)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             module_names.add(node.target.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # Top-level function/class names are visible to sibling
+            # functions.  Without this, ``tool_b`` calling ``tool_a``
+            # (both top-level in tools.py) would be a false-positive
+            # "undefined variable" finding, triggering B4 to "repair"
+            # working code by adding bogus imports.
+            module_names.add(node.name)
 
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

@@ -30,7 +30,7 @@ def {{ tool.func_name }}({% for param_name, param_type, default in tool.params %
 {% else %}
 def {{ tool.func_name }}() -> Any:
 {% endif %}
-    """{{ tool.description }}
+    """{{ tool.description | python_escape }}
 {% if tool.backend_kind == "script" %}
     Script-backed capability from skills/scripts/{{ tool.script_name }}.
     This wrapper executes the pre-existing script via subprocess.
