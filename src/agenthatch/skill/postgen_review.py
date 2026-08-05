@@ -55,6 +55,12 @@ CATEGORY_UNDEFINED_VAR = "undefined_var"
 CATEGORY_NONE_ATTR = "none_attr_access"
 CATEGORY_TYPE_ERROR = "type_error"
 CATEGORY_TEST_FAILURE = "test_failure"
+# v0.9.x: Exception-swallow antipatterns (bare except / except Exception
+# followed by pass / return None / return "").  Always WARNING — never
+# enters B4 repair loop (only SEVERITY_ERROR findings do).  Surfaced so
+# the user can manually tighten exception handling without forcing
+# autonomous rewrites that could regress working fallback logic.
+CATEGORY_EXCEPTION_SWALLOW = "exception_swallow"
 
 VERDICT_READY = "READY"
 VERDICT_WARN = "WARN"
@@ -310,6 +316,37 @@ def inspect_generated_package(output_dir: Path) -> PostGenReport:
                 )
             )
 
+        # ── Check 6: Exception-swallow antipatterns ───────────────────
+        # WARNING-only by design: ``except Exception: return None`` is
+        # sometimes a legitimate fallback in tool code (e.g. best-effort
+        # enrichment).  We surface the smell so the user can tighten it
+        # manually, but never let B4 autonomously rewrite it — LLM
+        # "repairs" here tend to either remove the fallback entirely
+        # (regressing resilience) or swap it for a more specific
+        # exception class that misses the actual failure mode.
+        swallow_findings = _detect_exception_antipatterns(tree)
+        for func_name, lineno, reason in swallow_findings:
+            report.findings.append(
+                PostGenFinding(
+                    severity=SEVERITY_WARNING,
+                    file=rel_path,
+                    line=lineno,
+                    category=CATEGORY_EXCEPTION_SWALLOW,
+                    message=(
+                        f"Tool '{func_name}' has a broad except handler that "
+                        f"silently swallows exceptions ({reason}). Callers "
+                        f"cannot distinguish legitimate empty results from "
+                        f"tool failures."
+                    ),
+                    tool_name=func_name,
+                    suggested_fix=(
+                        "Catch a specific exception type, log the error, and "
+                        "either re-raise or return a value that signals failure "
+                        "distinctly from a successful empty result."
+                    ),
+                )
+            )
+
     # Count tools with issues
     tools_with_issues = {f.tool_name for f in report.findings if f.tool_name}
     report.tools_with_issues = len(tools_with_issues)
@@ -560,6 +597,114 @@ def _detect_semantic_stubs(
                         )
                         break
                 continue
+
+    return findings
+
+
+# "Silent fallback" return values that turn any exception into an
+# indistinguishable success-like result.  ``None`` / ``""`` / ``0`` /
+# ``False`` are problematic because the caller cannot tell "the tool
+# legitimately produced this empty result" from "the tool blew up and
+# swallowed the error".  Empty containers (``[]`` / ``{}`` / ``()``)
+# are handled separately in ``_handler_body_is_swallow`` via AST node
+# types, since they can't live in a frozenset (unhashable).
+_SILENT_FALLBACK_LITERALS: frozenset[Any] = frozenset(
+    {None, "", 0, False}
+)
+
+
+def _is_broad_except(handler: ast.ExceptHandler) -> bool:
+    """True for ``except:`` (bare) and ``except Exception:`` forms.
+
+    ``BaseException`` is intentionally included — catching it is an
+    antipattern in tool code because it swallows
+    ``KeyboardInterrupt`` / ``SystemExit``.
+    """
+    if handler.type is None:
+        return True
+    if isinstance(handler.type, ast.Name) and handler.type.id in (
+        "Exception",
+        "BaseException",
+    ):
+        return True
+    # ``except (Exception, ...):`` — tuple form, still broad if either
+    # of the above is present.
+    if isinstance(handler.type, ast.Tuple):
+        for elt in handler.type.elts:
+            if isinstance(elt, ast.Name) and elt.id in (
+                "Exception",
+                "BaseException",
+            ):
+                return True
+    return False
+
+
+def _handler_body_is_swallow(handler: ast.ExceptHandler) -> str | None:
+    """Return a short reason string if the handler body silently swallows.
+
+    Patterns caught:
+      - ``pass``
+      - ``return None`` / ``return ""`` / ``return []`` / ``return {}``
+        / ``return 0`` / ``return False``
+      - ``return`` (bare) — equivalent to ``return None``
+
+    Returns ``None`` for non-matching bodies (including bodies that
+    log/re-raise, which are considered intentional handling).
+    """
+    body = handler.body
+    if not body:
+        return None
+
+    # Single-statement bodies are the common offender.
+    if len(body) == 1:
+        stmt = body[0]
+        if isinstance(stmt, ast.Pass):
+            return "pass"
+        if isinstance(stmt, ast.Return):
+            if stmt.value is None:
+                return "return (bare)"
+            if isinstance(stmt.value, ast.Constant) and stmt.value.value in _SILENT_FALLBACK_LITERALS:
+                return f"return {stmt.value.value!r}"
+            # ast.List / ast.Tuple / ast.Dict with no elements → [] / () / {}
+            if isinstance(stmt.value, (ast.List, ast.Tuple, ast.Dict)) and len(stmt.value.elts if isinstance(stmt.value, (ast.List, ast.Tuple)) else stmt.value.keys) == 0:
+                empty_repr = "[]" if isinstance(stmt.value, ast.List) else "{}" if isinstance(stmt.value, ast.Dict) else "()"
+                return f"return {empty_repr}"
+        # ``... `` (Ellipsis literal as a body) — functionally a pass
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value is Ellipsis:
+            return "..."
+    return None
+
+
+def _detect_exception_antipatterns(
+    tree: ast.Module,
+) -> list[tuple[str, int, str]]:
+    """Find broad except handlers that silently swallow exceptions.
+
+    Returns list of (func_name, lineno, reason).  Only top-level
+    FunctionDef / AsyncFunctionDef are scanned — the generated
+    ``tools.py`` is structured this way, and nested helpers are rare
+    enough that scanning them offers little signal for the noise.
+
+    Severity is WARNING by design (see ``inspect_generated_package``),
+    so findings here never enter ``tools_to_repair()`` and never
+    trigger B4 autonomous rewrites.
+    """
+    findings: list[tuple[str, int, str]] = []
+
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        func_name = node.name
+        for sub in ast.walk(node):
+            if not isinstance(sub, ast.ExceptHandler):
+                continue
+            if not _is_broad_except(sub):
+                continue
+            reason = _handler_body_is_swallow(sub)
+            if reason is None:
+                continue
+            findings.append((func_name, sub.lineno, reason))
 
     return findings
 
