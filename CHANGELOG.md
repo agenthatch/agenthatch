@@ -6,14 +6,84 @@ All notable changes to agenthatch will be documented in this file.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+---
+
+## [v1.0.7] — 2026-07-20
+
+### Added
+
+- **Exception-swallow antipattern detection** — The post-generation review now flags generated tool functions that catch `Exception` (or `BaseException`, or bare `except:`) and silently swallow with `pass` / `return None` / `return ""` / `return []` / `return 0` / `return False`. WARNING-only by design: an earlier attempt let B4 rewrite these automatically, but the LLM kept either deleting legitimate fallbacks (breaking resilience) or narrowing to a specific exception class that missed the actual failure mode. The smell is surfaced for the user to tighten by hand.
+
 ### Fixed
 
-- **Bug #11-#16: KB store/chunker 回归测试补充** — 新增 19 个测试覆盖 KB 核心模块之前零测试的关键路径：`_escape_fts5_query` FTS5 特殊字符转义、`_fuse_results` 边缘情况、`get_stats()` 文档计数、`KBChunker` 边缘情况（空文本/二进制检测/Unicode 错误/overlap=0）、`_split_paragraphs` heading 追踪、`_fallback_search` LIKE 通配符转义。`tests/test_kb_regressions.py` 从 29 测试扩展到 48 测试。
-- **R4-V23/R4-V22/R4-V16 静态守护测试** — 新建 `tests/test_generated_code_regressions.py`（12 测试）：防止模板 `return (yield from` 退化（R4-V23）、`kb_max_text` typo（R4-V22）、`sys.modules[spec.name]` 遗漏（R4-V16）、`python_escape` 空字节/控制字符/三引号处理。
-- **MCP/LLM 回归测试** — 新建 `tests/test_mcp_regressions.py`（3 测试）守护 `split("__", 2)`；追加 `tests/test_llm_regression.py`（2 测试）守护 `ThinkingDelta` 延迟导入和 `reasoning_tokens` getattr。
+- **MCP tool name parsing in template** — `tools.py.j2` was splitting MCP tool names on the wrong delimiter, producing garbled server/tool identifiers in the generated CapBus registration.
+- **Postgen review local-name detection** — `_detect_undefined_variables` now recognizes `AugAssign`, `MatchAs`, `MatchStar`, and `MatchMapping` nodes so variables bound by `+=` / `case x:` / `case *rest:` / `case {**rest}:` are no longer false-positive undefined.
 
-- **Bug #10: `retrieve(top_k=N)` 被 `RETRIEVAL_TOP_K` 静默截断** — 生成的 `knowledge_base.py.j2` 模板在 `retrieve()` 中调用 `store.search(top_k=min(top_k, RETRIEVAL_TOP_K), ...)`，把调用方显式传入的 `top_k` 静默截断到 frontmatter 配置的 `RETRIEVAL_TOP_K`（默认 5）。这违反了 docstring 声明的"Maximum number of chunks to return"契约：LLM 调 `retrieve(top_k=20)` 期望最多 20 个，实际拿到 5 个，且无 warning、无法从返回值区分"被截断"还是"索引只有 5 条匹配"。修复为移除 `min()` 截断，`top_k` 直接透传给 `store.search()`。`RETRIEVAL_TOP_K` 仍作为 `KnowledgeBaseConfig` 的构建期默认值保留（通过 `MAX_RESULTS_PER_QUERY` 作为 `retrieve()` 签名默认值），但不再限制运行时单次调用。新增 5 个回归测试在 `tests/test_kb_regressions.py::TestBug10RetrieveTopKNotSilentlyClamped`，含 1 个静态源码守护测试，防止未来 refactor 重新引入 `top_k=min(top_k, RETRIEVAL_TOP_K)`。
-- **Bug #9: `_fuse_results` 在 `alpha` 极端值下泄漏零分结果** — `KnowledgeStore._fuse_results(bm25_results, emb_results, alpha)` 的加权公式为 `final_score = alpha * keyword + (1-alpha) * embedding`。当用户显式设 `alpha=1.0`（纯关键词模式）时，原实现仍遍历 embedding 结果并以 `(1-1.0)*score = 0` 加入 fused dict，导致 emb-only 文档以零分占据 top-k 槽位；`alpha=0.0`（纯 embedding 模式）对称地泄漏 bm25-only 零分结果。修复为在 `alpha >= 1.0` 时直接 early-return 仅含 BM25 归一化结果，`alpha <= 0.0` 时对称 early-return 仅含 embedding 结果；若"纯"侧为空，仍回退到另一侧（比返回空更好）。混合 alpha 区间（0 < alpha < 1）保留原有 v1.0.0 融合逻辑不变。新增 8 个回归测试在 `tests/test_kb_regressions.py::TestBug9FuseResultsNoLeakAtAlphaExtremes`。
+---
+
+## [v1.0.6] — 2026-07-20
+
+### Fixed
+
+- **`store.close()` crash when `KnowledgeStore` init fails** — `KnowledgeStore()` was instantiated before the `try` block, so if init itself failed (bad model path, disk full), the `finally` block called `store.close()` on an unbound variable. Moved instantiation inside `try` with a `None` guard on close.
+- **Missing `retrieve` import in generated KB agents** — `agent.py.j2` with `kb_enabled` was missing `from .knowledge_base import retrieve`, so the first `retrieve()` call raised `NameError`. Template now emits the import.
+- **Spinner freeze on E harness failure** — When E harness failed after retries, the progress spinner kept spinning because the harness status was never marked complete. `SchemaValidationError` is now caught, harness completion is displayed, and a user-friendly error panel replaces the raw traceback.
+- **Token savings estimates outdated** — `validate.py` still quoted 5-harness token estimates (~8000) after the 6-harness migration. Updated to ~18000 to reflect the F harness addition.
+
+---
+
+## [v1.0.5] — 2026-07-20
+
+### Changed
+
+- **Confidence retry penalty** — Each harness retry now deducts 5% from the confidence score, floored at 0.75. Prevents a harness that succeeds on retry 3 from reporting the same confidence as one that succeeded on the first try.
+- **E harness merges F's MCP servers** — Harness E now pulls MCP server definitions from F's output into the assembled interface, so generated agents ship with MCP tools wired in without a separate assembly step.
+- **Harness B simplified frontmatter passing** — Frontmatter is now passed to B as-is rather than through an intermediate dict reshape that dropped unknown keys.
+
+### Fixed
+
+- **JSON Schema enum and constraints not mapped** — `compile_output_schema` now maps `enum` to `Literal`, numeric `minimum`/`maximum` to `ge`/`le`, string `minLength`/`maxLength`/`pattern` to `StringConstraints`, and array `minItems`/`maxItems` to `min_length`/`max_length`. Previously these constraints were silently dropped, so generated tool signatures accepted any value.
+- **Internal validation errors leaked to users** — `_try_validate` was surfacing raw `ValidationError` messages (including internal field paths) in user-facing output. Now logs the full exception via `logger.error(exc_info=True)` and returns a generic error message.
+
+---
+
+## [v1.0.4] — 2026-07-19
+
+### Fixed
+
+- **Bug #10: `retrieve(top_k=N)` silently clamped by `RETRIEVAL_TOP_K`** — The generated `knowledge_base.py.j2` template called `store.search(top_k=min(top_k, RETRIEVAL_TOP_K), ...)`, clamping the caller's explicit `top_k` to the frontmatter-configured `RETRIEVAL_TOP_K` (default 5). An LLM calling `retrieve(top_k=20)` got 5 results with no warning and no way to distinguish "clamped" from "index only has 5 matches". Fixed by removing the `min()` clamp; `top_k` passes through to `store.search()` directly. `RETRIEVAL_TOP_K` remains as a build-time default (via `MAX_RESULTS_PER_QUERY` as the `retrieve()` signature default) but no longer caps runtime calls. 5 regression tests added in `TestBug10RetrieveTopKNotSilentlyClamped`, including 1 static source guard.
+- **Bug #9: `_fuse_results` leaks zero-score results at alpha extremes** — `KnowledgeStore._fuse_results` uses `final_score = alpha * keyword + (1-alpha) * embedding`. At `alpha=1.0` (pure keyword mode), embedding-only documents still entered the fused dict with `(1-1.0)*score = 0`, occupying top-k slots with zero scores; `alpha=0.0` symmetrically leaked BM25-only zeros. Fixed with early-return at `alpha >= 1.0` (BM25-only) and `alpha <= 0.0` (embedding-only), falling back to the other side if the "pure" side is empty. Mixed alpha (0 < alpha < 1) keeps the v1.0.0 fusion logic. 8 regression tests added in `TestBug9FuseResultsNoLeakAtAlphaExtremes`.
+
+### Added
+
+- **KB regression test expansion (Bug #11-#16)** — 19 new tests covering previously untested KB core paths: `_escape_fts5_query` FTS5 special-char escaping, `_fuse_results` edge cases, `get_stats()` document counts, `KBChunker` edge cases (empty text / binary detection / Unicode errors / overlap=0), `_split_paragraphs` heading tracking, `_fallback_search` LIKE wildcard escaping. `tests/test_kb_regressions.py` grew from 29 to 48 tests.
+- **Generated code static guard tests (R4-V23/V22/V16)** — New `tests/test_generated_code_regressions.py` (12 tests): prevents template `return (yield from` regression (R4-V23), `kb_max_text` typo (R4-V22), `sys.modules[spec.name]` omission (R4-V16), and `python_escape` null-byte / control-char / triple-quote handling.
+- **MCP/LLM regression tests** — New `tests/test_mcp_regressions.py` (3 tests) guards `split("__", 2)` for three-segment MCP tool names. `tests/test_llm_regression.py` gains 2 tests guarding `ThinkingDelta` deferred import and `reasoning_tokens` getattr.
+
+---
+
+## [v1.0.3] — 2026-07-18
+
+### Fixed
+
+- **Bug #6: `agenthatch.yaml` in skill directory reports `total_chunks=0` after hatch** — The YAML was written before the KB index build, so the persisted file always showed `total_chunks=0` and `index_size_bytes=0`. `hatch.py` now refreshes `skill_dir/agenthatch.yaml` after the KB index build with accurate stats.
+- **Bug #7: Generated agent's `pyproject.toml` missing `agenthatch-core` dependency** — KB-enabled agents silently failed on `retrieve()` because `agenthatch-core` (which provides `KnowledgeStore`) was not in the dependency list. `pyproject.toml.j2` now adds `agenthatch-core` and `sentence-transformers` when `kb_enabled`, and force-includes the `knowledge/` directory in the wheel.
+- **Bug #8: `retrieve(top_k=0)` returns 1 result** — `KnowledgeStore.search` clamped `top_k <= 0` to 1 instead of returning an empty list. An explicit `top_k=0` (user asking for zero results) returned one result. Fixed to return `[]` for non-positive `top_k`.
+- **KB index path resolution fails on pip install layout** — `knowledge_base.py.j2` hardcoded the KB index directory relative to the agent module, which broke under pip-installed layout (where `knowledge/` lives one level up from the dev layout). Added `_resolve_kb_index_dir()` with candidate-path fallback supporting both dev and pip layouts.
+
+---
+
+## [v1.0.2] — 2026-07-17
+
+### Fixed
+
+- **Bug #2: `KBChunker` else branch drops accumulated content** — When a chunk exceeded `chunk_size`, the else branch reset `current_parts` to a new list instead of appending the overflow paragraph, silently losing accumulated text. Fixed to append `para_text` to `current_parts` before starting a new chunk.
+- **Bug #3: `discover_kb_files()` ignores `exclude_patterns`** — The exclude parameter was accepted but never applied. Files matching exclude patterns (e.g. `*.tmp`, `drafts/`) were indexed alongside real content. Fixed to filter files through `exclude_patterns` before returning.
+- **`KBChunker` crashes when `chunk_overlap >= chunk_size`** — `KnowledgeBaseConfig` now validates `chunk_overlap < chunk_size` at construction time, preventing `KBChunker` initialization from raising `ValueError` mid-hatch.
+- **Anti-narration patterns** — Expanded the meta-narration pattern list and tightened the sentence-boundary expansion logic to catch LLM variants like "already answered above" without deleting legitimate closing sentences.
+- **CI mypy: `model_validator` return type** — `def _validate_chunk_overlap_lt_size(self) -> "KnowledgeBaseConfig"` used a string forward reference that confused mypy under `--strict`. Changed to a direct type reference.
 
 ---
 
@@ -21,17 +91,17 @@ All notable changes to agenthatch will be documented in this file.
 
 ### Fixed
 
-- **R4-V23: `chat_stream()` 裸 `yield from` 丢弃子 generator 返回值** — 生成的 agent 在 `chat_stream` 中使用 `yield from super().chat_stream(user_input)`，Python 会把子 generator 的 `return` value 丢弃（`yield from` 表达式的值为 `None`，除非显式写 `return (yield from ...)`）。导致 `ConversationLoop.stream()` 老老实实 return 的 `final_text`（如 466 字符的完整答案）在调用方拿到的却是空字符串。文本已流式输出到终端，但编程接口返回空。修复为 `return (yield from super().chat_stream(user_input))`，同步修复 `agent.py.j2` 模板防止复发。
-- **R4-V22: `chat_stream()` 路径 `kb_max_text` typo** — `agent.py` 中 `chat_stream()` 路径的 `kb_max_text = 1`，注释写着 "Same KB auto-continuation cap as chat()"，但 `chat()` 路径实际是 `0`。这一个数字让流式路径下 `self._max_consecutive_text_only == 0` 永远不成立，`_strip_trailing_meta_narration` 从未被调用，meta-narration（"前已详答,此不赘述"、"前问已答毕"）泄漏到用户。修复为 `0`，与 `chat()` 路径一致。
-- **R4-V22: `_strip_trailing_meta_narration` 旧策略误删正文** — 旧策略"在最早匹配点截断到末尾"会删除 meta-narration 之后的全部正文（如结尾的"阁下若欲探询..."邀请句），触发 40% 安全保护，反而让 meta-narration 泄漏通过。重写为"删除包含匹配的整个句子"策略：找到所有匹配，扩展到完整句子边界（。！？\n），合并重叠区间，只删这些句子。安全阈值从 40% 调整为 50%。
-- **R4-V22: meta-narration 模式列表扩展** — 添加"前问已答"、"已答毕"、"前文已..."、"上文已..."、"已详答"、"已作答"等 LLM 变体；`前已` 模式中 `详细` 改为 `详细?` 使"前已答"也能匹配。
-- **R4-V21: meta-narration 残留在 text stream** — KB agent 在调用 `task_complete` 之前，LLM 常加几句"已完整解答...无剩余步骤"的 meta-commentary，尽管 B4 (e) 明确禁止。引入 `_strip_trailing_meta_narration()` 函数，在最后 600 字符中匹配 meta-narration 模式并删除整句。
-- **R4-V20: `task_complete` 重复 yield meta-summary** — `task_complete` 被调用时，若已流式输出过真实答案（`has_yielded_text=True`），仍会再次 yield `summary` 参数内容（通常是"已回答..."的 meta-summary），导致用户看到答案后又看到一句冗余总结。修复为：`has_yielded_text=True` 时用 `accumulated_text` 作为 `final_text`，不再 yield summary。
-- **R4-V16: KB 包名解析走 MRO 导致 import 失败** — `type(self).__module__` 在某些加载路径下走 MRO 匹配到基类 `agenthatch_core.agent`（其 `__package__` 是 "agenthatch_core"），导致 `importlib.import_module(f"{pkg}.knowledge_base")` 报 `No module named 'agenthatch_core.knowledge_base'`。修复为：直接从 `__module__` 派生包名，并在 `run.py` 中于 `exec_module` 前将 agent module 注册到 `sys.modules[spec.name]`。
+- **R4-V23: `chat_stream()` bare `yield from` discards subgenerator return value** — Generated agents used `yield from super().chat_stream(user_input)`, which drops the subgenerator's `return` value (the `yield from` expression evaluates to `None` unless written as `return (yield from ...)`). `ConversationLoop.stream()` returned a complete `final_text` (e.g. 466 chars), but callers got an empty string. The text had streamed to the terminal, but the programmatic API returned nothing. Fixed to `return (yield from super().chat_stream(user_input))`, and patched `agent.py.j2` to prevent regression.
+- **R4-V22: `kb_max_text` typo in `chat_stream()` path** — `agent.py` had `kb_max_text = 1` in the streaming path with a comment saying "Same KB auto-continuation cap as chat()", but `chat()` actually used `0`. That single digit meant `self._max_consecutive_text_only == 0` was never true on the streaming path, so `_strip_trailing_meta_narration` never ran and meta-narration leaked to the user. Fixed to `0`, matching `chat()`.
+- **R4-V22: `_strip_trailing_meta_narration` old strategy deleted body text** — The old "truncate from earliest match to end" strategy deleted everything after the meta-narration (including legitimate closing invitations like "If you'd like to explore..."), which tripped the 40% safety guard and let the meta-narration through anyway. Rewritten to "delete the containing sentence": find all matches, expand to sentence boundaries, merge overlapping ranges, delete only those sentences. Safety threshold adjusted from 40% to 50%.
+- **R4-V22: meta-narration pattern list expanded** — Added LLM variants ("already answered", "answered above", "detailed earlier", etc.) and made the "detailed" pattern optional so shorter forms like "already answered" also match.
+- **R4-V21: meta-narration residue in text stream** — KB agents often append meta-commentary ("fully answered... no remaining steps") before `task_complete`, despite B4 (e) explicitly forbidding it. Added `_strip_trailing_meta_narration()` to match meta-narration patterns in the last 600 characters and delete the containing sentence.
+- **R4-V20: `task_complete` re-yields meta-summary** — When `task_complete` was called after text had already streamed (`has_yielded_text=True`), it still yielded the `summary` argument (usually a meta-summary like "Answered..."), so users saw the answer followed by a redundant summary. Fixed: when `has_yielded_text=True`, use `accumulated_text` as `final_text` and don't yield the summary.
+- **R4-V16: KB package name resolution via MRO causes import failure** — `type(self).__module__` sometimes resolved through MRO to the base class `agenthatch_core.agent` (whose `__package__` is "agenthatch_core"), so `importlib.import_module(f"{pkg}.knowledge_base")` failed with `No module named 'agenthatch_core.knowledge_base'`. Fixed to derive the package name directly from `__module__`, and register the agent module in `sys.modules[spec.name]` before `exec_module` in `run.py`.
 
 ### Changed
 
-- **KB agent auto-continuation 抑制** — 引入 `max_consecutive_text_only` 和 `nudge_grace` 参数（R4-V17），KB agent 传 `0` 让循环在首次 text-only 响应后即返回，避免 auto-continuation 产生重复答案和 meta-summary。
+- **KB agent auto-continuation suppression** — Introduced `max_consecutive_text_only` and `nudge_grace` parameters (R4-V17). KB agents pass `0` so the loop returns after the first text-only response, avoiding auto-continuation producing duplicate answers and meta-summaries.
 
 ---
 
@@ -39,21 +109,21 @@ All notable changes to agenthatch will be documented in this file.
 
 ### Added
 
-- **KnowledgeBaseBrick（RAG 检索）** — agent 工程意义上的工程知识库，区别于 skill 内部的 `references/` 共生知识。用户通过 CLI 第二参数指定 KB 路径，孵化期构建向量索引，运行时通过 `retrieve` 工具检索。
-  - **Phase B（编译期集成）**：KB inference pipeline（B2 检测 → B3 用法策略 → B4 prompt 生成）。`_build_knowledge_index()` 在 `_prepare_output_dir` 之后、模板渲染之前运行。
-  - **Phase C（运行期装配）**：`RetrieveTool` 注册到 CapBus；`AHCoreAgent` KB assembly block；`ContextManager` 注入 KB system prompt。
-  - **`knowledge_base.py.j2` 模板**：生成 runtime `retrieve()` 函数，含 LLM-inferred 的 `WHEN_TO_RETRIEVE`、`QUERY_TEMPLATES`、`SYSTEM_PROMPT_SECTION`。
-  - **SQLite FTS5 索引 + BM25 评分**：FTS5 索引将 `-` 替换为空格避免 NOT 操作符解析；BM25 评分用 `abs(rank)/(1+abs(rank))` 优先相关文档。
-- **HatchReport confidence 来源统一** — Hatch Summary 的 confidence 值改用 E harness cross-evaluation 分数，self-assessment 作为 fallback，修复了 Confidence panel（1.00）与 Hatch Summary（0.50）不一致的问题。
-- **Phase 3/3 标题** — 正常（非 dry-run）hatch 流程在控制台输出 `▸ Phase 3/3 Agent Generation` 标题。
+- **KnowledgeBaseBrick (RAG retrieval)** — An engineering knowledge base for agents, distinct from the skill's internal `references/` co-located knowledge. Users specify a KB path as the second CLI argument; the hatch pipeline builds a vector index at hatch time and the `retrieve` tool searches it at runtime.
+  - **Phase B (compile-time integration)**: KB inference pipeline (B2 detection -> B3 usage strategy -> B4 prompt generation). `_build_knowledge_index()` runs after `_prepare_output_dir` and before template rendering.
+  - **Phase C (runtime assembly)**: `RetrieveTool` registers on CapBus; `AHCoreAgent` KB assembly block; `ContextManager` injects the KB system prompt.
+  - **`knowledge_base.py.j2` template**: generates a runtime `retrieve()` function with LLM-inferred `WHEN_TO_RETRIEVE`, `QUERY_TEMPLATES`, and `SYSTEM_PROMPT_SECTION`.
+  - **SQLite FTS5 index + BM25 scoring**: FTS5 indexing replaces `-` with spaces to avoid NOT operator parsing; BM25 scoring uses `abs(rank)/(1+abs(rank))` to prioritize relevant documents.
+- **HatchReport confidence source unified** — Hatch Summary confidence values now use E harness cross-evaluation scores, with self-assessment as fallback. Fixes the Confidence panel (1.00) vs Hatch Summary (0.50) mismatch.
+- **Phase 3/3 title** — Normal (non-dry-run) hatch runs now display `Phase 3/3 Agent Generation` in the console.
 
 ### Fixed
 
-- **`--force` 误删 KB 索引** — `--force` flag 在覆盖输出目录时误删 KB 索引文件。修复为 `--force` 不再清除 KB 索引。
-- **SQLite 跨线程错误** — SQLite 连接改用 thread-local storage，避免跨线程访问错误。
-- **BM25 评分反转** — BM25 评分未取绝对值，负 rank 导致评分异常。修复为 `abs(rank)/(1+abs(rank))`。
-- **FTS5 hyphen 解析** — FTS5 将 hyphen 解析为 NOT 操作符导致查询失败。修复为索引时将 `-` 替换为空格。
-- **B2 detector 误报** — B2 detector 通过目录名匹配误判非 KB skill 为 KB skill。修复为只识别 KB 特定词汇，不匹配目录名。
+- **`--force` deletes KB index** — The `--force` flag was deleting KB index files when overwriting the output directory. Fixed: `--force` no longer clears the KB index.
+- **SQLite cross-thread errors** — SQLite connections now use thread-local storage to prevent cross-thread access errors.
+- **BM25 score inversion** — BM25 scores were not taking absolute values, so negative ranks produced inverted scores. Fixed to `abs(rank)/(1+abs(rank))`.
+- **FTS5 hyphen parsing** — FTS5 parsed hyphens as NOT operators, causing query failures. Fixed by replacing `-` with spaces at index time.
+- **B2 detector false positives** — B2 detector matched directory names, misclassifying non-KB skills as KB skills. Fixed to only recognize KB-specific vocabulary, not directory names.
 
 ---
 

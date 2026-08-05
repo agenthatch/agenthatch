@@ -49,6 +49,41 @@ got an empty string even though the answer had streamed to the terminal.
 meta-narration stripping. Both fixed, plus a wider pattern list for the
 trailing meta-narration the LLM tends to append before `task_complete`.
 
+v1.0.2 through v1.0.4 are the KB hardening pass. The chunker was silently
+dropping text when a paragraph exceeded `chunk_size`; `discover_kb_files`
+was ignoring `exclude_patterns`; the generated `pyproject.toml` was
+missing `agenthatch-core` so `retrieve()` failed silently after pip
+install; `retrieve(top_k=0)` returned one result instead of zero; and
+`_fuse_results` leaked zero-score documents into top-k at `alpha=1.0`
+or `alpha=0.0`. Regression coverage for the KB module went from 29 to
+48 tests, plus 12 static guard tests that prevent template regressions
+(`return (yield from`, `kb_max_text`, `sys.modules` registration) and
+5 MCP/LLM regression tests.
+
+v1.0.5 shifts the harness pipeline. Harness E now merges MCP server
+definitions from F's output into the assembled interface, so generated
+agents ship with MCP tools wired in without a separate step. Confidence
+scores take a 5% hit per retry (floored at 0.75) so a harness that
+succeeds on retry 3 doesn't report the same confidence as one that
+nailed it on the first try. JSON Schema `enum`/`min`/`max`/`pattern`
+constraints are now mapped to Pydantic types instead of silently
+dropped.
+
+v1.0.6 fixes two crashes. `KnowledgeStore()` was instantiated before
+the `try` block, so an init failure (bad model path, disk full) made
+the `finally` block crash on `store.close()` with an unbound variable.
+Generated KB agents were missing `from .knowledge_base import retrieve`,
+so the first retrieve call raised `NameError`. The E harness failure
+path also stopped freezing the spinner.
+
+v1.0.7 adds exception-swallow detection to the post-generation review.
+Generated tools that catch `Exception` and return `None` / `""` / `[]`
+/ `pass` make real failures look identical to legitimate empty results.
+WARNING-only on purpose — an earlier attempt let B4 rewrite these
+automatically, but the LLM kept either deleting legitimate fallbacks or
+narrowing to a specific exception class that missed the actual failure
+mode.
+
 What's not done yet: LLM re-rank of retrieved chunks, cross-agent shared
 KB memory, and a maintenance loop that flags stale entries. The hybrid
 search is BM25 + embeddings; re-ranking is still on the to-do list.
@@ -122,6 +157,9 @@ Some items people commonly ask about are already implemented:
 | Hatch report (`--report` / `--json`) | ✅ Since v0.9.17 |
 | Post-generation self-review (inspect → test → repair loop) | ✅ Since v0.9.22 |
 | KnowledgeBaseBrick (RAG retrieval, SQLite FTS5 + BM25) | ✅ Since v1.0.0 |
+| KB pipeline hardening (chunker, exclude, top_k, fuse, path resolution) | ✅ Since v1.0.4 |
+| Confidence retry penalty + JSON Schema constraint mapping | ✅ Since v1.0.5 |
+| Exception-swallow antipattern detection in postgen review | ✅ Since v1.0.7 |
 
 ---
 
