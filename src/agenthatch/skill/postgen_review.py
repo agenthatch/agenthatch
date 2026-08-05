@@ -608,9 +608,11 @@ def _detect_semantic_stubs(
 # swallowed the error".  Empty containers (``[]`` / ``{}`` / ``()``)
 # are handled separately in ``_handler_body_is_swallow`` via AST node
 # types, since they can't live in a frozenset (unhashable).
-_SILENT_FALLBACK_LITERALS: frozenset[Any] = frozenset(
-    {None, "", 0, False}
-)
+#
+# Note: ``0`` and ``False`` compare equal in Python, so the frozenset
+# dedupes them — membership check ``0 in _SILENT_FALLBACK_LITERALS``
+# still matches both ``return 0`` and ``return False``.
+_SILENT_FALLBACK_LITERALS: frozenset[Any] = frozenset({None, "", 0})
 
 
 def _is_broad_except(handler: ast.ExceptHandler) -> bool:
@@ -652,26 +654,43 @@ def _handler_body_is_swallow(handler: ast.ExceptHandler) -> str | None:
     log/re-raise, which are considered intentional handling).
     """
     body = handler.body
-    if not body:
+    if not body or len(body) != 1:
         return None
 
-    # Single-statement bodies are the common offender.
-    if len(body) == 1:
-        stmt = body[0]
-        if isinstance(stmt, ast.Pass):
-            return "pass"
-        if isinstance(stmt, ast.Return):
-            if stmt.value is None:
-                return "return (bare)"
-            if isinstance(stmt.value, ast.Constant) and stmt.value.value in _SILENT_FALLBACK_LITERALS:
-                return f"return {stmt.value.value!r}"
-            # ast.List / ast.Tuple / ast.Dict with no elements → [] / () / {}
-            if isinstance(stmt.value, (ast.List, ast.Tuple, ast.Dict)) and len(stmt.value.elts if isinstance(stmt.value, (ast.List, ast.Tuple)) else stmt.value.keys) == 0:
-                empty_repr = "[]" if isinstance(stmt.value, ast.List) else "{}" if isinstance(stmt.value, ast.Dict) else "()"
-                return f"return {empty_repr}"
-        # ``... `` (Ellipsis literal as a body) — functionally a pass
-        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value is Ellipsis:
-            return "..."
+    stmt = body[0]
+    if isinstance(stmt, ast.Pass):
+        return "pass"
+
+    if isinstance(stmt, ast.Return):
+        return _classify_return_value(stmt.value)
+
+    # ``...`` (Ellipsis literal as a body) — functionally a pass.
+    if (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and stmt.value.value is Ellipsis
+    ):
+        return "..."
+    return None
+
+
+def _classify_return_value(value: ast.AST | None) -> str | None:
+    """Classify a return value as a silent swallow or ``None``.
+
+    Handles bare ``return``, scalar literals in
+    ``_SILENT_FALLBACK_LITERALS``, and empty container literals
+    (``[]`` / ``{}`` / ``()``).
+    """
+    if value is None:
+        return "return (bare)"
+    if isinstance(value, ast.Constant) and value.value in _SILENT_FALLBACK_LITERALS:
+        return f"return {value.value!r}"
+    if isinstance(value, ast.List) and not value.elts:
+        return "return []"
+    if isinstance(value, ast.Tuple) and not value.elts:
+        return "return ()"
+    if isinstance(value, ast.Dict) and not value.keys:
+        return "return {}"
     return None
 
 
