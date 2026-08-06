@@ -467,6 +467,14 @@ def _detect_undefined_variables(
                                 local_names.add(elt.id)
             elif isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Name):
                 local_names.add(sub.target.id)
+            elif isinstance(sub, ast.NamedExpr) and isinstance(sub.target, ast.Name):
+                # PEP 572 walrus operator ``n := expr`` — assigns to
+                # ``n`` as an expression.  Without this branch, ``n`` is
+                # not added to ``local_names``, so the subsequent
+                # ``return n`` is misreported as undefined, triggering
+                # B4 to "repair" working walrus code by adding bogus
+                # defaults or rewriting the expression into a statement.
+                local_names.add(sub.target.id)
             elif isinstance(sub, ast.MatchAs) and sub.name is not None:
                 local_names.add(sub.name)
             elif isinstance(sub, ast.MatchStar) and sub.name is not None:
