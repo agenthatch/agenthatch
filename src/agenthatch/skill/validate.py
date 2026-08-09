@@ -319,10 +319,17 @@ def _retarget_harness(
     logger.info(f"Retargeting Harness {harness_key} ({HARNESS_LABELS.get(harness_key, '?')})")
 
     if harness_key == "A":
+        # v1.0.5 (Bug #17): Pass full body, not [:2500].  The Orchestrator
+        # main path (engine.py L1133) passes ``context.body`` unchanged;
+        # the previous ``[:2500]`` truncation here caused retarget-time
+        # Harness A to see less context than the original run.  For
+        # SKILL.md bodies > 2500 chars (common), identity fields
+        # referenced past char 2500 became invisible and the repair
+        # would fail even though the original Harness A had no trouble.
         output = h.run(
             frontmatter=context.frontmatter,
             dir_name=context.dir_name,
-            body_first_50_lines=context.body[:2500],
+            body_first_50_lines=context.body,
             file_contents=context.file_manifest.content_bundle(),
         )
     elif harness_key == "B":

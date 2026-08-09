@@ -10,6 +10,14 @@ No unreleased changes.
 
 ---
 
+## [v1.0.8] — 2026-07-20
+
+### Fixed
+
+- **Bug #17: `_retarget_harness("A")` truncated body to first 2500 chars** — `validate.py` passed `body_first_50_lines=context.body[:2500]` when re-running Harness A after a Pydantic validation failure, while the Orchestrator main path (`engine.py` L1133) passes `context.body` unchanged. For SKILL.md bodies longer than 2500 chars (common for medium-size skills), the retarget run saw less context than the original. Identity fields declared past char 2500 (e.g. an `id` inside a code block near the end of the body) became invisible, so the repair failed even though the original Harness A had no trouble extracting them. This surfaced as a spurious `SchemaValidationError` after exhausting `max_targeted_retries`. Fixed to pass `context.body` unchanged, matching the main path. 13 regression tests added in `tests/test_validate_regressions.py`: 2 dynamic tests verifying retarget passes full body, 1 static guard preventing `[:2500]` from reappearing, 3 smoke tests for other harness retarget signatures (B/C/D), and 7 `_map_errors_to_harnesses` field-routing tests.
+
+---
+
 ## [v1.0.7] — 2026-07-20
 
 ### Added
