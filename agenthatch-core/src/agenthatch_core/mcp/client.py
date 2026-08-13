@@ -77,18 +77,37 @@ class StdioTransport(Transport):
         if not self._proc or not self._proc.stdin or not self._proc.stdout:
             return {}
         payload = json.dumps(request)
-        self._proc.stdin.write(payload + "\n")
-        self._proc.stdin.flush()
+        try:
+            self._proc.stdin.write(payload + "\n")
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError) as e:
+            # Subprocess died — don't crash the caller, return {} per contract.
+            logger.warning("MCP StdioTransport write failed: %s", e)
+            return {}
         effective_timeout = timeout if timeout is not None else self._config.timeout
         deadline = time.time() + effective_timeout
+        expected_id = request.get("id")
         while time.time() < deadline:
             line = self._proc.stdout.readline()
             if not line:
                 return {}
             try:
-                return cast(dict[str, Any], json.loads(line))
+                msg = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            # v1.0.9 (Bug 21): Skip notifications (no "id" field) and
+            # any response whose "id" doesn't match our request. MCP
+            # servers can emit async notifications (notifications/progress,
+            # notifications/message, log messages) on stdout BEFORE the
+            # actual response. The previous code returned the first
+            # valid JSON line, so a startup notification would be
+            # mistaken for the initialize response — _discover_tools
+            # saw no "result" key and registered zero tools.
+            if "id" not in msg:
+                continue
+            if expected_id is not None and msg["id"] != expected_id:
+                continue
+            return cast(dict[str, Any], msg)
         logger.warning("MCP StdioTransport timed out after %.1fs", effective_timeout)
         return {}
 
@@ -230,7 +249,19 @@ class SSETransport(Transport):
             },
         })
         if init_response:
-            self.send_request({"method": "notifications/initialized"})
+            # v1.0.9 (Bug 22): Send notifications/initialized directly
+            # via _client.post, NOT via send_request. JSON-RPC 2.0
+            # notifications must NOT carry an "id" — but send_request
+            # injects "id": 1 into any request missing "jsonrpc",
+            # turning the notification into a regular request and
+            # colliding its id with the preceding initialize call.
+            # Standards-compliant SSE servers may reject the second
+            # id:1 or respond ambiguously, breaking the handshake.
+            self._client.post(
+                self._url,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                headers=self._headers,
+            )
 
     def send_request(self, request: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if not self._client:

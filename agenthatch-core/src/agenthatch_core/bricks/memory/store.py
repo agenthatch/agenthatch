@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,14 @@ class MemoryStore:
         self._core_path = self._dir / "MEMORY.md"
         self._prefs_path = self._dir / "preferences.md"
         self._facts_path = self._knowledge_dir / "facts.jsonl"
+        # v1.0.9 (Bug 19): Thread-local SQLite connection cache.
+        # Previously get_db() opened a brand-new connection on every call
+        # and no caller closed it. A long-running agent calling recall()
+        # once per turn for 1000 turns would leak ~2000 FDs (each sqlite
+        # connection holds 2 FDs: the db file + WAL) and hit the OS fd
+        # limit. Per project_memory.md hard constraint: "SQLite connections
+        # must use thread-local storage to prevent cross-thread errors".
+        self._thread_local = threading.local()
 
     # ── core memory ────────────────────────────────────────────────────
 
@@ -169,7 +178,40 @@ class MemoryStore:
         return self._dir / "index.db"
 
     def get_db(self) -> sqlite3.Connection:
-        """Get or create the SQLite database connection."""
-        db = sqlite3.connect(str(self.get_db_path()))
-        db.execute("PRAGMA journal_mode=WAL")
-        return db
+        """Get or create a thread-local SQLite database connection.
+
+        v1.0.9 (Bug 19): Returns a cached connection per thread instead
+        of opening a new one on every call. Callers (``_ensure_index``,
+        ``_bm25_search``, ``_fallback_search``, ``rebuild_index``) used
+        to leak connections because none of them called ``db.close()``.
+        Now the connection lives for the thread's lifetime and is reused
+        across calls.
+        """
+        conn = getattr(self._thread_local, "conn", None)
+        if conn is not None:
+            return conn
+        conn = sqlite3.connect(str(self.get_db_path()), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+        except sqlite3.OperationalError:
+            pass  # WAL may fail on network filesystems — fall back to default
+        self._thread_local.conn = conn
+        return conn
+
+    def close(self) -> None:
+        """Close the thread-local SQLite connection if open.
+
+        v1.0.9 (Bug 19): Optional cleanup method. MemoryBrick should call
+        this on shutdown to release the connection; if it doesn't, Python's
+        GC will reap it eventually, but explicit close avoids fd pressure
+        on long-lived processes.
+        """
+        conn = getattr(self._thread_local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            self._thread_local.conn = None

@@ -256,6 +256,14 @@ class CapBus:
                 expected = spec.get("type", "string")
                 if key in data:
                     actual = _JSON_TYPE_MAP.get(type(data[key]).__name__, "string")
+                    # v1.0.9 (Bug 20): JSON Schema "number" is a superset of
+                    # "integer" per spec (https://json-schema.org/draft/2020-12/
+                    # json-schema-validation.html#name-type). A tool returning
+                    # int 42 for a field declared as {"type": "number"} is
+                    # valid; previously rejected with "expected number, got
+                    # integer", breaking the agent's reasoning chain.
+                    if expected == "number" and actual == "integer":
+                        continue
                     if actual != expected:
                         logger.warning(
                             "Tool %s output schema validation failed: field '%s' expected %s, got %s",

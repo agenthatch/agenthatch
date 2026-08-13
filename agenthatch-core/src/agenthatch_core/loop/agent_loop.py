@@ -955,11 +955,26 @@ class ConversationLoop:
                         # answer to the user (has_yielded_text=True), use
                         # accumulated_text as the final text — do NOT yield
                         # the task_complete summary, which is typically a
-                        # meta-summary like "已回答…".  Only yield the
-                        # summary when no text was streamed (e.g. the LLM
-                        # called task_complete without any prior answer).
+                        # meta-summary like "已回答…".
+                        #
+                        # v1.0.9 (Bug 18): When has_yielded_text is False
+                        # but accumulated_text is non-empty, the text was
+                        # buffered in KB mode (max_text=0) without ever
+                        # calling a tool. The R4-V18 comment claimed this
+                        # buffered text would be "yielded as the final
+                        # answer via accumulated_text below" — but the
+                        # code actually used ``summary``, silently dropping
+                        # the real answer. A KB agent that answered from
+                        # training data (no retrieve needed) and then
+                        # called task_complete(summary="Done") would show
+                        # the user "Done" instead of the actual answer.
+                        # Now: yield accumulated_text when present, fall
+                        # back to summary only when nothing was buffered.
                         if has_yielded_text:
                             final_text = accumulated_text
+                        elif accumulated_text:
+                            final_text = accumulated_text
+                            yield accumulated_text
                         else:
                             final_text = summary
                             yield summary
