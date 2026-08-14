@@ -482,8 +482,23 @@ class AHCoreAgent:
                 if script_name and scripts_dir and (scripts_dir / script_name).exists():
                     script_exists = True
                 elif scripts_dir and scripts_dir.is_dir():
-                    # Legacy fallback: check if {cap_name}.py exists
-                    script_exists = (scripts_dir / f"{cap_name}.py").exists()
+                    # Legacy fallback: check if {cap_name}.py exists.
+                    # v1.0.10 (Bug 23): Must update script_name to the
+                    # discovered filename. The fallback fires when
+                    # script_name is a multi-word command like
+                    # "python create_docx.py" (scripts_dir / "python
+                    # create_docx.py" doesn't exist as a file) — but
+                    # the previous code kept the multi-word script_name,
+                    # registered a sandbox executor that would always
+                    # return "script not found", AND because the executor
+                    # was non-None, _register_python_tool() skipped the
+                    # real Python implementation (L594 check). Result:
+                    # capability permanently broken. Now: when the
+                    # legacy fallback finds {cap_name}.py, use that
+                    # filename as script_name.
+                    if (scripts_dir / f"{cap_name}.py").exists():
+                        script_exists = True
+                        script_name = f"{cap_name}.py"
                 if script_exists:
                     executor = _provide_script_executor(
                         cap_name, self.sandbox, self._agent_root,

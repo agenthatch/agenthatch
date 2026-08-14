@@ -10,6 +10,18 @@ No unreleased changes.
 
 ---
 
+## [v1.0.10] — 2026-08-14
+
+### Fixed
+
+- **Bug #23: Agent legacy fallback left multi-word `script_name`, permanently breaking capabilities** — When `agenthatch.yaml` workflow declared `script: "python create_docx.py"` (a multi-word command, not a filename) AND `scripts_dir / "{cap_name}.py"` happened to exist, the legacy fallback at `agent.py:484-486` set `script_exists = True` but did NOT update `script_name`. The sandbox executor was registered with `script_name="python create_docx.py"`, which never exists as a file path, so every call returned `Error: script 'python create_docx.py' not found in ...`. Worse: because the broken executor was non-None, `_register_python_tool()` skipped the real Python implementation at L594's `existing.executor is not None` check, leaving the capability permanently broken. The v0.8.21 comment explicitly claimed to fix this shadowing scenario, but the legacy fallback re-introduced it. Now: the legacy fallback updates `script_name = f"{cap_name}.py"` when it discovers the file, so the executor finds the script and the Python tool fallback still works. Probe-confirmed with simulated workflow + scripts_dir.
+
+### Added
+
+- **Agent runtime regression tests** — 5 new tests in `tests/test_agent_runtime_regressions.py` covering Bug #23 (legacy fallback updates `script_name`, explicit script_name unchanged, None script_name fallback, no-file description-only path, static source guard).
+
+---
+
 ## [v1.0.9] — 2026-08-12
 
 ### Fixed
