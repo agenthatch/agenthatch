@@ -115,12 +115,29 @@ class MemoryStore:
         """Iterate all session entries across all session files."""
         entries: list[dict[str, Any]] = []
         for session_file in sorted(self._sessions_dir.glob("*.jsonl")):
+            # v1.0.11 (Bug 29): Catch UnicodeDecodeError too — it's a
+            # subclass of ValueError (via UnicodeError), NOT OSError,
+            # so the previous ``except (json.JSONDecodeError, OSError)``
+            # didn't catch it.  A session file with non-UTF-8 bytes
+            # (e.g. truncated multi-byte sequence from a crash) would
+            # propagate the error and crash the entire iter call.
             try:
-                for line in session_file.read_text(encoding="utf-8").strip().split("\n"):
-                    if line.strip():
-                        entries.append(json.loads(line))
-            except (json.JSONDecodeError, OSError):
+                text = session_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
                 continue
+            # v1.0.11 (Bug 28): Skip bad LINES, not bad FILES.  The
+            # previous code wrapped the entire read+parse loop in one
+            # try/except — a single corrupt line (e.g. partial write
+            # from a killed process) caused ALL valid entries in the
+            # same file to be lost.  Per-line try/except preserves the
+            # valid entries and only drops the bad line.
+            for line in text.strip().split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
         return entries
 
     def get_recent_session_entries(self, limit: int = 30) -> list[dict[str, Any]]:
@@ -134,15 +151,24 @@ class MemoryStore:
         for session_file in sorted(
             self._sessions_dir.glob("*.jsonl"), reverse=True
         ):
+            # v1.0.11 (Bug 29): Catch UnicodeDecodeError (subclass of
+            # ValueError, not OSError) so a truncated-UTF-8 file skips
+            # cleanly instead of crashing the iter.
             try:
-                lines = session_file.read_text(encoding="utf-8").strip().split("\n")
-                for line in reversed(lines):
-                    if line.strip():
-                        entries.append(json.loads(line))
-                        if len(entries) >= limit:
-                            break
-            except (json.JSONDecodeError, OSError):
+                text = session_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
                 continue
+            # v1.0.11 (Bug 28): Per-line try/except — skip bad lines,
+            # not the entire file.
+            for line in reversed(text.strip().split("\n")):
+                if not line.strip():
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+                if len(entries) >= limit:
+                    break
             if len(entries) >= limit:
                 break
         return list(reversed(entries))  # chronological order
@@ -162,13 +188,24 @@ class MemoryStore:
         """Iterate all knowledge facts."""
         if not self._facts_path.exists():
             return []
-        entries: list[dict[str, Any]] = []
+        # v1.0.11 (Bug 29): Catch UnicodeDecodeError (subclass of
+        # ValueError, not OSError) so a truncated-UTF-8 facts file
+        # returns [] instead of crashing the agent's recall.
         try:
-            for line in self._facts_path.read_text(encoding="utf-8").strip().split("\n"):
-                if line.strip():
-                    entries.append(json.loads(line))
-        except (json.JSONDecodeError, OSError):
-            pass
+            text = self._facts_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return []
+        entries: list[dict[str, Any]] = []
+        # v1.0.11 (Bug 28): Per-line try/except — skip bad lines, not
+        # the entire file.  A single corrupt line shouldn't lose all
+        # valid facts in the same file.
+        for line in text.strip().split("\n"):
+            if not line.strip():
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
         return entries
 
     # ── SQLite index support ───────────────────────────────────────────

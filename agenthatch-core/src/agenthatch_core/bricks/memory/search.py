@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -155,6 +156,15 @@ class MemorySearch:
         # Escape special FTS5 characters
         safe_query = self._escape_fts5_query(query)
 
+        # v1.0.11 (Bug 27): Guard against empty queries.  If the escaped
+        # query is empty (user passed only special chars or whitespace),
+        # FTS5 MATCH raises OperationalError, which previously fell
+        # through to _fallback_search.  There, ``like_query = f"%{q}%"``
+        # became ``"%%"`` and matched EVERY document — returning 20
+        # random docs to the user.  KB store guards with this same check.
+        if not safe_query.strip():
+            return []
+
         try:
             cursor = db.execute(
                 "SELECT m.content, m.source, m.timestamp, m.is_evergreen, "
@@ -169,8 +179,20 @@ class MemorySearch:
             results: list[MemoryEntry] = []
             for row in cursor.fetchall():
                 content, source, timestamp, is_evergreen, rank = row
-                # BM25 returns negative scores (lower = better), invert to positive
-                score = 1.0 / (1.0 + abs(rank)) if rank is not None else 0.5
+                # v1.0.11 (Bug 25): BM25 returns negative values where
+                # MORE negative = MORE relevant.  The previous formula
+                # (one over one-plus-abs-rank) was INVERTED — it gave
+                # HIGHER scores to LESS relevant docs (smaller |rank|),
+                # so ``_mmr_rerank`` (which sorts descending) returned
+                # the LEAST relevant doc first.  KB store fixed this in
+                # v0.9.x to magnitude / (1 + magnitude) (higher =
+                # more relevant); memory store was missed during the
+                # original refactor.
+                if rank is None:
+                    score = 0.5
+                else:
+                    magnitude = abs(rank)
+                    score = magnitude / (1.0 + magnitude)
                 results.append(MemoryEntry(
                     content=content,
                     score=score,
@@ -178,18 +200,33 @@ class MemorySearch:
                     source=source,
                 ))
             return results
-        except Exception:
-            # FTS5 query failed — fall back to simple LIKE search
+        except sqlite3.OperationalError:
+            # v1.0.11 (Bug 26): Narrow the catch from ``Exception`` to
+            # ``sqlite3.OperationalError``.  The broad catch previously
+            # masked programming errors (NameError, AttributeError, etc.)
+            # by silently falling back to LIKE search.  Only FTS5 query
+            # syntax failures (the legitimate fallback trigger) are
+            # OperationalError; everything else should propagate so we
+            # can see and fix it.
             return self._fallback_search(query)
 
     def _fallback_search(self, query: str) -> list[MemoryEntry]:
         """Simple LIKE-based search fallback when FTS5 fails."""
         db = self.store.get_db()
-        like_query = f"%{query}%"
+        # v1.0.11 (Bug 24): Escape LIKE wildcards (%, _) and backslash so
+        # user queries like "100%" or "file_name" don't act as wildcards.
+        # KB store's _fallback_search got this fix in v1.0.1; memory store
+        # was missed during the original refactor.
+        escaped = (
+            query.replace("\\", "\\\\")
+                 .replace("%", "\\%")
+                 .replace("_", "\\_")
+        )
+        like_query = f"%{escaped}%"
         cursor = db.execute(
             "SELECT content, source, timestamp, is_evergreen "
             "FROM memory_index "
-            "WHERE content LIKE ? "
+            "WHERE content LIKE ? ESCAPE '\\' "
             "LIMIT 20",
             (like_query,),
         )
@@ -208,14 +245,47 @@ class MemorySearch:
 
     @staticmethod
     def _escape_fts5_query(query: str) -> str:
-        """Escape special FTS5 characters and format for prefix matching."""
-        # FTS5 special chars: * " - ( ) :
-        escaped = re.sub(r'([*"\-():])', r'\\\1', query)
-        # Add prefix wildcard to last word for partial matching
+        """Escape special FTS5 characters and format for prefix matching.
+
+        Uses OR semantics for better recall (partial matches still scored).
+        BM25 still ranks documents with more matching terms higher.
+
+        Hyphens are replaced with spaces *before* tokenization — FTS5 treats
+        ``-`` as the NOT operator in query syntax, so ``wind-rider*`` would
+        be parsed as ``wind NOT rider*`` and match nothing in documents that
+        contain both ``wind`` and ``rider``.  Since the unicode61 tokenizer
+        already splits hyphenated words at index time, splitting them at
+        query time keeps the query consistent with the index.
+
+        v1.0.11 (Bug 24): Also escape backslash and caret.  FTS5 treats
+        ``\\`` as an escape prefix, so an unescaped backslash (e.g. Windows
+        path ``C:\\Users``) silently truncates the query at the ``\\``.
+        ``^`` is the column qualifier (alternative to ``:``), so
+        ``title^hello`` is parsed as "search column ``title`` for ``hello``"
+        — usually wrong since most schemas don't have a ``title`` column on
+        ``memory_fts``.  Previously only ``* " - ( ) :`` were escaped;
+        missing ``^`` and ``\\`` caused silent query failures.
+
+        v1.0.11 (Bug 24): Add prefix wildcard to EVERY word (not just the
+        last), and join with ``OR`` for better recall.  The previous
+        ``default space = AND`` join with only-last-word prefix caused
+        multi-word queries like ``"fireball level 3 spell"`` to require
+        all four terms to match exactly, which is too strict for RAG
+        recall.  KB store's v1.0.1 fix used this pattern; memory store
+        was missed during the original refactor.
+        """
+        # Replace hyphens with spaces first — they are FTS5 NOT operators
+        # in query syntax AND separators in the unicode61 tokenizer.
+        # Also escape remaining special chars: * " ( ) : ^ \
+        cleaned = query.replace("-", " ")
+        escaped = re.sub(r'([*"():^\\])', r'\\\1', cleaned)
         words = escaped.strip().split()
-        if words:
-            words[-1] = words[-1] + "*"
-        return " ".join(words)
+        if not words:
+            return ""
+        # Add prefix wildcard to each word for partial matching
+        words = [w + "*" for w in words if w]
+        # Use OR for better recall — partial term matches still get scored
+        return " OR ".join(words)
 
     def _apply_time_decay(self, results: list[MemoryEntry]) -> list[MemoryEntry]:
         """Apply time decay: score × e^(-λ × days_since).
