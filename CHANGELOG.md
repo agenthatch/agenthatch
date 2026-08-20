@@ -6,6 +6,12 @@ All notable changes to agenthatch will be documented in this file.
 
 ## [Unreleased]
 
+No unreleased changes.
+
+---
+
+## [v1.0.11] — 2026-08-16
+
 ### Fixed
 
 - **Bug #24: `MemorySearch._escape_fts5_query` diverged from KB store** — The memory store's FTS5 query escaper was missed during the original refactor and never got the KB store's v1.0.1 improvements. Four issues: (1) hyphens were escaped as literals instead of replaced with spaces, so `wind-rider*` was parsed as `wind NOT rider*` and matched nothing in docs containing both terms; (2) `^` and `\\` were not escaped, so `title^hello` was parsed as a column-qualifier search and Windows paths like `C:\\Users` silently truncated the query at the `\\`; (3) prefix wildcard was only on the last word, so multi-word queries required exact matches on all but the last term; (4) words were joined with implicit AND, too strict for RAG recall. Now: hyphens replaced with spaces, `^` and `\\` escaped, prefix wildcard on every word, OR join for better recall. Matches KB store pattern.
@@ -15,6 +21,7 @@ All notable changes to agenthatch will be documented in this file.
 - **Bug #27: `MemorySearch._bm25_search` missing empty-query guard** — When the escaped query was empty (user passed only special chars or whitespace), FTS5 MATCH raised `OperationalError` and fell through to `_fallback_search`. There, `like_query = f"%{escaped}%"` became `"%%"` and matched EVERY document — returning 20 random docs to the user. Now: empty escaped query returns `[]` immediately (matching KB store's guard).
 - **Bug #28: `iter_session_entries` / `get_recent_session_entries` / `iter_knowledge_facts` skipped entire file on any single corrupt JSON line** — The read+parse loop was wrapped in one `try/except`. A single partial write (e.g. process killed mid-append) caused ALL valid entries in the same file to be lost. Now: per-line `try/except` skips only the bad line, preserving the valid entries.
 - **Bug #29: `iter_session_entries` / `get_recent_session_entries` / `iter_knowledge_facts` didn't catch `UnicodeDecodeError`** — `UnicodeDecodeError` is a subclass of `ValueError` (via `UnicodeError`), NOT `OSError`, so the previous `except (json.JSONDecodeError, OSError)` didn't catch it. A session file with non-UTF-8 bytes (e.g. truncated multi-byte sequence from a crash) propagated the error and crashed the entire `iter_*` call — taking down the agent's recall. Now: `UnicodeDecodeError` is caught alongside `OSError`, so a truncated-UTF-8 file is skipped cleanly.
+- **Bug #30: `_has_side_effects` missed `from X import Y` bare-name calls and `os`/`shutil` module calls** — The post-generation review's side-effect detector only checked `ast.Attribute` calls (`subprocess.run(...)`, `requests.get(...)`). Two whole categories were missed: (1) `from subprocess import run` followed by a bare `run(...)` call — the imported name is bound locally, so `sub.func` is an `ast.Name`, not an `ast.Attribute`; (2) `os.system(...)`, `os.remove(...)`, `shutil.rmtree(...)` — the `os`/`shutil` modules were not in the module list. Both are extremely common in LLM-generated tool code. A missed detection means the "safe to self-test" gate lets a destructive call through and the sandbox executes it for real — e.g. `os.system('rm -rf /tmp/x')` would actually run during post-generation review. Now: flags bare-name calls for names imported from side-effect modules (`subprocess`, `os`, `shutil`, `requests`, `urllib`, `httpx`, `socket`), bare `open`/`exec`/`eval`/`input` builtins, and `os.*` attribute calls except `os.path.*` (which are pure path arithmetic). Conservative: an unused dangerous import (`from subprocess import run` with no call) also skips the self-test.
 
 ### Added
 

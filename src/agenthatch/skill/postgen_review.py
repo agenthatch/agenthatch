@@ -937,31 +937,135 @@ def test_tool_signatures(
     return report
 
 
+# Dangerous names imported via ``from X import Y`` that map to a
+# side-effect kind when called directly (``Y(...)`` without the module
+# prefix).  Keyed by the *imported name* the LLM would call.
+_FROM_IMPORT_DANGEROUS: dict[str, str] = {
+    # subprocess
+    "run": "subprocess",
+    "call": "subprocess",
+    "check_call": "subprocess",
+    "check_output": "subprocess",
+    "Popen": "subprocess",
+    "getoutput": "subprocess",
+    "getstatusoutput": "subprocess",
+    # os — process control
+    "system": "subprocess",
+    "popen": "subprocess",
+    "execv": "subprocess",
+    "execve": "subprocess",
+    "spawnv": "subprocess",
+    "spawnve": "subprocess",
+    "remove": "file_io",
+    "unlink": "file_io",
+    "rmdir": "file_io",
+    "removedirs": "file_io",
+    "mkdir": "file_io",
+    "makedirs": "file_io",
+    "rename": "file_io",
+    "renames": "file_io",
+    "replace": "file_io",
+    # builtins
+    "open": "file_io",
+    "exec": "subprocess",
+    "eval": "subprocess",
+    "input": "file_io",
+    # network
+    "urlopen": "network",
+    "urlretrieve": "network",
+    "create_connection": "network",
+}
+
+# Module names whose *any* attribute call is side-effectful
+# (``mod.anything(...)`` → skip self-test).  ``os`` is deliberately
+# NOT here — it has its own special-case logic below because
+# ``os.path.join`` / ``os.path.basename`` are pure.
+_SIDE_EFFECT_MODULES: dict[str, str] = {
+    "subprocess": "subprocess",
+    "requests": "network",
+    "urllib": "network",
+    "httpx": "network",
+    "socket": "network",
+    "shutil": "file_io",
+}
+
+
 def _has_side_effects(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
     """Detect if a function has side effects (subprocess, network, file IO).
+
+    v1.0.11: Previously only ``ast.Attribute`` calls were checked
+    (``subprocess.run(...)``, ``requests.get(...)``).  Two whole
+    categories were missed:
+
+    1. ``from subprocess import run`` followed by a bare ``run(...)``
+       call — the imported name is bound locally, so ``sub.func`` is
+       an ``ast.Name``, not an ``ast.Attribute``.
+    2. ``os.system(...)``, ``os.remove(...)``, ``shutil.rmtree(...)``
+       — the ``os``/``shutil`` modules were not in the module list.
+
+    Both are extremely common in LLM-generated tool code.  A missed
+    detection means the "safe to self-test" gate lets a destructive
+    call through and the sandbox executes it for real — e.g. an
+    ``os.system('rm -rf /tmp/x')`` tool would actually run during
+    post-generation review.
 
     Returns the side-effect kind as a string, or ``None`` if the function
     appears pure (safe to self-test).
     """
     for sub in ast.walk(func_node):
-        # subprocess.run / subprocess.Popen
+        # subprocess.run(...) / os.system(...) / shutil.rmtree(...) /
+        # requests.get(...) — module-prefixed attribute calls
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
             attr = sub.func
             if isinstance(attr.value, ast.Name):
-                if attr.value.id == "subprocess":
-                    return "subprocess"
-                if attr.value.id == "requests":
-                    return "network"
-                if attr.value.id == "urllib":
-                    return "network"
-                if attr.value.id == "httpx":
-                    return "network"
-        # open(...) calls (file IO)
+                if attr.value.id == "os":
+                    # os.path.join / os.path.basename are pure path
+                    # arithmetic — only flag other os.* calls
+                    # (os.system, os.remove, os.mkdir, ...).
+                    if attr.attr != "path":
+                        return "subprocess"
+                else:
+                    kind = _SIDE_EFFECT_MODULES.get(attr.value.id)
+                    if kind:
+                        return kind
+        # open(...) / run(...) / system(...) — bare name calls
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+            # ``open`` / ``exec`` / ``eval`` / ``input`` are builtins —
+            # flag unconditionally since they're always side-effectful
+            # (file IO / dynamic execution / blocking stdin read) when
+            # *called*.
             if sub.func.id == "open":
                 return "file_io"
-            if sub.func.id in ("socket",):
-                return "network"
+            if sub.func.id in ("exec", "eval"):
+                return "subprocess"
+            if sub.func.id == "input":
+                return "file_io"
+            # Other bare names are only dangerous if imported from a
+            # side-effect module (``from subprocess import run``).
+            # Caveat: if the tool defines its own helper named e.g.
+            # ``run``/``call``, this is a false positive — acceptable,
+            # skipping the self-test is cheap; running a destructive
+            # call is not.
+            kind = _FROM_IMPORT_DANGEROUS.get(sub.func.id)
+            if kind:
+                return kind
+        # ``from subprocess import run`` — the import itself proves
+        # intent to call it; flag regardless of whether we saw the
+        # call, so an unused dangerous import still skips the
+        # self-test (conservative).
+        if isinstance(sub, ast.ImportFrom):
+            if sub.module:
+                root = sub.module.split(".")[0]
+                if root == "os":
+                    # from os.path import join → pure; from os import
+                    # system → dangerous.  Check the imported names.
+                    for alias in sub.names:
+                        if alias.name != "path" and alias.name in _FROM_IMPORT_DANGEROUS:
+                            return _FROM_IMPORT_DANGEROUS[alias.name]
+                else:
+                    kind = _SIDE_EFFECT_MODULES.get(root)
+                    if kind:
+                        return kind
 
     return None
 
