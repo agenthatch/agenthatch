@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -82,14 +83,20 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="OPENAI_API_KEY",
         base_url="https://api.openai.com/v1",
-        default_model="gpt-4o",
-        context_window=128000,
+        default_model="gpt-5.6-sol",  # GPT-5.6 flagship (GA 2026-07), 1.05M context
+        context_window=1050000,
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,
             supports_json_mode=True,
             supports_parallel_tool_calls=True,
-            supports_reasoning_content=True,  # o-series / GPT-5.5 thinking models
+            supports_reasoning_content=True,  # o-series / GPT-5.x thinking models
+            available_models=(
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+                "gpt-5.5",
+            ),
         ),
     ),
     "anthropic": ProviderInfo(
@@ -134,8 +141,8 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="",
         base_url="http://localhost:11434/v1",
-        default_model="llama3",
-        context_window=4096,
+        default_model="llama3.1",
+        context_window=4096,  # Ollama runtime default (num_ctx), not model max
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,
@@ -143,11 +150,62 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_parallel_tool_calls=True,
         ),
     ),
+    # Zhipu GLM — OpenAI-compatible v4 endpoint.
+    # China: open.bigmodel.cn; intl alternative: https://api.z.ai/api/paas/v4
+    "glm": ProviderInfo(
+        name="glm",
+        kind="builtin",
+        env_key="ZAI_API_KEY",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        default_model="glm-5",
+        context_window=200000,
+        features=ProviderFeatures(
+            supports_tools=True,
+            supports_stream_tools=True,
+            supports_json_mode=True,
+            supports_parallel_tool_calls=True,
+            supports_reasoning_content=True,
+            available_models=(
+                "glm-5",
+                "glm-4.7",
+                "glm-4.6",
+                "glm-4.5-air",
+                "glm-4.7-flash",
+            ),
+        ),
+    ),
+    # Qwen (Alibaba Cloud DashScope) — OpenAI-compatible endpoint.
+    # China (Beijing): dashscope.aliyuncs.com; intl: dashscope-intl.aliyuncs.com
+    "qwen": ProviderInfo(
+        name="qwen",
+        kind="builtin",
+        env_key="DASHSCOPE_API_KEY",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        default_model="qwen3.8-max",
+        context_window=262144,
+        features=ProviderFeatures(
+            supports_tools=True,
+            supports_stream_tools=True,
+            supports_json_mode=True,
+            supports_parallel_tool_calls=True,
+            supports_reasoning_content=True,
+            available_models=(
+                "qwen3.8-max",
+                "qwen3.7-max",
+                "qwen3.7-plus",
+                "qwen3.7-flash",
+                "qwen-plus",
+            ),
+        ),
+    ),
 }
 
 BUILTIN_PROVIDER_NAMES: frozenset[str] = frozenset(BUILTIN_PROVIDERS.keys())
 
 logger = logging.getLogger(__name__)
+
+# Matches a base_url that already ends with a version segment (/v1, /v4, …).
+_VERSIONED_PATH_RE = re.compile(r"/v\d+$")
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +240,7 @@ def get_provider(name: str, config: dict[str, Any] | None = None) -> ProviderInf
     """Resolve a provider by name.
 
     Order:
-    1. Built-in providers (openai, anthropic, deepseek, ollama)
+    1. Built-in providers (openai, anthropic, deepseek, ollama, glm, qwen)
     2. Custom providers from config.toml [providers.custom.NAME]
 
     Args:
@@ -393,6 +451,11 @@ def verify_api_key(
     - 401/403 = key is invalid
     - Timeout/connection error = cannot verify (treated as uncertain, not failure)
 
+    The models endpoint is built by appending /models when the base_url
+    already ends with a version segment (e.g. /v1 for OpenAI-compatible
+    APIs, /v4 for Zhipu GLM); otherwise /v1/models is appended following
+    the OpenAI convention.
+
     Returns:
         (ok, detail) tuple:
         - ok=True: key verified successfully
@@ -405,9 +468,11 @@ def verify_api_key(
             if provider == "anthropic" or requires_anthropic_headers
             else {"Authorization": f"Bearer {api_key}"}
         )
-        # Build models endpoint: ensure /v1 prefix for providers that need it
+        # Build models endpoint: append /models when the URL already ends
+        # with a version segment (/v1, /v4, …); otherwise assume the
+        # OpenAI convention and append /v1/models.
         stripped = base_url.rstrip("/")
-        if "/v1" in stripped:
+        if _VERSIONED_PATH_RE.search(stripped):
             url = f"{stripped}/models"
         else:
             url = f"{stripped}/v1/models"

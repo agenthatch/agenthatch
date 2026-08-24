@@ -65,13 +65,27 @@ class TestNormalizeProviderSection:
         result = _normalize_provider_section(section, "openai")
         assert result["api_key"] == "sk-key"
         assert result["base_url"] == "https://api.openai.com/v1"
-        assert result["default_model"] == "gpt-4o"
+        assert result["default_model"] == "gpt-5.6-sol"
 
     def test_ollama_no_env_key(self):
         section = {}
         result = _normalize_provider_section(section, "ollama")
         assert result["base_url"] == "http://localhost:11434/v1"
-        assert result["default_model"] == "llama3"
+        assert result["default_model"] == "llama3.1"
+
+    def test_glm_fills_defaults(self):
+        section = {"api_key": "sk-glm"}
+        result = _normalize_provider_section(section, "glm")
+        assert result["api_key"] == "sk-glm"
+        assert result["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
+        assert result["default_model"] == "glm-5"
+
+    def test_qwen_fills_defaults(self):
+        section = {"api_key": "sk-qwen"}
+        result = _normalize_provider_section(section, "qwen")
+        assert result["api_key"] == "sk-qwen"
+        assert result["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert result["default_model"] == "qwen3.8-max"
 
     def test_custom_requires_base_url(self):
         section = {"api_key": "key"}
@@ -98,7 +112,7 @@ class TestLoadProviderConfig:
         result = load_provider_config(config, "openai")
         assert result["api_key"] == "sk-test"
         assert result["base_url"] == "https://api.openai.com/v1"
-        assert result["default_model"] == "gpt-4o"
+        assert result["default_model"] == "gpt-5.6-sol"
 
     def test_load_custom(self):
         config = {

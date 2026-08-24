@@ -375,7 +375,7 @@ class AHCoreAgent:
 
         self.llm = LLMClient(
             provider=llm_cfg.get("provider", "openai"),
-            model=llm_cfg.get("model", "gpt-4o"),
+            model=llm_cfg.get("model", "gpt-5.6-sol"),
             api_key=llm_cfg.get("api_key"),
             base_url=llm_cfg.get("base_url"),
             temperature=llm_cfg.get("temperature"),

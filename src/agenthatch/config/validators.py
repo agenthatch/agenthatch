@@ -73,7 +73,7 @@ def validate_config_integrity(config: dict[str, Any]) -> list[str]:
         raise ConfigError("[providers].default must be a string")
 
     # Collect all available provider names
-    available: set[str] = {"openai", "anthropic", "deepseek", "ollama"}
+    available: set[str] = {"openai", "anthropic", "deepseek", "ollama", "glm", "qwen"}
     custom_section = providers_section.get("custom", {})
     if isinstance(custom_section, dict):
         for name in custom_section:

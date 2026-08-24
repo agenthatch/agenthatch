@@ -21,12 +21,14 @@ from agenthatch.providers import (
 class TestBuiltinProviders:
     """Built-in provider registry tests."""
 
-    def test_four_builtin_providers(self):
-        assert len(BUILTIN_PROVIDERS) >= 4
+    def test_builtin_providers_present(self):
+        assert len(BUILTIN_PROVIDERS) >= 6
         assert "openai" in BUILTIN_PROVIDERS
         assert "anthropic" in BUILTIN_PROVIDERS
         assert "deepseek" in BUILTIN_PROVIDERS
         assert "ollama" in BUILTIN_PROVIDERS
+        assert "glm" in BUILTIN_PROVIDERS
+        assert "qwen" in BUILTIN_PROVIDERS
 
     def test_openai_info(self):
         info = BUILTIN_PROVIDERS["openai"]
@@ -34,7 +36,7 @@ class TestBuiltinProviders:
         assert info.kind == "builtin"
         assert info.env_key == "OPENAI_API_KEY"
         assert "api.openai.com" in info.base_url
-        assert info.default_model == "gpt-4o"
+        assert info.default_model == "gpt-5.6-sol"
 
     def test_ollama_no_env_key(self):
         info = BUILTIN_PROVIDERS["ollama"]
@@ -139,6 +141,105 @@ class TestVerifyApiKey:
         ok, detail = verify_api_key("openai", "sk-test", "https://api.openai.com/v1")
         assert ok is False  # M1 fix: timeout → failure, not "uncertain"
         assert "timed out" in detail
+
+    def test_glm_v4_base_url_hits_v4_models(self, monkeypatch):
+        """GLM base_url ends with /v4 — models URL must be /v4/models."""
+        captured: dict[str, str] = {}
+
+        class _MockResponse:
+            status_code = 200
+            is_success = True
+
+        def _mock_get(url, **kwargs):
+            captured["url"] = url
+            return _MockResponse()
+
+        monkeypatch.setattr("agenthatch.providers.httpx.get", _mock_get)
+        ok, _ = verify_api_key(
+            "glm", "sk-test", "https://open.bigmodel.cn/api/paas/v4"
+        )
+        assert ok is True
+        assert captured["url"] == "https://open.bigmodel.cn/api/paas/v4/models"
+
+    def test_v1_base_url_appends_models_only(self, monkeypatch):
+        """base_url ending in /v1 must keep appending just /models."""
+        captured: dict[str, str] = {}
+
+        class _MockResponse:
+            status_code = 200
+            is_success = True
+
+        def _mock_get(url, **kwargs):
+            captured["url"] = url
+            return _MockResponse()
+
+        monkeypatch.setattr("agenthatch.providers.httpx.get", _mock_get)
+        ok, _ = verify_api_key(
+            "qwen", "sk-test", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        assert ok is True
+        assert captured["url"] == (
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+        )
+
+    def test_unversioned_base_url_appends_v1_models(self, monkeypatch):
+        """base_url without a version segment keeps the /v1/models convention."""
+        captured: dict[str, str] = {}
+
+        class _MockResponse:
+            status_code = 200
+            is_success = True
+
+        def _mock_get(url, **kwargs):
+            captured["url"] = url
+            return _MockResponse()
+
+        monkeypatch.setattr("agenthatch.providers.httpx.get", _mock_get)
+        ok, _ = verify_api_key(
+            "anthropic", "sk-test", "https://api.anthropic.com"
+        )
+        assert ok is True
+        assert captured["url"] == "https://api.anthropic.com/v1/models"
+
+
+class TestGlmQwenPresets:
+    """GLM / Qwen builtin provider preset tests."""
+
+    def test_glm_preset(self):
+        info = BUILTIN_PROVIDERS["glm"]
+        assert info.name == "glm"
+        assert info.kind == "builtin"
+        assert info.env_key == "ZAI_API_KEY"
+        assert info.base_url == "https://open.bigmodel.cn/api/paas/v4"
+        assert info.default_model == "glm-5"
+        assert info.context_window == 200000
+        assert info.features.supports_tools
+        assert info.features.supports_stream_tools
+        assert info.features.supports_reasoning_content
+        assert "glm-5" in info.features.available_models
+
+    def test_qwen_preset(self):
+        info = BUILTIN_PROVIDERS["qwen"]
+        assert info.name == "qwen"
+        assert info.kind == "builtin"
+        assert info.env_key == "DASHSCOPE_API_KEY"
+        assert info.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert info.default_model == "qwen3.8-max"
+        assert info.context_window == 262144
+        assert info.features.supports_tools
+        assert info.features.supports_stream_tools
+        assert info.features.supports_reasoning_content
+        assert "qwen3.8-max" in info.features.available_models
+
+    def test_get_provider_resolves_glm_qwen(self):
+        for name in ("glm", "qwen"):
+            info = get_provider(name)
+            assert info.kind == "builtin"
+            assert info.name == name
+
+    def test_ollama_default_model_updated(self):
+        info = BUILTIN_PROVIDERS["ollama"]
+        assert info.default_model == "llama3.1"
 
 
 class TestDeepSeekBaseURL:

@@ -173,6 +173,43 @@ class TestBaseURLFallback:
         )
 
 
+class TestProviderThinkingBody:
+    """Provider-specific deep-thinking extra_body construction.
+
+    GLM shares DeepSeek's ``thinking: {type: enabled}`` format.
+    Qwen is intentionally passthrough (None): qwen3.5+ models enable
+    thinking server-side by default and non-hybrid models reject an
+    explicit ``enable_thinking`` parameter.
+    """
+
+    @staticmethod
+    def _make(provider: str, **kwargs):
+        with patch("openai.OpenAI"):
+            return LLMClient(
+                provider=provider,
+                model="test-model",
+                api_key="sk-test",
+                base_url="https://example.com/v1",
+                **kwargs,
+            )
+
+    def test_glm_uses_deepseek_style_thinking(self):
+        client = self._make("glm")
+        assert client._build_thinking_body() == {"thinking": {"type": "enabled"}}
+
+    def test_qwen_is_passthrough(self):
+        client = self._make("qwen")
+        assert client._build_thinking_body() is None
+
+    def test_deepseek_thinking_unchanged(self):
+        client = self._make("deepseek")
+        assert client._build_thinking_body() == {"thinking": {"type": "enabled"}}
+
+    def test_thinking_disabled_returns_none(self):
+        client = self._make("glm", thinking=False)
+        assert client._build_thinking_body() is None
+
+
 class TestBugThinkingDeltaDeferredImport:
     """v0.9.18: ThinkingDelta must be imported inside the streaming loop.
     

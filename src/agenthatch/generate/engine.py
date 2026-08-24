@@ -547,18 +547,18 @@ class GenerateEngine:
     def _read_default_provider() -> tuple[str, str, str]:
         """Read default provider, model, and base_url from global config.
 
-        Returns ("openai", "gpt-4o", "https://api.openai.com/v1") if no config found.
+        Returns ("openai", "gpt-5.6-sol", "https://api.openai.com/v1") if no config found.
         """
         import tomllib as _tomllib
 
         config_path = Path.home() / ".agenthatch" / "config.toml"
         if not config_path.exists():
-            return ("openai", "gpt-4o", "https://api.openai.com/v1")
+            return ("openai", "gpt-5.6-sol", "https://api.openai.com/v1")
 
         try:
             cfg = _tomllib.loads(config_path.read_text())
         except Exception:
-            return ("openai", "gpt-4o", "https://api.openai.com/v1")
+            return ("openai", "gpt-5.6-sol", "https://api.openai.com/v1")
 
         provider = cfg.get("agenthatch", {}).get("default", "openai")
         # Resolve custom.xxx nested key
@@ -567,7 +567,7 @@ class GenerateEngine:
             provider_cfg = cfg.get("providers", {}).get("custom", {}).get(custom_key, {})
         else:
             provider_cfg = cfg.get("providers", {}).get(provider, {})
-        model = provider_cfg.get("default_model", "gpt-4o")
+        model = provider_cfg.get("default_model", "gpt-5.6-sol")
         base_url = provider_cfg.get("base_url", "https://api.openai.com/v1")
         return (provider, model, base_url)
 

@@ -23,7 +23,7 @@ _CONFIG_TEMPLATE = """\
 [core]
 verbose = false
 
-# Default LLM provider (openai, anthropic, deepseek, ollama, or custom.<name>)
+# Default LLM provider (openai, anthropic, deepseek, glm, qwen, ollama, or custom.<name>)
 [providers]
 default = "openai"
 
@@ -32,14 +32,14 @@ default = "openai"
 [providers.openai]
 api_key = ""
 base_url = "https://api.openai.com/v1"
-default_model = "gpt-4o"
+default_model = "gpt-5.6-sol"
 
 # Anthropic
 # API key: set via environment variable ANTHROPIC_API_KEY
 [providers.anthropic]
 api_key = ""
 base_url = "https://api.anthropic.com"
-default_model = "claude-sonnet-4-20250514"
+default_model = "claude-opus-4-8"
 
 # DeepSeek
 # API key: set via environment variable DEEPSEEK_API_KEY
@@ -48,11 +48,27 @@ api_key = ""
 base_url = "https://api.deepseek.com/v1"
 default_model = "deepseek-v4-pro"
 
+# GLM (Zhipu AI) — OpenAI-compatible
+# API key: set via environment variable ZAI_API_KEY
+# Intl alternative base_url: https://api.z.ai/api/paas/v4
+[providers.glm]
+api_key = ""
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+default_model = "glm-5"
+
+# Qwen (Alibaba DashScope) — OpenAI-compatible
+# API key: set via environment variable DASHSCOPE_API_KEY
+# Intl alternative base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+[providers.qwen]
+api_key = ""
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+default_model = "qwen3.8-max"
+
 # Ollama (local — no API key needed)
 [providers.ollama]
 api_key = ""
 base_url = "http://localhost:11434/v1"
-default_model = "llama3"
+default_model = "llama3.1"
 
 # Custom OpenAI-compatible providers
 # Add your own under [providers.custom.<name>]

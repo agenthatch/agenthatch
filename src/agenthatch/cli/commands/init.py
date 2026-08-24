@@ -37,10 +37,12 @@ def _display_provider_menu() -> None:
     console.print()
     console.print("[bold]Select LLM Provider[/bold]")
     console.print()
-    for idx, info in enumerate(list_builtin_providers(), start=1):
+    builtins = list_builtin_providers()
+    for idx, info in enumerate(builtins, start=1):
         env_hint = f" (env: {info.env_key})" if info.env_key else " (local, no key needed)"
         console.print(f"  [accent][{idx}][/accent] {info.name}{env_hint}")
-    console.print("  [accent][5][/accent] Custom (OpenAI-compatible)")
+    custom_idx = len(builtins) + 1
+    console.print(f"  [accent][{custom_idx}][/accent] Custom (OpenAI-compatible)")
     console.print()
 
 
@@ -64,7 +66,8 @@ def init_command(
     """Interactive provider and API key configuration.
 
     Guides the user through:
-    1. Provider selection (openai / anthropic / deepseek / ollama / custom)
+    1. Provider selection (openai / anthropic / deepseek / ollama / glm /
+       qwen / custom)
     2. API Key input (or confirmation that an env var is set)
     3. Default model selection
 
@@ -76,6 +79,8 @@ def init_command(
       OPENAI_API_KEY       — provider-specific key
       ANTHROPIC_API_KEY    — provider-specific key
       DEEPSEEK_API_KEY     — provider-specific key
+      ZAI_API_KEY          — provider-specific key (GLM)
+      DASHSCOPE_API_KEY    — provider-specific key (Qwen)
       AGENTHATCH_MODEL     — default model (optional)
     """
     if CONFIG_FILE.exists() and not force:
@@ -106,14 +111,15 @@ def _init_interactive(force: bool) -> None:
     # Step 1 — Provider selection
     _display_provider_menu()
     choices = _build_choice_map()
+    custom_idx = len(BUILTIN_PROVIDERS) + 1
     choice = Prompt.ask(
         "Enter choice",
-        choices=["1", "2", "3", "4", "5"],
+        choices=[str(i) for i in range(1, custom_idx + 1)],
         default="1",
     )
     choice_idx = int(choice)
 
-    if choice_idx == 5:
+    if choice_idx == custom_idx:
         _configure_custom_provider(force)
         return
 
@@ -364,8 +370,7 @@ def _write_multi_provider_config(
     ]
 
     # Write built-in providers
-    for pname in ("openai", "anthropic", "deepseek", "ollama"):
-        info = BUILTIN_PROVIDERS[pname]
+    for pname, info in BUILTIN_PROVIDERS.items():
         lines.append(f"# {pname.capitalize()}")
         if info.env_key:
             lines.append(f"# API key: set via environment variable {info.env_key}")
@@ -435,8 +440,7 @@ def _write_custom_provider_config(
         "",
     ]
 
-    for pname in ("openai", "anthropic", "deepseek", "ollama"):
-        info = BUILTIN_PROVIDERS[pname]
+    for pname, info in BUILTIN_PROVIDERS.items():
         lines.append(f"[providers.{pname}]")
         lines.append('api_key = ""')
         lines.append(f'base_url = "{info.base_url}"')

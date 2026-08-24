@@ -178,7 +178,8 @@ degrades gracefully when tools time out.
 ### Step 1: `agenthatch init`
 
 Sets up `~/.agenthatch/` with your LLM provider configuration. Supports OpenAI,
-DeepSeek, Anthropic, and any OpenAI-compatible endpoint. The config file is
+Anthropic, DeepSeek, GLM (Zhipu), Qwen (DashScope), Ollama, and any
+OpenAI-compatible endpoint. The config file is
 TOML. Readable, versionable, easy to share.
 
 ### Step 2: `agenthatch skills add <path>`

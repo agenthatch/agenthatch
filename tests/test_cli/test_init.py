@@ -39,11 +39,23 @@ class TestInitInteractive:
         result = runner.invoke(
             app,
             ["init"],
-            input="4\n\nllama3\n",
+            input="4\n\nllama3.1\n",
         )
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()
         assert 'default = "ollama"' in content
+
+    def test_select_glm(self, runner, app, tmp_agenthatch_home):
+        """Menu entry 5 is GLM (builtins: openai/anthropic/deepseek/ollama/glm/qwen)."""
+        result = runner.invoke(
+            app,
+            ["init"],
+            input="5\nsk-glm-test\nglm-5\n",
+        )
+        assert result.exit_code == 0
+        content = tmp_agenthatch_home.joinpath("config.toml").read_text()
+        assert 'default = "glm"' in content
+        assert "open.bigmodel.cn" in content
 
     def test_refuses_overwrite_without_force(
         self, runner, app, tmp_agenthatch_home
@@ -66,10 +78,11 @@ class TestInitInteractive:
 
     def test_custom_provider(self, runner, app, tmp_agenthatch_home):
         # v0.9: custom provider flow adds API format prompt (step 5)
+        # Custom is menu entry 7 (after 6 builtin providers)
         result = runner.invoke(
             app,
             ["init"],
-            input="5\nmy-llm\nhttp://localhost:8000/v1\nmy-key\nmixtral-8x7b\n1\nMY_LLM_KEY\n",
+            input="7\nmy-llm\nhttp://localhost:8000/v1\nmy-key\nmixtral-8x7b\n1\nMY_LLM_KEY\n",
         )
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()
@@ -126,7 +139,7 @@ class TestInitConfigContent:
         result = runner.invoke(
             app,
             ["init", "--force"],
-            input="1\nsk-test\ngpt-4o\n",
+            input="1\nsk-test\ngpt-5.6-sol\n",
         )
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()
@@ -136,4 +149,6 @@ class TestInitConfigContent:
         assert "[providers.anthropic]" in content
         assert "[providers.deepseek]" in content
         assert "[providers.ollama]" in content
+        assert "[providers.glm]" in content
+        assert "[providers.qwen]" in content
         assert 'default = "openai"' in content

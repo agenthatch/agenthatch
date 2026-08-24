@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "1.0.11"
+version = "1.1.0"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]

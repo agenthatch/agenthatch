@@ -10,6 +10,29 @@ No unreleased changes.
 
 ---
 
+## [v1.1.0] — 2026-08-24
+
+### Added
+
+- **GLM (Zhipu AI) built-in provider** — New `glm` preset using the OpenAI-compatible v4 endpoint (`https://open.bigmodel.cn/api/paas/v4`, intl alternative `https://api.z.ai/api/paas/v4`). Default model `glm-5` (200K context), env key `ZAI_API_KEY`, with `available_models` listing glm-5 / glm-4.7 / glm-4.6 / glm-4.5-air / glm-4.7-flash. Deep thinking uses the DeepSeek-style `{"thinking": {"type": "enabled"}}` extra_body (same wire format).
+- **Qwen (Alibaba Cloud DashScope) built-in provider** — New `qwen` preset using the OpenAI-compatible endpoint (`https://dashscope.aliyuncs.com/compatible-mode/v1`, intl alternative `dashscope-intl.aliyuncs.com`). Default model `qwen3.8-max` (256K context), env key `DASHSCOPE_API_KEY`. Thinking is intentionally passthrough: qwen3.5+ models enable thinking server-side by default and return `reasoning_content` (already handled by the streaming layer), while non-hybrid models reject an explicit `enable_thinking` parameter — sending nothing is both safe and equivalent.
+- **Provider presets now carry `available_models` for OpenAI** — `doctor` surfaces the model list for OpenAI (gpt-5.6-sol / terra / luna / gpt-5.5), matching the existing DeepSeek behavior.
+
+### Changed
+
+- **Unified stale default models across all lookup paths** — The OpenAI default was `gpt-4o` (128K context, pre-reasoning era) in the registry, config template, engine fallback, core agent fallback, and runtime.toml template, while the code already spoke GPT-5.x reasoning. All six paths now default to `gpt-5.6-sol` (GA 2026-07, 1.05M context). The Anthropic default was self-contradictory — registry said `claude-opus-4-8` but the config template said `claude-sonnet-4-20250514`; both now say `claude-opus-4-8`. Ollama default bumped `llama3` → `llama3.1`.
+- **`hatch` provider fallback is provider-aware** — `_create_ai_chat_fn` fell back to hardcoded `gpt-4o` when config had no `default_model`; now falls back to the resolved provider's own `default_model`.
+- **`init` interactive menu is registry-driven** — The provider menu, the valid choice range, and both config-writer loops iterated a hardcoded `("openai", "anthropic", "deepseek", "ollama")` tuple (with Custom pinned to menu slot 5). Adding GLM/Qwen would have collided slot 5 with GLM. All four spots now derive from `BUILTIN_PROVIDERS`; Custom is always `len(builtins) + 1`. Adding future providers no longer requires touching init.
+- **`run` TUI `/config` provider switcher** — Provider choices list extended with `glm` and `qwen`.
+- **`verify_api_key` models-endpoint URL construction** — Previously only recognized `/v1` (any URL containing "/v1" got `/models` appended, everything else got `/v1/models`). GLM's endpoint ends in `/v4`, which would have produced `…/v4/v1/models` (404). Now a `/v\d+$` regex appends `/models` for any versioned base URL and keeps the `/v1/models` OpenAI convention otherwise. Existing provider URL behavior locked by tests.
+- **README / README_CN provider lists** — Both now mention the six built-in providers.
+
+### Fixed
+
+- **Pre-existing hardcoded tuple drift in `init`** — `_write_multi_provider_config` and `_write_custom_provider_config` wrote only the four original provider sections; fresh configs from `init` were missing GLM/Qwen entries until manually added. Both writers now iterate the full registry.
+
+---
+
 ## [v1.0.11] — 2026-08-16
 
 ### Fixed

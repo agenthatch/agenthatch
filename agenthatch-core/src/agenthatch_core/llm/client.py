@@ -4,7 +4,7 @@ Supports OpenAI-compatible APIs. Core version accepts provider details directly
 rather than resolving from agenthatch config.
 
 Usage:
-    client = LLMClient(provider="openai", model="gpt-4o", api_key="sk-...")
+    client = LLMClient(provider="openai", model="gpt-5.6-sol", api_key="sk-...")
     response = client.chat(messages=[{"role": "user", "content": "Hello"}])
     result = client.chat_structured(messages=msgs, response_model=MyPydanticModel)
 """
@@ -161,16 +161,20 @@ class LLMClient:
 
         Provider-specific thinking configuration:
           DeepSeek:  {"thinking": {"type": "enabled"}}
-          OpenAI:    {"reasoning_effort": "medium"}   (o-series / GPT-5.5)
+          GLM:       {"thinking": {"type": "enabled"}} (same format as DeepSeek)
+          OpenAI:    {"reasoning_effort": "medium"}   (o-series / GPT-5.x)
           Anthropic: {"thinking": {"type": "adaptive"}} (Opus 4.6+, Sonnet 4.6+)
                      budget_tokens is DEPRECATED on 4.6+ and REMOVED on 4.7/4.8.
                      Use output_config.effort to control thinking depth.
+          Qwen:      None (passthrough) — qwen3.5+ models enable thinking
+                     server-side by default; forcing "enable_thinking" here
+                     would be rejected by non-hybrid models, so we never send it.
           Others:    None (passthrough)
         """
         if not self._thinking:
             return None
         provider = self._provider_name.lower()
-        if provider == "deepseek":
+        if provider in ("deepseek", "glm"):
             return {"thinking": {"type": "enabled"}}
         elif provider == "openai":
             return {"reasoning_effort": self._reasoning_effort}

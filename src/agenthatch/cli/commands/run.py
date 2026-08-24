@@ -645,7 +645,10 @@ def _handle_config_command(agent: Any) -> str | None:
     choice = Prompt.ask("Select", choices=["1", "2", "3", "4"])
 
     if choice == "1":
-        new_provider = Prompt.ask("Provider", choices=["deepseek", "openai", "anthropic", "ollama"])
+        new_provider = Prompt.ask(
+            "Provider",
+            choices=["deepseek", "openai", "anthropic", "ollama", "glm", "qwen"],
+        )
         llm["provider"] = new_provider
     elif choice == "2":
         llm["model"] = Prompt.ask("Model", default=llm.get("model", "deepseek-v4-pro"))

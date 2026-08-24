@@ -104,7 +104,9 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
         logger.warning("No API key configured for AI tool generation")
         return None
 
-    model = provider_cfg.get("default_model", "gpt-4o")
+    model = provider_cfg.get("default_model") or (
+        provider_info.default_model if provider_info else "gpt-5.6-sol"
+    )
     base_url = provider_cfg.get("base_url", "")
 
     client = LLMClient(

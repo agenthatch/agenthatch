@@ -157,8 +157,9 @@ hatched-agent/
 
 ### 第 1 步：`agenthatch init`
 
-在 `~/.agenthatch/` 目录下配置 LLM 提供商。支持 OpenAI、DeepSeek、Anthropic
-及任何 OpenAI 兼容接口。配置文件为 TOML 格式——可读、可版本化、易于分享。
+在 `~/.agenthatch/` 目录下配置 LLM 提供商。支持 OpenAI、Anthropic、DeepSeek、
+GLM（智谱）、Qwen（百炼）、Ollama 及任何 OpenAI 兼容接口。配置文件为 TOML 格式——
+可读、可版本化、易于分享。
 
 ### 第 2 步：`agenthatch skills add <path>`
 

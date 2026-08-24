@@ -5,14 +5,15 @@
 #   (1) --api-key CLI flag (session-only, not persisted)
 #   (2) api_key value below (per-agent persistent override)
 #   (3) ~/.agenthatch/config.toml (global default)
-#   (4) Environment variable (DEEPSEEK_API_KEY, OPENAI_API_KEY, etc.)
+#   (4) Environment variable (DEEPSEEK_API_KEY, OPENAI_API_KEY,
+#       ZAI_API_KEY, DASHSCOPE_API_KEY, etc.)
 #
 # Use /key-source in the TUI to see which source is active.
 # Use /config in the TUI to change provider/model/key at runtime.
 
 [llm]
 provider = "{{ llm_provider | default('openai') }}"
-model = "{{ model | default('gpt-4o') }}"
+model = "{{ model | default('gpt-5.6-sol') }}"
 base_url = "{{ base_url | default('https://api.openai.com/v1') }}"
 # api_key = "sk-your-key-here"     # Uncomment to set per-agent key
 
