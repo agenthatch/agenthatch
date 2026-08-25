@@ -10,6 +10,20 @@ No unreleased changes.
 
 ---
 
+## [v1.0.13] — 2026-08-25
+
+### Added
+
+- **Anthropic prompt caching** — The adapter now marks `cache_control: {"type": "ephemeral"}` on every request: the last system block, the last tool definition, and the last content block of the final message (3 of the 4 breakpoints the API allows). Cached reads bill at 10% of the base input price, so agent loops that resend the same system prompt + tools + history every turn get the bulk of their input cost cut. Blocks are copied before marking, so the caller's message objects are never mutated — they get reused across agent-loop turns and marking them in place would leak `cache_control` into subsequent requests. Non-dict trailing content items (which the translation layer passes through verbatim) are skipped rather than crashing.
+- **Prompt-cache usage accounting** — `_Usage` now carries `cache_read_input_tokens` / `cache_creation_input_tokens` and folds them into `prompt_tokens` / `total_tokens` (Anthropic reports them separately and excludes them from `input_tokens`). The streaming path captures input-side tokens from `message_start` and merges them into the final usage chunk, so `TokenCounter` sees the same numbers streaming as it does non-streaming. Cache fields are propagated to streaming consumers as well.
+
+### Fixed
+
+- **Gateway double-counting of input tokens** — Some OpenAI-compatible gateways replay full input-side usage in `message_delta`; the merge now only applies when the delta didn't already report input tokens. Locked by test.
+- **Streaming cache stats were always zero** — The final streaming usage chunk didn't carry the cache fields, so `TokenCounter.cache_read_tokens` / `cache_write_tokens` stayed at 0 on streaming runs even when the cache was hit.
+
+---
+
 ## [v1.0.12] — 2026-08-24
 
 ### Added

@@ -11,6 +11,7 @@ Supported features:
   - Tool use (tool_use content blocks ↔ tool_calls)
   - System messages (OpenAI role=system → Anthropic top-level system param)
   - Thinking (extended thinking with budget_tokens)
+  - Prompt caching (cache_control breakpoints on system/tools/last message)
 """
 
 from __future__ import annotations
@@ -53,10 +54,18 @@ class _Choice:
 
 @dataclass
 class _Usage:
-    """OpenAI-compatible usage."""
+    """OpenAI-compatible usage.
+
+    Prompt caching: Anthropic reports cached tokens separately
+    (cache_read_input_tokens / cache_creation_input_tokens) and excludes
+    them from input_tokens. prompt_tokens/total_tokens fold them in so
+    OpenAI-format consumers see the full input size.
+    """
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 @dataclass
@@ -378,6 +387,61 @@ def _openai_tools_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[
     return anthropic_tools if anthropic_tools else None
 
 
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _apply_cache_control(
+    system: str | list[dict[str, Any]],
+    anthropic_messages: list[dict[str, Any]],
+    anthropic_tools: list[dict[str, Any]] | None,
+) -> tuple[str | list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]] | None]:
+    """Add cache_control breakpoints for Anthropic prompt caching.
+
+    Marks up to 3 of the 4 breakpoints Anthropic allows:
+      1. Last system block — caches the system prompt (stable across turns)
+      2. Last tool definition — caches the tool schemas
+      3. Last content block of the final message — caches the conversation
+         prefix as it grows turn over turn
+
+    Blocks are copied before marking so the caller's message objects are
+    never mutated (they are reused across agent-loop turns).
+
+    Cached input is billed at 10% (read) / 125% (write, 5-min TTL) of the
+    base input price — a clear net win for agent loops that resend the
+    same system prompt + tools + history every turn.
+    """
+    if system:
+        if isinstance(system, str):
+            system = [{
+                "type": "text",
+                "text": system,
+                "cache_control": dict(_CACHE_CONTROL),
+            }]
+        else:
+            system = [dict(b) if isinstance(b, dict) else b for b in system]
+            # Only dict blocks can carry cache_control; the translation layer
+            # passes through non-dict items verbatim, so guard before marking.
+            if isinstance(system[-1], dict):
+                system[-1]["cache_control"] = dict(_CACHE_CONTROL)
+
+    if anthropic_tools:
+        anthropic_tools = [dict(t) for t in anthropic_tools]
+        anthropic_tools[-1]["cache_control"] = dict(_CACHE_CONTROL)
+
+    if anthropic_messages:
+        last = anthropic_messages[-1]
+        content = last.get("content")
+        if isinstance(content, list) and content:
+            content = [dict(b) if isinstance(b, dict) else b for b in content]
+            if isinstance(content[-1], dict):
+                content[-1]["cache_control"] = dict(_CACHE_CONTROL)
+                anthropic_messages = anthropic_messages[:-1] + [
+                    {**last, "content": content}
+                ]
+
+    return system, anthropic_messages, anthropic_tools
+
+
 # ── Adapter class ───────────────────────────────────────────────────────────
 
 
@@ -405,6 +469,11 @@ class AnthropicChatCompletions:
         """
         system, anthropic_messages = _openai_messages_to_anthropic(messages)
         anthropic_tools = _openai_tools_to_anthropic(tools)
+
+        # Prompt caching: mark system/tools/last-message breakpoints
+        system, anthropic_messages, anthropic_tools = _apply_cache_control(
+            system, anthropic_messages, anthropic_tools
+        )
 
         # Build thinking parameter for extended thinking support
         # Opus 4.6+/Sonnet 4.6+: adaptive thinking (no budget_tokens)
@@ -484,13 +553,26 @@ class AnthropicChatCompletions:
         choice = _anthropic_message_to_openai_choice(
             response, 0, getattr(response, "stop_reason", "end_turn")
         )
+
+        usage_obj = getattr(response, "usage", None)
+        if usage_obj:
+            input_tokens = getattr(usage_obj, "input_tokens", 0) or 0
+            output_tokens = getattr(usage_obj, "output_tokens", 0) or 0
+            cache_read = getattr(usage_obj, "cache_read_input_tokens", 0) or 0
+            cache_creation = getattr(usage_obj, "cache_creation_input_tokens", 0) or 0
+            if cache_read or cache_creation:
+                logger.debug(
+                    "Anthropic prompt cache: read=%d created=%d",
+                    cache_read, cache_creation,
+                )
+        else:
+            input_tokens = output_tokens = cache_read = cache_creation = 0
         usage = _Usage(
-            prompt_tokens=getattr(response, "usage", None).input_tokens if getattr(response, "usage", None) else 0,
-            completion_tokens=getattr(response, "usage", None).output_tokens if getattr(response, "usage", None) else 0,
-            total_tokens=(
-                getattr(response, "usage", None).input_tokens +
-                getattr(response, "usage", None).output_tokens
-            ) if getattr(response, "usage", None) else 0,
+            prompt_tokens=input_tokens + cache_read + cache_creation,
+            completion_tokens=output_tokens,
+            total_tokens=input_tokens + cache_read + cache_creation + output_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_creation,
         )
 
         return _Response(
@@ -507,11 +589,56 @@ class AnthropicChatCompletions:
 
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
+        # Input-side tokens (incl. prompt-cache reads/writes) arrive in the
+        # message_start event; output tokens arrive in message_delta. Capture
+        # the former and merge into the final usage chunk so OpenAI-format
+        # consumers see the full picture in one place.
+        input_prompt_tokens = 0
+        cache_read_tokens = 0
+        cache_creation_tokens = 0
+
         try:
             with self._client.messages.stream(**kwargs) as stream:
                 for event in stream:
+                    etype = getattr(event, "type", "")
+                    if etype == "message_start":
+                        message = getattr(event, "message", None)
+                        usage_info = getattr(message, "usage", None) if message else None
+                        if usage_info:
+                            cache_read_tokens = (
+                                getattr(usage_info, "cache_read_input_tokens", 0) or 0
+                            )
+                            cache_creation_tokens = (
+                                getattr(usage_info, "cache_creation_input_tokens", 0) or 0
+                            )
+                            input_prompt_tokens = (
+                                (getattr(usage_info, "input_tokens", 0) or 0)
+                                + cache_read_tokens
+                                + cache_creation_tokens
+                            )
+                            if cache_read_tokens or cache_creation_tokens:
+                                logger.debug(
+                                    "Anthropic prompt cache: read=%d created=%d",
+                                    cache_read_tokens,
+                                    cache_creation_tokens,
+                                )
+                        continue
                     chunk = _anthropic_stream_event_to_openai_delta(event, model, chunk_id)
                     if chunk.choices:
+                        if etype == "message_delta" and chunk.usage:
+                            # Anthropic's message_delta.usage only carries
+                            # output_tokens; input-side tokens live in
+                            # message_start. Merge only when the delta didn't
+                            # already report input tokens (some OpenAI-compatible
+                            # gateways replay full usage there — avoid double
+                            # counting).
+                            if input_prompt_tokens and not chunk.usage.prompt_tokens:
+                                chunk.usage.prompt_tokens += input_prompt_tokens
+                                chunk.usage.total_tokens += input_prompt_tokens
+                            # Propagate cache fields so streaming consumers
+                            # (TokenCounter) see the same data as non-streaming.
+                            chunk.usage.cache_read_input_tokens = cache_read_tokens
+                            chunk.usage.cache_creation_input_tokens = cache_creation_tokens
                         yield chunk
         except Exception as e:
             logger.error("Anthropic streaming error: %s", e)
