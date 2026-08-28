@@ -100,6 +100,80 @@ def test_orchestrator_uses_large_model_override(minimal_config):
 
 
 # ---------------------------------------------------------------------------
+# Tier model resolution from config ([harness] vs [providers.<name>])
+# ---------------------------------------------------------------------------
+
+def _make_orchestrator_with_patched_llm(config):
+    """Construct Orchestrator with LLMClient mocked out; return call kwargs."""
+    mock_provider_info = MagicMock()
+    mock_provider_info.default_model = "default-m"
+
+    with (
+        patch("agenthatch.skill.engine.LLMClient") as mock_llm,
+        patch("agenthatch.providers.get_provider", return_value=mock_provider_info),
+        patch("agenthatch.providers.resolve_api_key", return_value="test-api-key"),
+    ):
+        Orchestrator(config)
+
+    return [call.kwargs["model"] for call in mock_llm.call_args_list]
+
+
+class TestTierModelResolution:
+    """Regression tests for [harness] large_model/small_model being honored.
+
+    The config template written by `init` documents the tier keys under
+    [harness], but the Orchestrator used to read them only from the provider
+    section — the documented location was silently ignored.
+    """
+
+    def test_harness_section_tier_models_are_honored(self):
+        """[harness] tier keys (template-documented) must take effect."""
+        cfg = {
+            "agenthatch": {"default": "openai"},
+            "providers": {"openai": {}},
+            "harness": {"large_model": "big-m", "small_model": "small-m"},
+        }
+        models = _make_orchestrator_with_patched_llm(cfg)
+        assert models == ["big-m", "small-m"]
+
+    def test_provider_section_tier_models_still_work(self):
+        """Legacy undocumented location (provider section) stays supported."""
+        cfg = {
+            "agenthatch": {"default": "openai"},
+            "providers": {"openai": {"large_model": "big-m", "small_model": "small-m"}},
+            "harness": {},
+        }
+        models = _make_orchestrator_with_patched_llm(cfg)
+        assert models == ["big-m", "small-m"]
+
+    def test_harness_section_takes_precedence_over_provider_section(self):
+        """[harness] wins when both locations define the tier keys."""
+        cfg = {
+            "agenthatch": {"default": "openai"},
+            "providers": {
+                "openai": {"large_model": "legacy-large", "small_model": "legacy-small"}
+            },
+            "harness": {"large_model": "doc-large", "small_model": "doc-small"},
+        }
+        models = _make_orchestrator_with_patched_llm(cfg)
+        assert models == ["doc-large", "doc-small"]
+
+    def test_both_empty_falls_back_to_default_model(self):
+        """Empty strings everywhere fall back to the provider default_model.
+
+        Note: both tiers resolve to the same model, so the client is reused
+        and LLMClient is constructed exactly once.
+        """
+        cfg = {
+            "agenthatch": {"default": "openai"},
+            "providers": {"openai": {}},
+            "harness": {"large_model": "", "small_model": ""},
+        }
+        models = _make_orchestrator_with_patched_llm(cfg)
+        assert models == ["default-m"]
+
+
+# ---------------------------------------------------------------------------
 # HARNESS_CONFIG tests
 # ---------------------------------------------------------------------------
 

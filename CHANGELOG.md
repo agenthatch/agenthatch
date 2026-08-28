@@ -10,6 +10,14 @@ No unreleased changes.
 
 ---
 
+## [v1.0.14] — 2026-08-25
+
+### Fixed
+
+- **`[harness]` tier models were silently ignored** — The config template written by `init` documents `large_model` / `small_model` under `[harness]`, but the Orchestrator only ever read them from the provider section — the documented location was a dead knob, with no warning. Resolution order is now: CLI override → `[harness]` → `[providers.<name>]` (legacy undocumented location, still supported) → provider default. Existing configs that put the keys in the provider section keep working unchanged. Locked by tests, including the single-client reuse when both tiers resolve to the same model.
+
+---
+
 ## [v1.0.13] — 2026-08-25
 
 ### Added

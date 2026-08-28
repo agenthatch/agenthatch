@@ -1032,17 +1032,28 @@ class Orchestrator:
         else:
             provider_cfg = providers_section.get(provider_name, {}) or {}
 
-        # H2 fix: try to read per-tier models from provider config,
-        # falling back to the default_model for both tiers.
-        self._large_model = large_model or provider_cfg.get("large_model", default_model)
-        self._small_model = small_model or provider_cfg.get("small_model", default_model)
+        harness_cfg = config.get("harness", {})
+        if not isinstance(harness_cfg, dict):
+            harness_cfg = {}
+
+        # Tier models: [harness] first (documented in the config template),
+        # then the provider section (legacy undocumented location).
+        self._large_model = (
+            large_model
+            or harness_cfg.get("large_model", "")
+            or provider_cfg.get("large_model", "")
+            or default_model
+        )
+        self._small_model = (
+            small_model
+            or harness_cfg.get("small_model", "")
+            or provider_cfg.get("small_model", "")
+            or default_model
+        )
 
         api_key = resolve_api_key(provider_name, config=config, prompt=True)
 
         timeout = provider_cfg.get("timeout", 180)
-        harness_cfg = config.get("harness", {})
-        if not isinstance(harness_cfg, dict):
-            harness_cfg = {}
         reasoning_effort = harness_cfg.get("reasoning_effort", "medium")
 
         self._large_client = LLMClient(
