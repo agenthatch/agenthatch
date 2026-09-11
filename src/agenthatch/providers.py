@@ -83,15 +83,16 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="OPENAI_API_KEY",
         base_url="https://api.openai.com/v1",
-        default_model="gpt-5.6-sol",  # GPT-5.6 flagship (GA 2026-07), 1.05M context
+        default_model="gpt-6-astra",  # GPT-6 flagship (GA 2026-09), 1.05M context
         context_window=1050000,
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,
             supports_json_mode=True,
             supports_parallel_tool_calls=True,
-            supports_reasoning_content=True,  # o-series / GPT-5.x thinking models
+            supports_reasoning_content=True,  # o-series / GPT-5.x/6 thinking models
             available_models=(
+                "gpt-6-astra",
                 "gpt-5.6-sol",
                 "gpt-5.6-terra",
                 "gpt-5.6-luna",
@@ -104,8 +105,8 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="ANTHROPIC_API_KEY",
         base_url="https://api.anthropic.com",
-        default_model="claude-opus-4-8",
-        context_window=1000000,  # 1M context for Opus 4.8 / Sonnet 4.6+
+        default_model="claude-fable-5-1",
+        context_window=1000000,  # 1M context for Fable 5.1 / Opus 5
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=False,  # synthetic streaming via adapter
@@ -114,6 +115,11 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_reasoning_content=True,
             requires_anthropic_adapter=True,
             temperature_range=(0.0, 1.0),  # per docs.claude.com/en/api/messages
+            available_models=(
+                "claude-fable-5-1",
+                "claude-opus-5",
+                "claude-opus-4-8",
+            ),
         ),
     ),
     "deepseek": ProviderInfo(
@@ -121,8 +127,8 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="DEEPSEEK_API_KEY",
         base_url="https://api.deepseek.com/v1",
-        default_model="deepseek-v4-pro",
-        context_window=128000,
+        default_model="deepseek-flash",  # V4.1 Flash — surpasses V4 Pro, cheaper
+        context_window=1000000,  # 1M context per api-docs.deepseek.com
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,
@@ -130,9 +136,8 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_parallel_tool_calls=True,
             supports_reasoning_content=True,
             available_models=(
-                "deepseek-chat",
-                "deepseek-v4-flash",
-                "deepseek-v4-pro",
+                "deepseek-flash",
+                "deepseek-v4-pro",  # routed to V4.1 Flash after 2026-09-14
             ),
         ),
     ),
@@ -157,8 +162,8 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         kind="builtin",
         env_key="ZAI_API_KEY",
         base_url="https://open.bigmodel.cn/api/paas/v4",
-        default_model="glm-5",
-        context_window=200000,
+        default_model="glm-5.3",  # flagship since 2026-08-19, 1M context
+        context_window=1000000,
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,
@@ -166,10 +171,10 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_parallel_tool_calls=True,
             supports_reasoning_content=True,
             available_models=(
+                "glm-5.3",
+                "glm-5.3-flash",
+                "glm-5.2",
                 "glm-5",
-                "glm-4.7",
-                "glm-4.6",
-                "glm-4.5-air",
                 "glm-4.7-flash",
             ),
         ),
@@ -182,7 +187,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         env_key="DASHSCOPE_API_KEY",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         default_model="qwen3.8-max",
-        context_window=262144,
+        context_window=1048576,  # qwen3.8-max keeps the 1M context
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,
@@ -191,6 +196,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_reasoning_content=True,
             available_models=(
                 "qwen3.8-max",
+                "qwen3.8-flash",
                 "qwen3.7-max",
                 "qwen3.7-plus",
                 "qwen3.7-flash",

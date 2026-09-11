@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -362,13 +363,44 @@ def _openai_messages_to_anthropic(
     return system, anthropic_messages
 
 
-def _is_opus_47_or_later(model: str) -> bool:
-    """Check if model is Opus 4.7+ (temperature/top_p/top_k removed)."""
-    model_lower = model.lower()
-    return any(
-        m in model_lower
-        for m in ("claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-7", "claude-sonnet-4-8")
-    )
+# Matches "claude-<family>-<major>[-<minor>]", e.g. claude-opus-4-8,
+# claude-fable-5-1, claude-opus-5. Snapshot suffixes (e.g. -20250514)
+# are ignored by only matching the first version segment.
+_CLAUDE_VERSION_RE = re.compile(r"claude-(opus|sonnet|fable|mythos)-(\d+)(?:-(\d+))?")
+
+
+def _sampling_params_removed(model: str) -> bool:
+    """Check if model accepts temperature/top_p/top_k.
+
+    Anthropic removed the sampling parameters on Opus/Sonnet 4.7+ and on
+    every 5th-generation family (Fable, Mythos, Opus 5) — passing them
+    returns a 400. Unrecognized model names keep the legacy behavior
+    (send temperature) rather than silently dropping a user setting.
+    """
+    m = _CLAUDE_VERSION_RE.search(model.lower())
+    if not m:
+        return False
+    family, major, minor = m.group(1), int(m.group(2)), m.group(3)
+    if family in ("fable", "mythos"):
+        return True
+    if major >= 5:
+        return True
+    return major == 4 and minor is not None and int(minor) >= 7
+
+
+def _forced_tool_choice_unsupported(model: str) -> bool:
+    """Check if model rejects tool_choice any/tool with a 400.
+
+    Fable/Mythos 5.1 dropped forced tool_choice: the "any" and "tool"
+    types return a 400 error (auto/none are unchanged).
+    """
+    m = _CLAUDE_VERSION_RE.search(model.lower())
+    if not m:
+        return False
+    family, major, minor = m.group(1), int(m.group(2)), m.group(3)
+    if family not in ("fable", "mythos"):
+        return False
+    return minor is not None and (major, int(minor)) >= (5, 1)
 
 
 def _openai_tools_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
@@ -521,19 +553,28 @@ class AnthropicChatCompletions:
         if anthropic_tools:
             kwargs_for_api["tools"] = anthropic_tools
 
-        # Opus 4.7/4.8: temperature, top_p, top_k are removed (400 if passed)
-        # Only include temperature for pre-4.7 models
+        # Sampling params were removed on Opus/Sonnet 4.7+ and on all
+        # 5th-generation families (Fable/Mythos/Opus 5) — passing them
+        # returns a 400, so only include temperature for older models.
         if temperature is not None and temperature > 0:
-            if not _is_opus_47_or_later(model):
+            if not _sampling_params_removed(model):
                 kwargs_for_api["temperature"] = temperature
 
-        # Handle tool_choice
+        # Handle tool_choice.
+        # Fable/Mythos 5.1+ reject tool_choice "any"/"tool" with a 400;
+        # fall back to the default "auto" there and log the downgrade.
         if tool_choice and tool_choice != "auto":
-            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+            if tool_choice == "none":
+                pass  # no Anthropic equivalent; request proceeds without tool_choice
+            elif _forced_tool_choice_unsupported(model):
+                logger.warning(
+                    "Anthropic model %s does not support forced tool_choice "
+                    "(any/tool); falling back to auto",
+                    model,
+                )
+            elif isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
                 fn_name = tool_choice.get("function", {}).get("name", "")
                 kwargs_for_api["tool_choice"] = {"type": "tool", "name": fn_name}
-            elif tool_choice == "none":
-                pass  # Anthropic: omit tools to disable
             elif tool_choice == "required":
                 kwargs_for_api["tool_choice"] = {"type": "any"}
 

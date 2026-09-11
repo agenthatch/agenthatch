@@ -32,21 +32,21 @@ default = "openai"
 [providers.openai]
 api_key = ""
 base_url = "https://api.openai.com/v1"
-default_model = "gpt-5.6-sol"
+default_model = "gpt-6-astra"
 
 # Anthropic
 # API key: set via environment variable ANTHROPIC_API_KEY
 [providers.anthropic]
 api_key = ""
 base_url = "https://api.anthropic.com"
-default_model = "claude-opus-4-8"
+default_model = "claude-fable-5-1"
 
 # DeepSeek
 # API key: set via environment variable DEEPSEEK_API_KEY
 [providers.deepseek]
 api_key = ""
 base_url = "https://api.deepseek.com/v1"
-default_model = "deepseek-v4-pro"
+default_model = "deepseek-flash"
 
 # GLM (Zhipu AI) — OpenAI-compatible
 # API key: set via environment variable ZAI_API_KEY
@@ -54,7 +54,7 @@ default_model = "deepseek-v4-pro"
 [providers.glm]
 api_key = ""
 base_url = "https://open.bigmodel.cn/api/paas/v4"
-default_model = "glm-5"
+default_model = "glm-5.3"
 
 # Qwen (Alibaba DashScope) — OpenAI-compatible
 # API key: set via environment variable DASHSCOPE_API_KEY

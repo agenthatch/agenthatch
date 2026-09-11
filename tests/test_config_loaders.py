@@ -65,7 +65,7 @@ class TestNormalizeProviderSection:
         result = _normalize_provider_section(section, "openai")
         assert result["api_key"] == "sk-key"
         assert result["base_url"] == "https://api.openai.com/v1"
-        assert result["default_model"] == "gpt-5.6-sol"
+        assert result["default_model"] == "gpt-6-astra"
 
     def test_ollama_no_env_key(self):
         section = {}
@@ -78,7 +78,7 @@ class TestNormalizeProviderSection:
         result = _normalize_provider_section(section, "glm")
         assert result["api_key"] == "sk-glm"
         assert result["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
-        assert result["default_model"] == "glm-5"
+        assert result["default_model"] == "glm-5.3"
 
     def test_qwen_fills_defaults(self):
         section = {"api_key": "sk-qwen"}
@@ -112,7 +112,7 @@ class TestLoadProviderConfig:
         result = load_provider_config(config, "openai")
         assert result["api_key"] == "sk-test"
         assert result["base_url"] == "https://api.openai.com/v1"
-        assert result["default_model"] == "gpt-5.6-sol"
+        assert result["default_model"] == "gpt-6-astra"
 
     def test_load_custom(self):
         config = {

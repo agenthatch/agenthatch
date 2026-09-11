@@ -139,7 +139,7 @@ class TestInitConfigContent:
         result = runner.invoke(
             app,
             ["init", "--force"],
-            input="1\nsk-test\ngpt-5.6-sol\n",
+            input="1\nsk-test\ngpt-6-astra\n",
         )
         assert result.exit_code == 0
         content = tmp_agenthatch_home.joinpath("config.toml").read_text()

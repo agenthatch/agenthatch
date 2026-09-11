@@ -4,7 +4,7 @@ Supports OpenAI-compatible APIs. Core version accepts provider details directly
 rather than resolving from agenthatch config.
 
 Usage:
-    client = LLMClient(provider="openai", model="gpt-5.6-sol", api_key="sk-...")
+    client = LLMClient(provider="openai", model="gpt-6-astra", api_key="sk-...")
     response = client.chat(messages=[{"role": "user", "content": "Hello"}])
     result = client.chat_structured(messages=msgs, response_model=MyPydanticModel)
 """
@@ -162,7 +162,11 @@ class LLMClient:
         Provider-specific thinking configuration:
           DeepSeek:  {"thinking": {"type": "enabled"}}
           GLM:       {"thinking": {"type": "enabled"}} (same format as DeepSeek)
-          OpenAI:    {"reasoning_effort": "medium"}   (o-series / GPT-5.x)
+                     GLM-5.3+ thinking is always on and only accepts "enabled";
+                     depth is controlled by a top-level reasoning_effort
+                     (low/high/max) that we intentionally leave unset so the
+                     provider default (max) applies.
+          OpenAI:    {"reasoning_effort": "medium"}   (o-series / GPT-5.x/6)
           Anthropic: {"thinking": {"type": "adaptive"}} (Opus 4.6+, Sonnet 4.6+)
                      budget_tokens is DEPRECATED on 4.6+ and REMOVED on 4.7/4.8.
                      Use output_config.effort to control thinking depth.

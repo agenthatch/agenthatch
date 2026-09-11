@@ -36,7 +36,7 @@ class TestBuiltinProviders:
         assert info.kind == "builtin"
         assert info.env_key == "OPENAI_API_KEY"
         assert "api.openai.com" in info.base_url
-        assert info.default_model == "gpt-5.6-sol"
+        assert info.default_model == "gpt-6-astra"
 
     def test_ollama_no_env_key(self):
         info = BUILTIN_PROVIDERS["ollama"]
@@ -211,12 +211,12 @@ class TestGlmQwenPresets:
         assert info.kind == "builtin"
         assert info.env_key == "ZAI_API_KEY"
         assert info.base_url == "https://open.bigmodel.cn/api/paas/v4"
-        assert info.default_model == "glm-5"
-        assert info.context_window == 200000
+        assert info.default_model == "glm-5.3"
+        assert info.context_window == 1000000
         assert info.features.supports_tools
         assert info.features.supports_stream_tools
         assert info.features.supports_reasoning_content
-        assert "glm-5" in info.features.available_models
+        assert "glm-5.3" in info.features.available_models
 
     def test_qwen_preset(self):
         info = BUILTIN_PROVIDERS["qwen"]
@@ -225,11 +225,12 @@ class TestGlmQwenPresets:
         assert info.env_key == "DASHSCOPE_API_KEY"
         assert info.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
         assert info.default_model == "qwen3.8-max"
-        assert info.context_window == 262144
+        assert info.context_window == 1048576
         assert info.features.supports_tools
         assert info.features.supports_stream_tools
         assert info.features.supports_reasoning_content
         assert "qwen3.8-max" in info.features.available_models
+        assert "qwen3.8-flash" in info.features.available_models
 
     def test_get_provider_resolves_glm_qwen(self):
         for name in ("glm", "qwen"):

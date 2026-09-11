@@ -105,7 +105,7 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
         return None
 
     model = provider_cfg.get("default_model") or (
-        provider_info.default_model if provider_info else "gpt-5.6-sol"
+        provider_info.default_model if provider_info else "gpt-6-astra"
     )
     base_url = provider_cfg.get("base_url", "")
 

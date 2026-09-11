@@ -58,7 +58,7 @@ def run_command(
     Examples:
         agenthatch run weather-reporter
         agenthatch run ./weather-reporter-agent/
-        agenthatch run weather-reporter --provider deepseek --model deepseek-v4-pro
+        agenthatch run weather-reporter --provider deepseek --model deepseek-flash
     """
     # 1. Find the hatched Agent directory
     agent_dir = _find_hatched_agent(skill_name)
@@ -621,7 +621,7 @@ def _handle_config_command(agent: Any) -> str | None:
         return "[warn]tomli_w not installed. Run: pip install tomli_w[/warn]"
 
     if not runtime_path.exists():
-        runtime_path.write_text("[llm]\nprovider = \"deepseek\"\nmodel = \"deepseek-v4-pro\"\n")
+        runtime_path.write_text("[llm]\nprovider = \"deepseek\"\nmodel = \"deepseek-flash\"\n")
 
     cfg = tomllib.loads(runtime_path.read_text())
     llm = cfg.setdefault("llm", {})
@@ -636,7 +636,7 @@ def _handle_config_command(agent: Any) -> str | None:
 
     console.print(Panel(
         f"Provider: {llm.get('provider', 'deepseek')}\n"
-        f"Model: {llm.get('model', 'deepseek-v4-pro')}\n"
+        f"Model: {llm.get('model', 'deepseek-flash')}\n"
         f"API Key: {key_display}",
         title="API Key Configuration"
     ))
@@ -651,7 +651,7 @@ def _handle_config_command(agent: Any) -> str | None:
         )
         llm["provider"] = new_provider
     elif choice == "2":
-        llm["model"] = Prompt.ask("Model", default=llm.get("model", "deepseek-v4-pro"))
+        llm["model"] = Prompt.ask("Model", default=llm.get("model", "deepseek-flash"))
     elif choice == "3":
         llm["api_key"] = Prompt.ask("API Key", password=True)
     else:
@@ -663,7 +663,7 @@ def _handle_config_command(agent: Any) -> str | None:
     from agenthatch_core.llm.client import LLMClient
     agent.llm = LLMClient(
         provider=llm.get("provider", "deepseek"),
-        model=llm.get("model", "deepseek-v4-pro"),
+        model=llm.get("model", "deepseek-flash"),
         api_key=llm.get("api_key"),
     )
 
