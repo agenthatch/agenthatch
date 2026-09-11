@@ -75,7 +75,7 @@ def _generate_completion_script(shell: str) -> str | None:
         if cls is None:
             return None
         completer = cls(
-            cli=click_cmd,
+            cli=click_cmd,  # type: ignore[arg-type, unused-ignore]  # typer._click re-export drifts from click.core
             ctx_args={},
             prog_name="agenthatch",
             complete_var="_AGENTHATCH_COMPLETE",
