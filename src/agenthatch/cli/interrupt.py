@@ -110,7 +110,25 @@ class EarlyInputReader:
             new[termios.CC][termios.VTIME] = 0  # type: ignore[attr-defined]
             termios.tcsetattr(fd, termios.TCSAFLUSH, new)
         except Exception:
+            # Raw mode is unavailable — Windows has no ``termios`` at all, and
+            # its CRT console read is line-buffered.  The byte-wise reader
+            # depends on raw mode: without it ``os.read`` blocks until Enter,
+            # so ``stop()`` (which only joins for a second) left the thread
+            # stuck holding stdin, where it competed with prompt_toolkit and
+            # swallowed the user's keystrokes — the ``You:`` prompt accepted
+            # input but never echoed it.  Stay inactive rather than hijack the
+            # console.  Ctrl+C during streaming still interrupts via the
+            # KeyboardInterrupt path in ``run.py``, since cooked mode keeps
+            # ISIG enabled.
+            logger.debug(
+                "EarlyInputReader inactive: raw-mode setup unavailable on %s",
+                sys.platform,
+            )
             self._original_stdin_settings = None
+            self._running = False
+            if EarlyInputReader._active_instance is self:
+                EarlyInputReader._active_instance = None
+            return
 
         self._buffer = []
         self._running = True

@@ -10,6 +10,14 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.17] — 2026-09-25
+
+### Fixed
+
+* **`agenthatch run` swallowed keystrokes on Windows** — `EarlyInputReader.start()` launched its byte-wise stdin reader thread unconditionally, even when the raw-mode setup had failed. Windows has no `termios`, so that setup *always* fails there, and the `except` branch only recorded `None` before falling through to `threading.Thread(...).start()`. Without raw mode a CRT console read is line-buffered, so the thread sat blocked inside `os.read` waiting for Enter — while `stop()` merely joins for one second, orphaning it still holding stdin. The orphan then competed with prompt_toolkit for input: the `You:` prompt accepted typing but never echoed it, and input only appeared to "unlock" after Enter released the blocked read. Since every turn starts and stops a reader, leaked threads accumulated and the prompt degraded further across a session. `start()` now returns early when raw mode is unavailable, so no thread is created and the console is left to prompt_toolkit. Windows gives up only the "type ahead while the agent streams" affordance — Ctrl+C during streaming still interrupts via the `KeyboardInterrupt` path in `run.py`, which cooked mode keeps reachable. POSIX behaviour is untouched: the guard fires only when the prerequisite is missing, never on a platform check, and `tests/test_interrupt.py` pins both directions.
+
+***
+
 ## \[v1.0.16] — 2026-09-25
 
 ### Fixed
