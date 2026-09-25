@@ -109,7 +109,7 @@ def inherit_api_key(config: dict[str, Any]) -> dict[str, Any]:
         return config
 
     try:
-        ah_cfg = tomllib.loads(ah_config_path.read_text())
+        ah_cfg = tomllib.loads(ah_config_path.read_text(encoding="utf-8"))
     except Exception:
         return config
 

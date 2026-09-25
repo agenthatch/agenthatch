@@ -38,7 +38,7 @@ def assemble_command(
         if not ahs_path.exists():
             console.print(f"[warn]agenthatch.yaml not found for '{skill_name}'.[/warn]")
             raise typer.Exit(1)
-        spec = yaml.safe_load(ahs_path.read_text())
+        spec = yaml.safe_load(ahs_path.read_text(encoding="utf-8"))
         skill_specs.append({"id": skill_name, "spec": spec, "path": ahs_path})
 
     if not skill_specs:

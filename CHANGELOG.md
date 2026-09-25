@@ -6,6 +6,22 @@ All notable changes to agenthatch will be documented in this file.
 
 ## \[Unreleased]
 
+No unreleased changes.
+
+***
+
+## \[v1.0.16] — 2026-09-25
+
+### Fixed
+
+* **Locale-dependent file reads aborted `run` on non-UTF-8 systems** — Ten production call sites read files through `Path.read_text()` with no `encoding=`, so CPython fell back to the platform locale encoding rather than UTF-8. Every file in question is *written* as UTF-8 by this codebase (`init` writes `config.toml`, `hatch` writes `agenthatch.yaml`, the generator writes `runtime.toml`), so the readers were the asymmetric half; they now pin `encoding="utf-8"` and the read/write pair is consistent again. On Chinese Windows (cp936) a single `→` inside a generated `agenthatch.yaml` was enough to abort `agenthatch run` with `UnicodeDecodeError: 'gbk' codec can't decode byte 0x92 in position 2894` — `0x92` is a UTF-8 continuation byte, not a valid GBK lead byte. On `LANG=C` / `LC_ALL=C` (CI, Docker, cron, systemd) the same reads fail on *any* non-ASCII byte, since the ASCII codec rejects all of them. Touched: `agenthatch_core/agent.py`, `agenthatch_core/config.py`, `cli/commands/assemble.py`, `cli/commands/run.py`, `generate/engine.py`. Deliberately left alone: the checkpoint/history JSON readers (`json.dumps` defaults to `ensure_ascii=True`, so those files are ASCII-only and encoding-independent) and `builtins/file_io.py`, which reads arbitrary user files and needs an encoding fallback chain rather than a single pinned codec. Locked by `tests/test_encoding_regressions.py`, which fails if a bare `read_text()` reappears in any of the five files.
+
+* **`[v1.0.15]` CHANGELOG section restored** — v1.0.15 shipped with its notes still filed under `[Unreleased]`, because a documentation-reformat pass reverted the finalisation edit before the release commit landed. The entry content is unchanged; it is simply filed under the version that actually shipped it.
+
+***
+
+## \[v1.0.15] — 2026-09-11
+
 ### Added
 
 * **Anthropic model-generation compatibility rules** — The adapter now derives API-surface rules from the model name instead of an explicit model list: sampling params (`temperature`/`top_p`/`top_k`) are dropped for Opus/Sonnet 4.7+ and all 5th-generation families (Fable, Mythos, Opus 5), and forced `tool_choice` (`any`/`tool`) — which Fable/Mythos 5.1+ reject with a 400 — falls back to `auto` with a warning log. Previously, configuring `claude-fable-5-1` or `claude-opus-5` sent `temperature` and would fail with a 400; forced tool choice on Fable 5.1 broke structured-output flows the same way.

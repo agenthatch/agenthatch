@@ -177,7 +177,7 @@ def _load_runtime_toml(agent_dir: Path) -> dict[str, Any]:
     toml_path = agent_dir / "runtime.toml"
     if not toml_path.exists():
         return {}
-    raw = tomllib.loads(toml_path.read_text())
+    raw = tomllib.loads(toml_path.read_text(encoding="utf-8"))
     resolved = resolve_runtime_config(raw)
     return inherit_api_key(resolved)
 
@@ -206,7 +206,7 @@ def _resolve_key_source(
     # Check if runtime.toml has an api_key entry
     toml_path = agent_dir / "runtime.toml"
     if toml_path.exists():
-        toml_cfg = tomllib.loads(toml_path.read_text())
+        toml_cfg = tomllib.loads(toml_path.read_text(encoding="utf-8"))
         toml_key = toml_cfg.get("llm", {}).get("api_key", "")
         if toml_key and toml_key == active_key:
             return "runtime.toml (per-agent override)"
@@ -214,7 +214,7 @@ def _resolve_key_source(
     # Check global config
     global_config = Path.home() / ".agenthatch" / "config.toml"
     if global_config.exists():
-        gcfg = tomllib.loads(global_config.read_text())
+        gcfg = tomllib.loads(global_config.read_text(encoding="utf-8"))
         provider = gcfg.get("agenthatch", {}).get("default", "")
         if provider.startswith("custom."):
             custom_key = provider.removeprefix("custom.")
@@ -623,7 +623,7 @@ def _handle_config_command(agent: Any) -> str | None:
     if not runtime_path.exists():
         runtime_path.write_text("[llm]\nprovider = \"deepseek\"\nmodel = \"deepseek-flash\"\n")
 
-    cfg = tomllib.loads(runtime_path.read_text())
+    cfg = tomllib.loads(runtime_path.read_text(encoding="utf-8"))
     llm = cfg.setdefault("llm", {})
     current_key = llm.get("api_key", "")
 
@@ -710,7 +710,7 @@ def _handle_key_source_command(agent: Any) -> str:
     if agent_dir:
         toml_path = agent_dir / "runtime.toml"
         if toml_path.exists():
-            toml_cfg = tomllib.loads(toml_path.read_text())
+            toml_cfg = tomllib.loads(toml_path.read_text(encoding="utf-8"))
             runtime_key = toml_cfg.get("llm", {}).get("api_key", "")
             if runtime_key:
                 runtime_has_key = True
@@ -725,7 +725,7 @@ def _handle_key_source_command(agent: Any) -> str:
     global_has_key = False
     if global_config.exists():
         try:
-            gcfg = tomllib.loads(global_config.read_text())
+            gcfg = tomllib.loads(global_config.read_text(encoding="utf-8"))
             provider = gcfg.get("agenthatch", {}).get("default", "")
             if provider.startswith("custom."):
                 custom_key = provider.removeprefix("custom.")

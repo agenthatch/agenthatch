@@ -556,7 +556,7 @@ class GenerateEngine:
             return ("openai", "gpt-6-astra", "https://api.openai.com/v1")
 
         try:
-            cfg = _tomllib.loads(config_path.read_text())
+            cfg = _tomllib.loads(config_path.read_text(encoding="utf-8"))
         except Exception:
             return ("openai", "gpt-6-astra", "https://api.openai.com/v1")
 

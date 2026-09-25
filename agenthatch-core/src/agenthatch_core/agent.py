@@ -330,7 +330,7 @@ class AHCoreAgent:
         import yaml
 
         if spec_path and spec_path.exists():
-            spec = yaml.safe_load(spec_path.read_text()) or {}
+            spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
             spec.setdefault("identity", {}).update({
                 "id": identity.id,
                 "display_name": identity.display_name,
