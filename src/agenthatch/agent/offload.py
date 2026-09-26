@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import atexit
-import fcntl
 import json
 import logging
 import os
+import sys
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -13,7 +13,47 @@ from typing import Any
 
 from agenthatch.agent.compact import CompactSummary
 
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
+
 logger = logging.getLogger(__name__)
+
+
+def _lock_fd(fd: int) -> bool:
+    """Try to take the exclusive advisory lock on *fd* without blocking.
+
+    Returns False when the lock is already held (another process is
+    running the same skill). fcntl.flock is POSIX-only; msvcrt.locking
+    on byte 0 is the CRT equivalent on Windows.
+    """
+    if sys.platform == "win32":
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    else:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            return False
+
+
+def _unlock_fd(fd: int) -> None:
+    """Release the lock taken by _lock_fd. Best effort."""
+    try:
+        if sys.platform == "win32":
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
 
 # ── Process-level lock registry ───────────────────────────────────────
 # Key: resolved lock file path → (fd, refcount)
@@ -28,7 +68,7 @@ def _cleanup_locks() -> None:
     with _lock_registry_lock:
         for fd, _ in _lock_registry.values():
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                _unlock_fd(fd)
                 os.close(fd)
             except OSError:
                 pass
@@ -89,7 +129,7 @@ class CheckpointManager:
 
     v0.8.1: Process-level lock registry with reference counting.
     Multiple CheckpointManager instances in the same process share
-    the same flock — no BlockingIOError on repeated from_ahspec().
+    the same lock — no conflict on repeated from_ahspec().
     """
 
     def __init__(self, session_dir: Path):
@@ -106,7 +146,7 @@ class CheckpointManager:
 
         First call in this process: acquire lock, register fd.
         Subsequent calls: share existing fd, increment refcount.
-        Cross-process: BlockingIOError → RuntimeError (skill already running).
+        Cross-process: lock conflict → RuntimeError (skill already running).
         """
         lock_key = str(self._lock_path.resolve())
 
@@ -120,9 +160,7 @@ class CheckpointManager:
 
         # First acquirer in this process
         fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        if not _lock_fd(fd):
             os.close(fd)
             raise RuntimeError(
                 f"Skill '{self._dir.name}' is already running in another process. "
@@ -143,7 +181,7 @@ class CheckpointManager:
                     if refcount <= 1:
                         del _lock_registry[lock_key]
                         try:
-                            fcntl.flock(fd, fcntl.LOCK_UN)
+                            _unlock_fd(fd)
                             os.close(fd)
                         except OSError:
                             pass

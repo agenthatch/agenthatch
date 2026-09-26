@@ -6,12 +6,19 @@ All notable changes to agenthatch will be documented in this file.
 
 ## \[Unreleased]
 
+No unreleased changes.
+
+***
+
+## \[v1.0.18] — 2026-09-26
+
 ### Fixed
 
 * **skillhouse registration records the skill source dir, not the `-o` output dir** — `hatch <name> -o <dir>` registered the output dir's `agenthatch.yaml` as `ahs_path`; by-name resolution then treated the output dir as the skill source dir (no SKILL.md there) and crashed with "No .md file found". Registration now always records `skill_dir/agenthatch.yaml`.
 * **known pip packages are auto-installed via pip only** — Python packages detected by the readiness audit no longer go through a guaranteed-to-fail `npm install -g` attempt first.
 * **readiness no longer reports installed Python packages as missing system tools** — `base.dependencies` entries such as `pypdf` are now checked for importability/pip installation in addition to PATH, removing misleading warnings. Script imports are also detected from the conventional `<skill>/scripts` layout (previously only `<skill>/skills/scripts`).
 * **CP2 fidelity checkpoint no longer truncates skills at 4000 chars** — a 59KB SKILL.md had ~93% of its body hidden from the coverage check, producing false `coverage=fail` verdicts; the input cap is now 100,000 chars.
+* **`agenthatch.agent` now imports on Windows** — `agent/offload.py` opened with a module-level `import fcntl`, a POSIX-only module, so merely importing the package raised `ModuleNotFoundError: No module named 'fcntl'` on Windows; the blast radius covered the whole `agenthatch.agent` namespace (including `cap/bus.py`'s lazy `agent.builtins` import, which runs the parent package `__init__` first) and `tests/test_agent/test_runtime.py`, which could not even be collected locally — CI never noticed because the suite only runs on ubuntu. The per-skill checkpoint lock now hides the platform split behind `_lock_fd`/`_unlock_fd`: `fcntl.flock` where it exists, `msvcrt.locking` on byte 0 as the CRT equivalent on Windows. The single-instance guarantee is unchanged on both platforms — a second process still gets the existing "already running in another process" `RuntimeError` — and the in-process fd-sharing registry behaves exactly as before. `tests/test_offload.py` pins the real lock primitive of whichever platform runs it: cross-fd conflict, reacquire after unlock, and two managers sharing one lock through the registry.
 
 ***
 
