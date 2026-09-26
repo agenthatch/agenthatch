@@ -10,6 +10,14 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.19] — 2026-09-26
+
+### Fixed
+
+* **thinking-mode conversations broke from the second user turn onward** — DeepSeek runs its models in thinking mode and returns a `reasoning_content` field alongside the answer; the API then rejects any follow-up request in which an earlier assistant turn is replayed *without* that field, answering `400 The reasoning_content in the thinking mode must be passed back to the API`. The v0.9.8 fix carried the field inside the live `messages` list only, and `ContextManager.add_to_history()` had no parameter for it at all — so it was structurally impossible to persist, and every history rebuild (`build_messages()`) silently dropped it. Turn one succeeded, because its assistant messages were still in the in-memory list; turn two rebuilt the conversation from history and the tool loop started 400ing. `add_to_history()` now accepts and stores `reasoning_content`, and all nine assistant-recording sites in `agent_loop.py` funnel through a single `_record_assistant()` helper that keeps the field in both the live message list and history, for the tool-call path, the text-only path, the nudge-grace path and the four final-answer exits. Observed on a hatched tool-wrapper agent against the default `deepseek`/`deepseek-flash` provider: before, request 8 of the session failed and the PlanLayer logged `3 consecutive failures, transitioning to REPLANNING`, leaving the first turn's answer as leaked internal monologue; after, the same two-turn conversation completes in five requests with no failures and both answers well-formed. `tests/test_reasoning_content_regression.py` pins the replay path — recorded reasoning, `build_messages()` output, and the helper's behaviour for tool-call, text and non-thinking-provider cases.
+
+***
+
 ## \[v1.0.18] — 2026-09-26
 
 ### Fixed

@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_RESULT_CHARS = 10000
 
+
+def _reasoning_of(response: Any) -> str | None:
+    """Return a thinking-mode response's reasoning, if any (v1.0.19).
+
+    The value has to be carried into conversation history, not only into
+    the live message list: DeepSeek in thinking mode rejects a follow-up
+    request that replays an earlier assistant turn without the
+    ``reasoning_content`` it was returned with.
+    """
+    return getattr(response, "reasoning_content", None) or None
+
+
 # v0.9: Interrupt message injected when user interrupts agent mid-execution.
 _INTERRUPT_MESSAGE = (
     "User interrupted. Stop what you are doing, ask the user what they "
@@ -348,6 +360,38 @@ class ConversationLoop:
             ),
         })
 
+    def _record_assistant(
+        self,
+        response: Any,
+        content: str | None,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Build an assistant message and record it, keeping its reasoning.
+
+        v1.0.19: ``reasoning_content`` has to survive into conversation
+        history, not just into the current turn's message list.  DeepSeek
+        in thinking mode rejects a follow-up request in which an earlier
+        assistant turn is replayed without the reasoning it was returned
+        with ("The `reasoning_content` in the thinking mode must be
+        passed back to the API"), which is what broke the tool loop from
+        the second user turn onward.  The v0.9.8 fix only ever carried it
+        inside the live ``messages`` list, so every history rebuild
+        dropped it.
+        """
+        reasoning = _reasoning_of(response)
+        msg: dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        if reasoning:
+            msg["reasoning_content"] = reasoning
+        self.ctx.add_to_history(
+            "assistant",
+            content,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning,
+        )
+        return msg
+
     def run(self, user_input: str) -> str:
         """Execute one conversation turn synchronously."""
         self.ctx._turn_count += 1
@@ -425,7 +469,11 @@ class ConversationLoop:
                         if self._max_consecutive_text_only == 0:
                             final_text = _strip_trailing_meta_narration(final_text)
                         self.ctx.add_to_history("user", user_input)
-                        self.ctx.add_to_history("assistant", final_text)
+                        self.ctx.add_to_history(
+                            "assistant",
+                            final_text,
+                            reasoning_content=_reasoning_of(response),
+                        )
                         # v0.7.11: Record turn to memory
                         if self._memory_brick:
                             self._memory_brick.record_turn("user", user_input)
@@ -458,11 +506,9 @@ class ConversationLoop:
                 # progress naturally (e.g. "Page opened, search box visible")
                 # before nudging it to continue or complete.
                 if _consecutive_text_only < self._nudge_grace:
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.text,
-                    })
-                    self.ctx.add_to_history("assistant", str(response.text))
+                    messages.append(
+                        self._record_assistant(response, response.text)
+                    )
                     try:
                         response = self._call_with_retry(
                             self.llm.chat_with_tools, messages, tools_for_api,
@@ -477,11 +523,9 @@ class ConversationLoop:
                             tool_calls=[],
                         )
                     continue
-                messages.append({
-                    "role": "assistant",
-                    "content": response.text or "",
-                })
-                self.ctx.add_to_history("assistant", response.text)
+                messages.append(
+                    self._record_assistant(response, response.text or "")
+                )
                 messages.append({"role": "user", "content": _CONTINUE_NUDGE})
 
                 # v0.9: Check interrupt before auto-continuation
@@ -506,30 +550,22 @@ class ConversationLoop:
                     )
                 continue
 
-            assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in response.tool_calls
-                ],
-            }
-            # v0.9.8: Preserve reasoning_content for DeepSeek thinking mode
-            if response.reasoning_content:
-                assistant_msg["reasoning_content"] = response.reasoning_content
-            messages.append(assistant_msg)
-
-            self.ctx.add_to_history(
-                "assistant",
-                None,
-                tool_calls=assistant_msg.get("tool_calls"),
+            messages.append(
+                self._record_assistant(
+                    response,
+                    None,
+                    tool_calls=[
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ],
+                )
             )
 
             # PRE_TOOL_CALL hook
@@ -629,7 +665,11 @@ class ConversationLoop:
         if self._max_consecutive_text_only == 0:
             final_text = _strip_trailing_meta_narration(final_text)
         if final_text:
-            self.ctx.add_to_history("assistant", final_text)
+            self.ctx.add_to_history(
+                "assistant",
+                final_text,
+                reasoning_content=_reasoning_of(response),
+            )
         # v0.7.11: Record turn to memory
         if self._memory_brick:
             self._memory_brick.record_turn("user", user_input)
@@ -985,7 +1025,11 @@ class ConversationLoop:
                         if self._max_consecutive_text_only == 0:
                             final_text = _strip_trailing_meta_narration(final_text)
                         self.ctx.add_to_history("user", user_input)
-                        self.ctx.add_to_history("assistant", final_text)
+                        self.ctx.add_to_history(
+                            "assistant",
+                            final_text,
+                            reasoning_content=_reasoning_of(response),
+                        )
                         # v0.7.11: Record turn to memory
                         if self._memory_brick:
                             self._memory_brick.record_turn("user", user_input)
@@ -1023,11 +1067,11 @@ class ConversationLoop:
                 if _consecutive_text_only < self._nudge_grace:
                     accumulated_text = ""
                     continue
-                messages.append({
-                    "role": "assistant",
-                    "content": response.text or accumulated_text,
-                })
-                self.ctx.add_to_history("assistant", response.text or accumulated_text)
+                messages.append(
+                    self._record_assistant(
+                        response, response.text or accumulated_text
+                    )
+                )
                 messages.append({"role": "user", "content": _CONTINUE_NUDGE})
 
                 # v0.9: Check interrupt before auto-continuation (streaming)
@@ -1050,17 +1094,10 @@ class ConversationLoop:
                 }
                 for tc in response.tool_calls
             ]
-            stream_assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": assistant_tool_calls,
-            }
-            # v0.9.8: Preserve reasoning_content for DeepSeek thinking mode
-            if response.reasoning_content:
-                stream_assistant_msg["reasoning_content"] = response.reasoning_content
-            messages.append(stream_assistant_msg)
-            self.ctx.add_to_history(
-                "assistant", None, tool_calls=assistant_tool_calls
+            messages.append(
+                self._record_assistant(
+                    response, None, tool_calls=assistant_tool_calls
+                )
             )
 
             # PRE_TOOL_CALL hook (streaming)
@@ -1148,7 +1185,11 @@ class ConversationLoop:
         if self._max_consecutive_text_only == 0:
             final_text = _strip_trailing_meta_narration(final_text)
         if final_text:
-            self.ctx.add_to_history("assistant", final_text)
+            self.ctx.add_to_history(
+                "assistant",
+                final_text,
+                reasoning_content=_reasoning_of(response),
+            )
         # v0.7.11: Record turn to memory
         if self._memory_brick:
             self._memory_brick.record_turn("user", user_input)

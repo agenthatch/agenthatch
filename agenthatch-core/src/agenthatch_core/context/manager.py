@@ -553,13 +553,24 @@ class ContextManager:
         content: str | None,
         tool_call_id: str | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
+        reasoning_content: str | None = None,
     ) -> None:
-        """Add a message to conversation history."""
+        """Add a message to conversation history.
+
+        v1.0.19: ``reasoning_content`` is stored so it can be replayed.
+        Providers in thinking mode (DeepSeek) reject a follow-up request
+        whose earlier assistant turns omit the reasoning they were
+        returned with — the API answers 400 "reasoning_content in the
+        thinking mode must be passed back".  Dropping it here is what
+        made the tool loop fail on the *second* user turn.
+        """
         msg: dict[str, Any] = {"role": role, "content": content}
         if tool_call_id:
             msg["tool_call_id"] = tool_call_id
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        if reasoning_content:
+            msg["reasoning_content"] = reasoning_content
         self.history.append(msg)
         # v0.9.8: Micro-compact after each tool result to prevent
         # unbounded context growth between full LLM compactions.
