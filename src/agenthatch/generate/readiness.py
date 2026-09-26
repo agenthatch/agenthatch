@@ -12,6 +12,8 @@ environment BEFORE the hatch is declared successful. Checks:
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
+import importlib.util
 import json
 import logging
 import re
@@ -133,6 +135,10 @@ def extract_dependencies(
 
     # From Python scripts: detect import dependencies
     scripts_dir = skill_dir / "skills" / "scripts"
+    if not scripts_dir.exists():
+        # Skills conventionally keep scripts in <skill>/scripts; the
+        # skills/ prefix is the generated-agent layout.
+        scripts_dir = skill_dir / "scripts"
     if scripts_dir.exists():
         deps.pip_packages = _detect_import_dependencies(scripts_dir)
 
@@ -185,6 +191,29 @@ def _detect_import_dependencies(scripts_dir: Path) -> list[str]:
     return sorted(found)
 
 
+def _is_python_package_available(name: str) -> bool:
+    """True if *name* is importable or installed as a pip distribution.
+
+    base.dependencies entries are not always CLI tools — installed
+    Python packages (pypdf, pandas, ...) never appear on PATH, so the
+    environment audit needs this fallback to avoid false "missing"
+    warnings.
+    """
+    module = name.replace("-", "_")
+    try:
+        if importlib.util.find_spec(module) is not None:
+            return True
+    except (ImportError, ValueError):
+        pass
+    try:
+        importlib.metadata.version(name)
+        return True
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Step 2: Environment Audit
 # ─────────────────────────────────────────────────────────────────────────
@@ -199,7 +228,13 @@ def audit_environment(dep_manifest: DependencyManifest) -> EnvironmentReport:
         report.mcporter_version = _get_cli_version("mcporter")
 
     for tool in dep_manifest.system_tools:
-        report.system_tools[tool] = shutil.which(tool) is not None
+        found = shutil.which(tool) is not None
+        if not found:
+            # base.dependencies may list Python packages (e.g. pypdf)
+            # alongside real CLI tools; a PATH-only check reports
+            # installed packages as missing.
+            found = _is_python_package_available(tool)
+        report.system_tools[tool] = found
 
     # 2. Python packages: check importability
     for pkg in dep_manifest.pip_packages:

@@ -550,3 +550,27 @@ class TestRunFidelityCheckpoint:
         assert result.coverage == "pass"
         assert result.hallucination == "pass"
         assert "failed" in result.coverage_detail.lower()
+
+    def test_large_skill_body_not_truncated(self):
+        """CP2 must see the full skill body.
+
+        The old 4000-char cap hid most of large skills (a 59KB SKILL.md
+        lost ~93% of its body) and produced false coverage=fail
+        verdicts from the truncated blind zone.
+        """
+        client = MagicMock()
+        client.chat_structured.return_value = FidelityCheckpointOutput(
+            coverage="pass", hallucination="pass", fidelity_score=1.0
+        )
+        skill_md = "HEAD\n" + ("filler " * 1000) + "\nTAIL_MARKER_AT_END"
+        assert len(skill_md) > 4000
+
+        run_fidelity_checkpoint(
+            client=client,
+            model="test-model",
+            skill_md=skill_md,
+            ahspec_json="{}",
+        )
+
+        prompt = client.chat_structured.call_args.kwargs["messages"][0]["content"]
+        assert "TAIL_MARKER_AT_END" in prompt

@@ -904,7 +904,7 @@ def hatch_command(
             console.print(f"  [dim]Written: {yaml_output_path}[/dim]")
 
         # ── Register in skillhouse.json ─────────────────────────────────
-        _register_skillhouse(ahs_spec, yaml_output_path, config)
+        _register_skillhouse(ahs_spec, skill_dir, config)
 
     # ── 12. Phase 3: Readiness + Generation (silent unless --report) ──
     # v0.9.17: Capture readiness verdict for the HatchReport.
@@ -981,7 +981,7 @@ def hatch_command(
                     ]
                     if missing_pkgs:
                         for pkg in missing_pkgs:
-                            _auto_install_dependency(console, pkg)
+                            _auto_install_dependency(console, pkg, prefer_pip=True)
                 if not result.readiness.mcporter_installed and result._mcp_skill:
                     _auto_install_dependency(console, "mcporter")
                 # v1.0.0: Readiness text report ("HATCH REPORT: ...") is
@@ -1346,9 +1346,16 @@ def _resolve_yaml_path(skill_dir: Path, output: str | None) -> Path:
 
 
 def _register_skillhouse(
-    ahs_spec: Any, yaml_output_path: Path, config: dict[str, Any]
+    ahs_spec: Any, skill_dir: Path, config: dict[str, Any]
 ) -> None:
-    """Register skill in skillhouse.json index."""
+    """Register skill in skillhouse.json index.
+
+    The registered ahs_path ALWAYS points to skill_dir/agenthatch.yaml,
+    even when `-o` redirected the actual yaml write elsewhere. By-name
+    resolution treats ahs_path.parent as the skill source dir, so
+    recording an output-dir yaml breaks `hatch <name>` after
+    `hatch <name> -o <dir>` (the output dir has no SKILL.md).
+    """
     skillhouse_config = config.get("skillhouse", {}) if "skillhouse" in config else {}
     skillhouse_path = skillhouse_config.get(
         "path", ".agenthatch/skillhouse.json"
@@ -1362,7 +1369,7 @@ def _register_skillhouse(
 
     idx = SkillhouseIndex(str(skillhouse_full_path))
     try:
-        idx.add_entry(ahs_spec.identity.id, ahs_spec, str(yaml_output_path))
+        idx.add_entry(ahs_spec.identity.id, ahs_spec, str(skill_dir / "agenthatch.yaml"))
         console.print(
             f"  [dim]Registered: {skillhouse_full_path} "
             f"({idx.entry_count} entries)[/dim]"
@@ -1375,10 +1382,15 @@ def _register_skillhouse(
         console.print(f"[yellow]⚠ Skill indexing failed (non-fatal): {e}[/yellow]")
 
 
-def _auto_install_dependency(console: Any, tool: str) -> None:
-    """v0.9: Auto-install a CLI dependency using known package managers.
+def _auto_install_dependency(
+    console: Any, tool: str, prefer_pip: bool = False
+) -> None:
+    """v0.9: Auto-install a dependency using known package managers.
 
     Tries (in order): npm, pip, brew (macOS), apt-get (Linux).
+    With prefer_pip=True (known Python packages) only pip is tried —
+    a pip package can only ever come from pip, so an npm-first attempt
+    is guaranteed to fail and waste time.
     Uses smart timeout: kills process if no output for 15s (hung),
     waits up to 120s if output is being produced.
     Does NOT fail if all attempts fail — the agent runtime health check
@@ -1391,16 +1403,22 @@ def _auto_install_dependency(console: Any, tool: str) -> None:
     if shutil.which(tool):
         return
 
-    managers = [
-        ("npm", ["npm", "install", "-g", tool]),
-        ("pip", [sys.executable, "-m", "pip", "install", tool]),
-    ]
+    if prefer_pip:
+        managers = [
+            ("pip", [sys.executable, "-m", "pip", "install", tool]),
+        ]
+    else:
+        managers = [
+            ("npm", ["npm", "install", "-g", tool]),
+            ("pip", [sys.executable, "-m", "pip", "install", tool]),
+        ]
 
     system = platform.system()
-    if system == "Darwin":
-        managers.append(("brew", ["brew", "install", tool]))
-    elif system == "Linux":
-        managers.append(("apt", ["sudo", "apt-get", "install", "-y", tool]))
+    if not prefer_pip:
+        if system == "Darwin":
+            managers.append(("brew", ["brew", "install", tool]))
+        elif system == "Linux":
+            managers.append(("apt", ["sudo", "apt-get", "install", "-y", tool]))
 
     for mgr_name, cmd in managers:
         if not shutil.which(cmd[0]):

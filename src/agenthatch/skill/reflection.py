@@ -114,6 +114,11 @@ class HarnessReflectionOutput(BaseModel):
 # Fidelity Checkpoint CP2
 # ─────────────────────────────────────────────────────────────────────────
 
+# CP2 input cap. The previous 4000-char cap hid most of large skills
+# (a 59KB SKILL.md lost ~93% of its body) and produced false
+# coverage=fail verdicts from the truncated blind zone.
+_CP2_MAX_INPUT_CHARS = 100_000
+
 FIDELITY_CHECKPOINT_PROMPT = """\
 You are verifying that an AHSSPEC faithfully represents the original SKILL.md.
 
@@ -586,8 +591,8 @@ def run_fidelity_checkpoint(
     sentinel (score=0.5, all pass) so that the pipeline never blocks.
     """
     prompt = FIDELITY_CHECKPOINT_PROMPT.format(
-        skill_md=skill_md[:4000],
-        ahspec_json=ahspec_json[:4000],
+        skill_md=skill_md[:_CP2_MAX_INPUT_CHARS],
+        ahspec_json=ahspec_json[:_CP2_MAX_INPUT_CHARS],
     )
 
     try:
