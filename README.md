@@ -77,7 +77,7 @@ pip install agenthatch
 agenthatch init
 
 # Add a SKILL.md
-agenthatch skills add ./my-skill/SKILL.md
+agenthatch skill add ./my-skill/SKILL.md
 
 # Hatch it into an agent
 agenthatch hatch my-skill
@@ -145,6 +145,8 @@ hatched-agent/
 ├── runtime.toml            # LLM provider, model, API keys
 ├── README.md               # Generated usage docs
 ├── agenthatch.yaml         # AHSSPEC manifest
+├── skills/                 # Original SKILL.md + bundled resources
+├── knowledge/              # KB index (knowledge-base agents only)
 └── src/{package_name}/
     ├── __init__.py
     ├── agent.py            # Agent class (extends AHCoreAgent)
@@ -168,6 +170,21 @@ engine that runs STARTING → PLANNING → EXECUTING → VERIFYING → REPLANNIN
 DONE. It adapts mid-task: merges completed steps, branches on failure, and
 degrades gracefully when tools time out.
 
+### Knowledge-base agents (RAG-native)
+
+Pass a second positional — a directory of reference files — and the pipeline
+gains a Phase 2.5 KB stage: the corpus is indexed into a local SQLite FTS
+database, retrieval rules are inferred from the skill, and the generated
+agent gets a wired-in `retrieve()` tool (the `knowledge-base` archetype):
+
+```bash
+agenthatch hatch my-skill ./my-knowledge-base
+```
+
+The hatched agent answers strictly from the indexed archive, cites the
+source file for every claim, and reports honestly when a request falls
+outside the index.
+
 ***
 
 ## How it works under the hood
@@ -182,7 +199,7 @@ Anthropic, DeepSeek, GLM (Zhipu), Qwen (DashScope), Ollama, and any
 OpenAI-compatible endpoint. The config file is
 TOML. Readable, versionable, easy to share.
 
-### Step 2: `agenthatch skills add <path>`
+### Step 2: `agenthatch skill add <path>`
 
 Copies the SKILL.md and its directory into the skillhouse index. The skillhouse
 tracks every skill you've added, its hatch status, and where its generated agent
@@ -216,17 +233,18 @@ with tool calling, context compaction, and PlanLayer-driven execution.
 
 ## CLI Reference
 
-| Command                           | What it does                                       |
-| --------------------------------- | -------------------------------------------------- |
-| `agenthatch init`                 | Initialize config and provider setup               |
-| `agenthatch skills add <path>`    | Register a SKILL.md in the skillhouse              |
-| `agenthatch skills list`          | List all registered skills                         |
-| `agenthatch skills delete <name>` | Remove a skill from the skillhouse                 |
-| `agenthatch hatch <name>`         | Run the full pipeline (parse → harness → generate) |
-| `agenthatch run <name>`           | Launch a hatched agent in interactive TUI          |
-| `agenthatch search <query>`       | Search the skillhouse index                        |
-| `agenthatch doctor`               | Diagnose environment and dependencies              |
-| `agenthatch assemble`             | Re-assemble an existing skillhouse agent           |
+| Command                            | What it does                                       |
+| ---------------------------------- | -------------------------------------------------- |
+| `agenthatch init`                  | Initialize config and provider setup               |
+| `agenthatch skill add <path>`      | Register a SKILL.md in the skillhouse              |
+| `agenthatch skill list`            | List all registered skills                         |
+| `agenthatch skill delete <name>`   | Remove a skill from the skillhouse                 |
+| `agenthatch hatch <name> [kb]`     | Run the full pipeline (parse → harness → generate) |
+| `agenthatch run <name>`             | Launch a hatched agent in interactive TUI          |
+| `agenthatch search <query>`        | Search the skillhouse index                        |
+| `agenthatch doctor`                | Diagnose environment and dependencies              |
+| `agenthatch assemble`              | Re-assemble an existing skillhouse agent           |
+| `agenthatch hello`                 | Verify the installation works                      |
 
 ***
 
@@ -236,7 +254,7 @@ with tool calling, context compaction, and PlanLayer-driven execution.
 pip install agenthatch
 ```
 
-Requires Python 3.11 or later.
+Requires Python 3.11 or later. Runs on macOS, Linux, and Windows.
 
 For development:
 

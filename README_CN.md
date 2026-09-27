@@ -71,7 +71,7 @@ pip install agenthatch
 agenthatch init
 
 # 添加 SKILL.md
-agenthatch skills add ./my-skill/SKILL.md
+agenthatch skill add ./my-skill/SKILL.md
 
 # 孵化为 Agent
 agenthatch hatch my-skill
@@ -135,6 +135,8 @@ hatched-agent/
 ├── runtime.toml            # LLM 提供商、模型、API Key
 ├── README.md               # 自动生成的使用文档
 ├── agenthatch.yaml         # AHSSPEC 清单
+├── skills/                 # 原始 SKILL.md 及随附资源
+├── knowledge/              # KB 索引（仅知识库 Agent）
 └── src/{package_name}/
     ├── __init__.py
     ├── agent.py            # Agent 类（继承 AHCoreAgent）
@@ -147,6 +149,19 @@ hatched-agent/
 生成的 Agent 使用 **PlanLayer 状态机**——一个 6 状态规划引擎，路径为
 启动 → 规划 → 执行 → 验证 → 重新规划 → 完成。
 它能在任务中途自适应：合并已完成步骤、失败时分支、工具超时时优雅降级。
+
+### 知识库 Agent（RAG 原生）
+
+给 `hatch` 传入第二个位置参数——一个参考文件目录——流水线会追加阶段 2.5 KB 环节：
+语料被索引到本地 SQLite FTS 数据库，检索规则由推理得出，生成的 Agent 内置
+`retrieve()` 工具（即 `knowledge-base` 原型）：
+
+```bash
+agenthatch hatch my-skill ./my-knowledge-base
+```
+
+孵化后的 Agent 严格基于索引档案作答，每条结论都引用源文件，超出索引范围的
+请求会如实上报。
 
 ---
 
@@ -161,7 +176,7 @@ hatched-agent/
 GLM（智谱）、Qwen（百炼）、Ollama 及任何 OpenAI 兼容接口。配置文件为 TOML 格式——
 可读、可版本化、易于分享。
 
-### 第 2 步：`agenthatch skills add <path>`
+### 第 2 步：`agenthatch skill add <path>`
 
 将 SKILL.md 及其目录复制到 skillhouse 索引中。skillhouse 追踪你添加的每个 skill、
 孵化状态以及生成 Agent 的存储位置。
@@ -195,14 +210,15 @@ GLM（智谱）、Qwen（百炼）、Ollama 及任何 OpenAI 兼容接口。配�
 | 命令 | 功能 |
 |---|---|
 | `agenthatch init` | 初始化配置和提供商设置 |
-| `agenthatch skills add <path>` | 注册 SKILL.md 到 skillhouse |
-| `agenthatch skills list` | 列出所有已注册 skill |
-| `agenthatch skills delete <name>` | 从 skillhouse 移除 skill |
-| `agenthatch hatch <name>` | 运行完整流水线（解析 → 推理 → 生成） |
+| `agenthatch skill add <path>` | 注册 SKILL.md 到 skillhouse |
+| `agenthatch skill list` | 列出所有已注册 skill |
+| `agenthatch skill delete <name>` | 从 skillhouse 移除 skill |
+| `agenthatch hatch <name> [kb]` | 运行完整流水线（解析 → 推理 → 生成） |
 | `agenthatch run <name>` | 以交互式 TUI 启动孵化后的 Agent |
 | `agenthatch search <query>` | 搜索 skillhouse 索引 |
 | `agenthatch doctor` | 诊断环境和依赖 |
 | `agenthatch assemble` | 重新装配已有 skillhouse Agent |
+| `agenthatch hello` | 验证安装是否正常 |
 
 ---
 
@@ -212,7 +228,7 @@ GLM（智谱）、Qwen（百炼）、Ollama 及任何 OpenAI 兼容接口。配�
 pip install agenthatch
 ```
 
-要求 Python 3.11 及以上。
+要求 Python 3.11 及以上。支持 macOS、Linux 与 Windows。
 
 开发环境：
 

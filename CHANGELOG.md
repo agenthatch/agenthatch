@@ -6,7 +6,13 @@ All notable changes to agenthatch will be documented in this file.
 
 ## \[Unreleased]
 
-No unreleased changes.
+### Added
+
+* **READMEs now document knowledge-base agents** — the v1.0.0 RAG-native path (`agenthatch hatch <skill> <kb-path>`, the `knowledge-base` archetype with its SQLite FTS index and wired-in `retrieve()` tool) had never been described in either README; both now carry a short section in the Architecture chapter.
+
+### Fixed
+
+* **README quick-start command was wrong** — both READMEs told users to run `agenthatch skills add <path>`, but `skills` is only an alias for `skill list` and takes no subcommand, so the documented command errored. All occurrences (quick start, CLI reference, under-the-hood steps) now use the real `agenthatch skill add/list/delete` forms, the CLI table gains the missing `hello` row, the `hatch` row shows the optional knowledge-base positional, the generated-agent tree gains the `skills/` and `knowledge/` directories, and the install section now states macOS/Linux/Windows support.
 
 ***
 
