@@ -6,12 +6,19 @@ All notable changes to agenthatch will be documented in this file.
 
 ## \[Unreleased]
 
+No unreleased changes.
+
+***
+
+## \[v1.0.21] — 2026-09-27
+
 ### Added
 
 * **READMEs now document knowledge-base agents** — the v1.0.0 RAG-native path (`agenthatch hatch <skill> <kb-path>`, the `knowledge-base` archetype with its SQLite FTS index and wired-in `retrieve()` tool) had never been described in either README; both now carry a short section in the Architecture chapter.
 
 ### Fixed
 
+* **AI tool generation silently produced all-stub agents** — Phase 3 asks the LLM for one JSON document holding a complete function body per capability, built from a ~50K-char skill context. The request was capped at 16384 output tokens, which a multi-tool skill routinely exceeds (thinking models make it worse — reasoning tokens are drawn from the same budget). The response came back cut mid-string, `json.loads` raised `Unterminated string starting at: line 4`, `_ai_generate_tool_impls` returned `{}`, and **every** tool fell through the template to the "not implemented" stub while the hatch still printed a successful summary. Reproduced on `algorithmic-art` and `frontend-design`: `tools.py` was 3.7 KB with 3-4 stubs. The budget is now 65536, verified against the DeepSeek API, and the same skill generates 27.8 KB of real implementations with zero stubs. `tests/test_tool_generation_limits.py` pins the request budget so a refactor cannot quietly reintroduce the ceiling.
 * **README quick-start command was wrong** — both READMEs told users to run `agenthatch skills add <path>`, but `skills` is only an alias for `skill list` and takes no subcommand, so the documented command errored. All occurrences (quick start, CLI reference, under-the-hood steps) now use the real `agenthatch skill add/list/delete` forms, the CLI table gains the missing `hello` row, the `hatch` row shows the optional knowledge-base positional, the generated-agent tree gains the `skills/` and `knowledge/` directories, and the install section now states macOS/Linux/Windows support.
 
 ***

@@ -66,6 +66,17 @@ def _resolve_provider_cfg(config: dict[str, Any], provider_name: str) -> dict[st
     return dict(providers.get(provider_name, {}))
 
 
+# v1.0.21: Output budget for AI tool-implementation generation.
+# Phase 3 asks the model for ONE JSON document holding a complete function
+# body per capability, built from a ~50K-char skill context. At the old
+# 16384 ceiling the response was cut mid-string, json.loads raised
+# "Unterminated string", and EVERY tool silently fell through the template
+# to a non-functional stub — while the hatch still reported success.
+# Thinking models need extra room on top of the code, since reasoning
+# tokens are drawn from the same budget.
+AI_TOOL_MAX_TOKENS = 65536
+
+
 def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
     """Create a simple chat function for AI-driven tool generation.
 
@@ -122,7 +133,12 @@ def _create_ai_chat_fn(config: dict[str, Any]) -> Any:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return client.chat(messages=messages, temperature=0.3, max_tokens=16384)
+        # Tool implementations are large: one JSON document holding a full
+        # function body per capability. See AI_TOOL_MAX_TOKENS above for
+        # why this budget must stay generous.
+        return client.chat(
+            messages=messages, temperature=0.3, max_tokens=AI_TOOL_MAX_TOKENS
+        )
 
     return chat_fn
 
