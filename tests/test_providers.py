@@ -48,6 +48,33 @@ class TestBuiltinProviders:
             info.name = "changed"  # type: ignore[misc]
 
 
+class TestRegistryModelLists:
+    """v1.0.20: the registry tracks the 2026-09-22 model releases."""
+
+    def test_openai_has_gpt6_sol_and_luna(self):
+        models = BUILTIN_PROVIDERS["openai"].features.available_models
+        assert "gpt-6-sol" in models
+        assert "gpt-6-luna" in models
+
+    def test_anthropic_has_opus_55(self):
+        models = BUILTIN_PROVIDERS["anthropic"].features.available_models
+        assert "claude-opus-5-5" in models
+
+    def test_glm_has_flashx(self):
+        models = BUILTIN_PROVIDERS["glm"].features.available_models
+        assert "glm-5.3-flashx" in models
+
+    def test_defaults_unchanged(self):
+        """New tiers are additive — the flagship defaults stay put."""
+        assert BUILTIN_PROVIDERS["openai"].default_model == "gpt-6-astra"
+        assert (
+            BUILTIN_PROVIDERS["anthropic"].default_model == "claude-fable-5-1"
+        )
+        assert BUILTIN_PROVIDERS["deepseek"].default_model == "deepseek-flash"
+        assert BUILTIN_PROVIDERS["glm"].default_model == "glm-5.3"
+        assert BUILTIN_PROVIDERS["qwen"].default_model == "qwen3.8-max"
+
+
 class TestGetProvider:
     """get_provider resolution tests."""
 

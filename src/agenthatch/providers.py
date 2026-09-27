@@ -93,6 +93,8 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_reasoning_content=True,  # o-series / GPT-5.x/6 thinking models
             available_models=(
                 "gpt-6-astra",
+                "gpt-6-sol",    # 2026-09-22, coding/agentic, $2/$10 per MTok
+                "gpt-6-luna",   # 2026-09-22, high-volume tasks, $0.10/$0.50
                 "gpt-5.6-sol",
                 "gpt-5.6-terra",
                 "gpt-5.6-luna",
@@ -117,6 +119,9 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             temperature_range=(0.0, 1.0),  # per docs.claude.com/en/api/messages
             available_models=(
                 "claude-fable-5-1",
+                # claude-opus-5-5 (2026-09-22): rejects forced
+                # tool_choice; adaptive thinking only; $4/$20 per MTok.
+                "claude-opus-5-5",
                 "claude-opus-5",
                 "claude-opus-4-8",
             ),
@@ -137,7 +142,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             supports_reasoning_content=True,
             available_models=(
                 "deepseek-flash",
-                "deepseek-v4-pro",  # routed to V4.1 Flash after 2026-09-14
+                "deepseek-v4-pro",  # service retained past 2026-09-14
             ),
         ),
     ),
@@ -173,6 +178,7 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
             available_models=(
                 "glm-5.3",
                 "glm-5.3-flash",
+                "glm-5.3-flashx",  # 2026-09-21, 200 tokens/s high-speed tier
                 "glm-5.2",
                 "glm-5",
                 "glm-4.7-flash",

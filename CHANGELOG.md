@@ -10,6 +10,21 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.20] — 2026-09-27
+
+### Added
+
+* **model registry tracks the 2026-09-22 releases** — OpenAI shipped GPT-6 Sol (`gpt-6-sol`, complex coding and agentic workflows, \$2/\$10 per MTok) and GPT-6 Luna (`gpt-6-luna`, high-volume focused tasks, \$0.10/\$0.50), both 1.05M-token context, and Anthropic shipped Claude Opus 5.5 (`claude-opus-5-5`, 1M context, \$4/\$20). The registry also picks up Zhipu's `glm-5.3-flashx` (2026-09-21, 200 tokens/s high-speed tier). Defaults are deliberately unchanged — `gpt-6-astra`, `claude-fable-5-1`, `deepseek-flash`, `glm-5.3` and `qwen3.8-max` remain the flagships; the new tiers are additive so existing configs keep their meaning.
+* **`tests/v110_real_model_smoke.py`** — a live-API smoke harness (not pytest-collected) that exercises the exact runtime wiring — registry `ProviderFeatures` → core `LLMClient` — for chat and a full tool-call round-trip per model, replaying the assistant turn with its `reasoning_content` exactly as `agent_loop` does. Run result on 2026-09-26: `deepseek-flash` and `deepseek-v4-pro` both PASS chat + tools; the other providers SKIP cleanly without API keys. New-model verification (gpt-6-sol/luna, claude-opus-5-5, glm-5.3-flashx) is pending keys — the harness runs them with `python tests/v110_real_model_smoke.py <provider> <model>` once keys exist.
+* **misjudgment edge-case tests for the version-aware guards** — snapshot-suffixed IDs (`claude-opus-5-5-20260922`), any-letter-case IDs, gen-3 IDs (`claude-3-5-sonnet-*`, which must keep legacy behavior), `claude-sonnet-5` (sampling params dropped per the 5th-generation rule, forced tool_choice still allowed), and unknown/custom names (never silently stripped). These pin the routing layer's judgment calls identified by a full chain walk from config.toml through the registry, the harness/engine/run resolution paths, and the adapter's request translation.
+
+### Fixed
+
+* **forced tool_choice is downgraded for Claude Opus 5.5** — Opus 5.5 rejects `tool_choice` `"any"`/`"tool"` with a 400, "as on Claude Fable 5.1" per Anthropic's release notes, but `_forced_tool_choice_unsupported()` only knew the Fable/Mythos families, so a forced-tool request against Opus 5.5 would have failed on the wire. The guard now covers Opus 5.5+ and assumes Opus 6 keeps the restriction; Opus 5 and earlier still receive forced tool_choice, and the sampling-param strip already covered Opus 5.5 via the existing major-version rule.
+* **stale DeepSeek registry comment** — the entry claimed `deepseek-v4-pro` would be "routed to V4.1 Flash after 2026-09-14"; DeepSeek instead retained the V4 Pro service with unchanged billing, confirmed by a live chat + tool round-trip on 2026-09-26.
+
+***
+
 ## \[v1.0.19] — 2026-09-26
 
 ### Fixed

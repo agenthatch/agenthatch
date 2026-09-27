@@ -393,14 +393,21 @@ def _forced_tool_choice_unsupported(model: str) -> bool:
 
     Fable/Mythos 5.1 dropped forced tool_choice: the "any" and "tool"
     types return a 400 error (auto/none are unchanged).
+    v1.0.20: Claude Opus 5.5 rejects them too — per the Opus 5.5 release
+    notes, "as on Claude Fable 5.1". Opus 5 itself still accepts forced
+    tool_choice, so the Opus cutoff is 5.5, not 5.
     """
     m = _CLAUDE_VERSION_RE.search(model.lower())
     if not m:
         return False
     family, major, minor = m.group(1), int(m.group(2)), m.group(3)
-    if family not in ("fable", "mythos"):
-        return False
-    return minor is not None and (major, int(minor)) >= (5, 1)
+    if family in ("fable", "mythos"):
+        return minor is not None and (major, int(minor)) >= (5, 1)
+    if family == "opus":
+        if major >= 6:
+            return True
+        return minor is not None and (major, int(minor)) >= (5, 5)
+    return False
 
 
 def _openai_tools_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:

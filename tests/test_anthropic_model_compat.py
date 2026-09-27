@@ -5,6 +5,8 @@ Anthropic changed the Messages API surface across model generations:
     4.7+ and on every 5th-generation family (Fable, Mythos, Opus 5).
     Passing them returns a 400.
   - Fable/Mythos 5.1+ reject tool_choice "any"/"tool" with a 400.
+  - v1.0.20: Opus 5.5 (2026-09-22) rejects them too, "as on Claude
+    Fable 5.1" per the Opus 5.5 release notes.
 
 These tests lock down that the adapter drops the offending params for the
 new models and keeps sending them for the old ones.
@@ -108,6 +110,16 @@ class TestTemperatureInRequests:
         )
         assert "temperature" not in stub.captured
 
+    def test_opus_55_request_has_no_temperature(self):
+        """v1.0.20: the major>=5 rule already covers Opus 5.5 — lock it."""
+        completions, stub = _make_completions()
+        completions.create(
+            model="claude-opus-5-5",
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.7,
+        )
+        assert "temperature" not in stub.captured
+
 
 class TestForcedToolChoice:
     def test_fable_mythos_51_unsupported(self):
@@ -118,6 +130,25 @@ class TestForcedToolChoice:
         assert _forced_tool_choice_unsupported("claude-fable-5") is False
         assert _forced_tool_choice_unsupported("claude-opus-5") is False
         assert _forced_tool_choice_unsupported("claude-opus-4-8") is False
+
+    def test_opus_55_unsupported(self):
+        """v1.0.20: Opus 5.5 rejects any/tool "as on Claude Fable 5.1"."""
+        assert _forced_tool_choice_unsupported("claude-opus-5-5") is True
+
+    def test_future_opus_majors_assumed_unsupported(self):
+        """Opus 6 keeps the restriction until a release says otherwise."""
+        assert _forced_tool_choice_unsupported("claude-opus-6-0") is True
+        assert _forced_tool_choice_unsupported("claude-opus-6") is True
+
+    def test_required_downgraded_to_auto_on_opus_55(self):
+        completions, stub = _make_completions()
+        completions.create(
+            model="claude-opus-5-5",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[{"type": "function", "function": {"name": "f", "parameters": {}}}],
+            tool_choice="required",
+        )
+        assert "tool_choice" not in stub.captured
 
     def test_required_downgraded_to_auto_on_fable_51(self):
         completions, stub = _make_completions()
@@ -168,3 +199,39 @@ class TestForcedToolChoice:
             tool_choice={"type": "function", "function": {"name": "f"}},
         )
         assert stub.captured["tool_choice"] == {"type": "tool", "name": "f"}
+
+
+class TestVersionParsingEdgeCases:
+    """v1.0.20 chain walk: real-world ID shapes must resolve predictably.
+
+    The version-aware guards are the routing layer's judgment calls —
+    these tests pin every shape that could be misjudged.
+    """
+
+    def test_snapshot_suffixes_ignored(self):
+        """Dated snapshots share the base model's restrictions."""
+        assert _forced_tool_choice_unsupported("claude-opus-5-5-20260922") is True
+        assert _sampling_params_removed("claude-fable-5-1-20260901") is True
+
+    def test_case_insensitive(self):
+        assert _forced_tool_choice_unsupported("CLAUDE-OPUS-5-5") is True
+        assert _sampling_params_removed("Claude-Opus-5-5") is True
+
+    def test_gen3_ids_keep_legacy_behavior(self):
+        """Pre-4.7 models still accept sampling and forced tool_choice."""
+        assert _sampling_params_removed("claude-3-5-sonnet-20241022") is False
+        assert _forced_tool_choice_unsupported("claude-3-5-sonnet-20241022") is False
+
+    def test_sonnet_45_keeps_sampling(self):
+        assert _sampling_params_removed("claude-sonnet-4-5") is False
+
+    def test_sonnet_5_drops_sampling_but_keeps_forced_tools(self):
+        """Every 5th-gen family drops sampling params; only Fable/Mythos
+        5.1+ and Opus 5.5+ drop forced tool_choice (as documented today)."""
+        assert _sampling_params_removed("claude-sonnet-5") is True
+        assert _forced_tool_choice_unsupported("claude-sonnet-5") is False
+
+    def test_unknown_names_keep_legacy_behavior(self):
+        """Custom/renamed models must not be silently stripped."""
+        assert _sampling_params_removed("my-private-claude") is False
+        assert _forced_tool_choice_unsupported("my-private-claude") is False
