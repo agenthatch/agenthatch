@@ -10,6 +10,15 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.22] — 2026-09-27
+
+### Changed
+
+* **an unimplemented tool is now an ERROR, not a warning** — `inspect_generated_package()` classified stub tools as `SEVERITY_WARNING`, but `has_errors()` only counts `SEVERITY_ERROR`, so a package in which *every* capability was a stub still produced a `READY` verdict. Combined with the truncation bug fixed in v1.0.21, that let a completely non-functional agent ship behind a green summary. Stubs now count as errors, which makes the verdict `WARN` and sends the package into the B4 repair loop instead of being waved through. `tests/test_postgen_review.py` asserts the severity, `has_errors()` and the verdict.
+* **stub guidance no longer blames the user** — the generated stub body read "Re-run 'agenthatch hatch' with a working LLM provider", which pointed at the user's key or network. The real cause is on the generation side: the reply is cut off before the code is complete (agenthatch's own output budget). The generated message and the engine's warning now say so and point at the truncated-response signal. The sentinel phrase that `_check_tool_stubs()` matches is unchanged, so detection is unaffected.
+
+***
+
 ## \[v1.0.21] — 2026-09-27
 
 ### Added

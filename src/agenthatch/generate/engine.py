@@ -1271,12 +1271,17 @@ class GenerateEngine:
                         )
                 else:
                     # v0.8.19: warn when AI generation returned empty
+                    # v1.0.22: name the likely cause instead of blaming the
+                    # provider's wire format. A multi-tool response is a
+                    # large single JSON document, so a truncated reply is
+                    # the commonest reason it cannot be parsed.
                     tool_count = len(variables["tool_metadata"])
                     logger.warning(
-                        "AI tool generation failed for %d tools. "
-                        "Tools will be stubs. "
-                        "Check that the LLM provider supports the "
-                        "Anthropic Messages API format if using a custom provider.",
+                        "AI tool generation produced nothing usable for %d "
+                        "tools — they will be stubs. Check the log above "
+                        "for a truncated-response warning; if present, the "
+                        "output budget is too small for this skill. "
+                        "Otherwise the provider call itself failed.",
                         tool_count,
                     )
             except Exception as e:

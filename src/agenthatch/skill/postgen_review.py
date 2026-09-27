@@ -207,22 +207,30 @@ def inspect_generated_package(output_dir: Path) -> PostGenReport:
             )
 
     # ── Check 2: Literal stubs (reuse engine logic) ────────────────────
+    # v1.0.22: an unimplemented tool is an ERROR, not a warning. The
+    # capability cannot work at all, so a package built from stubs is not
+    # "fine with notes" — it is broken and the verdict must say so. The
+    # old WARNING-only severity is why an all-stub hatch reported READY.
     stub_tools = GenerateEngine._check_tool_stubs(output_dir)
     tools_py_relpath = _find_tools_py_relpath(output_dir)
     for tool_name in stub_tools:
         report.findings.append(
             PostGenFinding(
-                severity=SEVERITY_WARNING,
+                severity=SEVERITY_ERROR,
                 file=tools_py_relpath,
                 line=0,
                 category=CATEGORY_STUB,
                 message=(
-                    f"Tool '{tool_name}' is a non-functional stub "
-                    "(pass/NotImplementedError)"
+                    f"Tool '{tool_name}' has no implementation — this "
+                    "capability cannot work"
                 ),
                 tool_name=tool_name,
                 suggested_fix=(
-                    "Re-run hatch with working LLM provider, or implement manually"
+                    "AI tool generation produced nothing usable for this "
+                    "tool. Re-run hatch. If it repeats, the generation "
+                    "response is probably being truncated (see "
+                    "AI_TOOL_MAX_TOKENS in cli/commands/hatch.py) or the "
+                    "provider call itself is failing"
                 ),
             )
         )

@@ -83,14 +83,19 @@ def {{ tool.func_name }}() -> Any:
         return f"ERROR (exit {_result.returncode}): {_result.stderr.strip()}"
     return _result.stdout.strip()
 {% else %}
-    # v0.8.19: AI tool generation failed or was skipped.
-    # The tool is a non-functional stub — the agent will see an error
-    # message instead of hallucinating that the tool worked.
+    # v0.8.19: this tool has no implementation — the capability cannot work.
+    # v1.0.22: do not blame the user's provider. The commonest cause is the
+    # generation reply being cut off before the code is complete, which is
+    # agenthatch's own output budget, not a bad key or a broken network.
+    # The sentinel phrase below is matched by _check_tool_stubs() and by the
+    # generated agent's health check — keep it verbatim.
     _msg = (
-        f"ERROR: Tool '{{ tool.name }}' is not implemented. "
-        "AI tool generation did not produce a valid implementation. "
-        "Re-run 'agenthatch hatch' with a working LLM provider, "
-        "or implement this function manually."
+        f"ERROR: Tool '{{ tool.name }}' has no implementation. "
+        "AI tool generation did not produce a valid implementation for it. "
+        "This is a generation-side failure, not a problem with your API key "
+        "or network: the model's reply is usually cut short before the code "
+        "is complete. Re-run 'agenthatch hatch'; if every tool is affected, "
+        "look for a truncated-response warning in the hatch log."
     )
     return _msg
 {% endif %}

@@ -501,13 +501,20 @@ class TestInspectGeneratedPackage:
         assert len(semantic_findings) == 1
         assert semantic_findings[0].severity == SEVERITY_WARNING
 
-    def test_literal_stub_flagged_as_warning(self, output_dir: Path):
+    def test_literal_stub_flagged_as_error(self, output_dir: Path):
+        """v1.0.22: a stub cannot work, so it is an ERROR — not a warning.
+
+        As a warning it left has_errors() False, so a package where every
+        tool was a stub still reported READY.
+        """
         _make_tools_py(output_dir, _TOOLS_PY_LITERAL_STUB)
         report = inspect_generated_package(output_dir)
         stub_findings = [f for f in report.findings if f.category == CATEGORY_STUB]
         assert len(stub_findings) == 1
-        assert stub_findings[0].severity == SEVERITY_WARNING
+        assert stub_findings[0].severity == SEVERITY_ERROR
         assert stub_findings[0].tool_name == "load_data"
+        assert report.has_errors()
+        assert report.verdict == VERDICT_WARN
 
     def test_syntax_error_flagged_as_error(self, output_dir: Path):
         _make_tools_py(output_dir, _TOOLS_PY_SYNTAX_ERROR)
