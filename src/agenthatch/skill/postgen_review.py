@@ -1086,14 +1086,14 @@ def _has_side_effects(
     # Module-level imports — ``import X as Y`` / ``from X import Y`` live at
     # the top of tools.py, outside the function body, so walk the module too.
     if module is not None:
-        for node in module.body:
-            if isinstance(node, ast.Import):
-                for alias in node.names:
+        for stmt_node in module.body:
+            if isinstance(stmt_node, ast.Import):
+                for alias in stmt_node.names:
                     root = alias.name.split(".")[0]
                     import_aliases[alias.asname or root] = root
-            elif isinstance(node, ast.ImportFrom):
-                for alias in node.names:
-                    from_imports[alias.asname or alias.name] = node.module or ""
+            elif isinstance(stmt_node, ast.ImportFrom):
+                for alias in stmt_node.names:
+                    from_imports[alias.asname or alias.name] = stmt_node.module or ""
 
     for arg in (
         func_node.args.posonlyargs + func_node.args.args + func_node.args.kwonlyargs
