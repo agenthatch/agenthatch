@@ -27,6 +27,150 @@ from agenthatch_core.types import AgentIdentity
 logger = logging.getLogger(__name__)
 
 
+def _annotation_to_json_type(annotation: Any) -> str:
+    """v1.0.25: map a Python parameter annotation to its JSON Schema type.
+
+    The old mapping in _register_python_tool recognised only
+    int/float/bool and declared EVERYTHING else — dict, list, str — as
+    "string", so the LLM received a contract that told it to pass
+    strings for dict/list parameters. LLMs follow the declared schema,
+    so dict-receiving tools crashed on str input (reproduced live: a
+    parameters:dict tool received a string and blew up in dict(...)).
+
+    Handles generic aliases (dict[str, Any] via typing.get_origin),
+    Optional[...] unions, and string annotations (modules using
+    ``from __future__ import annotations``). Unknown or missing
+    annotations keep the conservative "string" default.
+    """
+    import inspect
+    import typing
+
+    if annotation is inspect.Parameter.empty:
+        return "string"
+    if isinstance(annotation, str):
+        text = annotation.strip()
+        if text.startswith("dict"):
+            return "object"
+        if text.startswith(("list", "tuple")):
+            return "array"
+        if text.startswith("int"):
+            return "integer"
+        if text.startswith("float"):
+            return "number"
+        if text.startswith("bool"):
+            return "boolean"
+        return "string"
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union:
+        non_none = [a for a in typing.get_args(annotation) if a is not type(None)]
+        if len(non_none) == 1:
+            return _annotation_to_json_type(non_none[0])
+        return "string"
+    if annotation is dict or origin is dict:
+        return "object"
+    if annotation is list or origin is list:
+        return "array"
+    if annotation is tuple or origin is tuple:
+        return "array"
+    if annotation is int:
+        return "integer"
+    if annotation is float:
+        return "number"
+    if annotation is bool:
+        return "boolean"
+    return "string"
+
+
+def _signature_to_parameters_schema(sig: Any) -> dict[str, Any]:
+    """v1.0.25: build the JSON Schema ``parameters`` object from a tool's
+    signature, declaring dict params as object and list params as array
+    (see _annotation_to_json_type)."""
+    import inspect
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for pname, param in sig.parameters.items():
+        properties[pname] = {"type": _annotation_to_json_type(param.annotation)}
+        if param.default is inspect.Parameter.empty:
+            required.append(pname)
+    return {"type": "object", "properties": properties, "required": required}
+
+
+def _coerce_arguments(sig: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """v1.0.25: safely coerce LLM-provided arguments toward the tool's
+    parameter annotations.
+
+    Even with a correct schema, some models serialize object/array
+    parameters as JSON strings; a json.loads round-trip revives them.
+    Anything that does not parse back to the annotated shape is passed
+    through unchanged — the tool's own error handling and the structured
+    retry hint take it from there. Never uses eval.
+    """
+    import json as _json
+
+    coerced = dict(args)
+    for name, param in sig.parameters.items():
+        if name not in coerced:
+            continue
+        expected = _annotation_to_json_type(param.annotation)
+        value = coerced[name]
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text:
+            continue
+        if expected in ("object", "array"):
+            try:
+                parsed = _json.loads(text)
+            except ValueError:
+                continue
+            if expected == "object" and isinstance(parsed, dict):
+                coerced[name] = parsed
+            elif expected == "array" and isinstance(parsed, list):
+                coerced[name] = parsed
+        elif expected in ("integer", "number"):
+            try:
+                coerced[name] = float(text) if expected == "number" else int(text)
+            except ValueError:
+                continue
+    return coerced
+
+
+def _make_python_tool_executor(tool: Callable) -> Callable:
+    """v1.0.25: build a CapBus executor for a plain Python tool function.
+
+    Two layers over the raw call:
+    1. _coerce_arguments revives JSON-stringified object/array/number
+       arguments before the call.
+    2. On TypeError/ValueError the LLM receives an actionable retry hint
+       (expected argument types, JSON-native guidance) instead of a raw
+       Python traceback line it cannot act on. The full exception is
+       logged to the log channel (visible with -v) so the failure stays
+       diagnosable while the default console stays clean.
+    """
+    import inspect
+
+    sig = inspect.signature(tool)
+
+    def executor(args: dict[str, Any]) -> Any:
+        try:
+            return tool(**_coerce_arguments(sig, args))
+        except (TypeError, ValueError) as e:
+            logger.warning("Tool '%s' execution failed: %s", tool.__name__, e)
+            expected = ", ".join(
+                f"'{p.name}'={_annotation_to_json_type(p.annotation)}"
+                for p in sig.parameters.values()
+            )
+            return (
+                f"Error: tool '{tool.__name__}' failed: {e}. "
+                f"Expected argument types: {expected}. "
+                "Retry with JSON-native values "
+                "(object for dict, array for list)."
+            )
+
+    return executor
+
+
 class AHCoreAgent:
     """Agent base class for agenthatch-generated independent Agents.
 
@@ -614,36 +758,19 @@ class AHCoreAgent:
             return
 
         sig = inspect.signature(tool)
-        params: dict[str, Any] = {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-        for pname, param in sig.parameters.items():
-            ptype = "string"
-            if param.annotation is not inspect.Parameter.empty:
-                anno = param.annotation
-                if anno is int:
-                    ptype = "integer"
-                elif anno is float:
-                    ptype = "number"
-                elif anno is bool:
-                    ptype = "boolean"
-            params["properties"][pname] = {"type": ptype}
-            if param.default is inspect.Parameter.empty:
-                params["required"].append(pname)
 
         self.capbus.register(
             name=tool.__name__,
-            # v1.0.24: return the tool's result unchanged. The old
-            # str() here stringified artifact dicts at the executor, so
-            # the loop could never detect and persist them (see
-            # CapBus.route() for the matching change).
-            executor=lambda args, _t=tool: _t(**args),
+            # v1.0.24: the executor returns the tool's result unchanged
+            # (no str()) so artifact dicts reach the loop. v1.0.25: it
+            # also coerces JSON-stringified arguments toward the
+            # signature annotations and returns an actionable retry hint
+            # on TypeError/ValueError. See _make_python_tool_executor().
+            executor=_make_python_tool_executor(tool),
             schema={
                 "name": tool.__name__,
                 "description": (tool.__doc__ or "").strip().split("\n")[0],
-                "parameters": params,
+                "parameters": _signature_to_parameters_schema(sig),
                 "output_schema": {"type": "string"},
             },
             source="user",

@@ -10,6 +10,14 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.25] — 2026-10-02
+
+### Fixed
+
+* **the tool schema stopped lying to the LLM — dict params now declare "object", list params "array"** — `_register_python_tool`'s annotation mapping recognised only int/float/bool and declared every other annotation (dict, list, str) as "string", so the model received a contract that instructed it to pass strings for dict parameters. Models obey the declared schema, so dict-receiving tools crashed on string input — reproduced live in the v1.0.24 E2E, where a parameters:dict tool blew up in `dict(...)` and the whole render chain never ran. Three deterministic layers now defend the contract. (1) The schema is derived truthfully: `_annotation_to_json_type` maps dict→object and list→array, including generic aliases (`dict[str, Any]`), `Optional[...]` unions and string annotations; unknown annotations keep the conservative string default. (2) The executor (`_make_python_tool_executor`) revives JSON-stringified object/array/number arguments via json.loads before the call — anything that does not parse back to the annotated shape passes through unchanged, and eval is never used. (3) On TypeError/ValueError the LLM receives an actionable retry hint ("Expected argument types: 'parameters'=object. Retry with JSON-native values (object for dict, array for list).") instead of a bare traceback line, while the full exception is logged to the log channel (-v), keeping the default console clean. The fix is runtime-side, so already-hatched agents benefit with no re-hatch — verified live: the same un-re-hatched agent's schemas flipped from parameters:"string" to parameters:"object", and the original crash input now executes successfully. `tests/test_tool_argument_contract.py` locks all three layers (12 tests); 685 total green.
+
+***
+
 ## \[v1.0.24] — 2026-10-02
 
 ### Fixed
