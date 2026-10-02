@@ -94,8 +94,8 @@ def {{ tool.func_name }}() -> Any:
         "AI tool generation did not produce a valid implementation for it. "
         "This is a generation-side failure, not a problem with your API key "
         "or network: the model's reply is usually cut short before the code "
-        "is complete. Re-run 'agenthatch hatch'; if every tool is affected, "
-        "look for a truncated-response warning in the hatch log."
+        "is complete. Re-run 'agenthatch hatch -v'; if every tool is "
+        "affected, look for a truncated-response warning in the log output."
     )
     return _msg
 {% endif %}

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agenthatch"
-version = "1.0.22"
+version = "1.0.23"
 description = "Turn any SKILL.md into a runnable AI Agent"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -84,6 +84,11 @@ addopts = [
     "-ra",
 ]
 testpaths = ["tests"]
+# v1.0.23: always import the workspace source, never whatever agenthatch
+# happens to be pip-installed. A non-editable PyPI install otherwise
+# shadows local edits and the suite silently validates the published
+# wheel instead of the code under test.
+pythonpath = ["src"]
 
 [tool.ruff]
 target-version = "py311"

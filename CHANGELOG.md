@@ -10,6 +10,19 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.23] — 2026-10-02
+
+### Changed
+
+* **the postgen verdict is log-channel only — the console stays clean by default** — the Phase 3.5 summary line ("⚠ postgen review: WARN (…)") has been printed to the console on every hatch since v0.9.22, contradicting the project's standing philosophy (v0.8.11: "Don't show error to user unless --report/trace") that the default hatch output stays clean and success-oriented and diagnostics are opt-in. The verdict now goes to the log channel: WARN at `WARNING` level, READY at `INFO` — both invisible at the default `verbose=0` (ERROR) and visible with `-v`. `--report` and `--report --json` still carry the full structured verdict exactly as before, so CI pipelines are unaffected. `tests/test_postgen_verdict_channel.py` pins the channel split (console gets process narration only; the verdict reaches the logger; the log channel is independent of the quiet flag).
+* **stub guidance now names the actual recovery command** — the generated stub message said to "look for a truncated-response warning in the hatch log", but no log is persisted anywhere; the log exists only in the terminal stream of a hatch run. The message now says to re-run `agenthatch hatch -v` so the truncated-response warning is actually visible. The sentinel phrase `_check_tool_stubs()` matches is unchanged, so detection is unaffected.
+
+### Fixed
+
+* **the test suite could silently validate the published wheel instead of the workspace** — `pyproject.toml` now sets `pythonpath = ["src"]`, so pytest always imports the workspace source regardless of what agenthatch is pip-installed. A non-editable PyPI install (`pip install -U agenthatch`, done during release verification) otherwise shadows local edits and every run validates site-packages instead of the code being changed — the v1.0.23 channel tests initially "failed" against stale v1.0.22 code that had already been fixed locally. Editable install is unaffected.
+
+***
+
 ## \[v1.0.22] — 2026-09-27
 
 ### Changed

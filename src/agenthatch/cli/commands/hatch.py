@@ -247,14 +247,18 @@ def _run_postgen_review(
         logger.warning("Post-generation review failed: %s", e)
         return None
 
-    if not quiet and report is not None:
-        verdict_style = "ok" if report.verdict == "READY" else "warn"
-        verdict_icon = "✓" if report.verdict == "READY" else "⚠"
-        console.print(
-            f"[{verdict_style}]{verdict_icon}[/{verdict_style}]  "
-            f"postgen review: {report.verdict} "
-            f"({report.iterations} rounds, "
-            f"{report.tools_with_issues}/{report.tools_total} tools with issues)"
+    # v1.0.23: the verdict goes to the log channel only — never the
+    # console. Project philosophy: the default hatch output stays clean
+    # and success-oriented; diagnostics are opt-in (re-run with -v for
+    # the log stream, or --report for the structured view).
+    if report is not None:
+        _verdict_log = logger.warning if report.verdict != "READY" else logger.info
+        _verdict_log(
+            "postgen review: %s (%d rounds, %d/%d tools with issues)",
+            report.verdict,
+            report.iterations,
+            report.tools_with_issues,
+            report.tools_total,
         )
 
     return report
