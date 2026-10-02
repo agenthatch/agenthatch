@@ -99,7 +99,12 @@ class CapBus:
 
         if cap is not None and cap.executor is not None:
             try:
-                result = str(cap.executor(arguments))
+                # v1.0.24: return the executor's result unchanged — do NOT
+                # str() here. The only consumer is ConversationLoop's
+                # _execute_tool_calls(), which stringifies (after running
+                # artifact persistence). Str()-ing at the bus hid artifact
+                # dicts from the loop, so they could never reach disk.
+                result = cap.executor(arguments)
             except Exception as e:
                 logger.warning("Tool '%s' execution failed: %s", tool_name, e)
                 return f"Error executing tool '{tool_name}': {e}"

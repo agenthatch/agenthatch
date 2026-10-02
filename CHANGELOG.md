@@ -10,6 +10,19 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.24] — 2026-10-02
+
+### Fixed
+
+* **agents now deliver their files: tool artifacts are persisted to disk** — a tool that returned an artifact dict ({"status": "ok", "type": "artifact", "filename": ..., html/content/...}) produced nothing on disk: the payload was stringified and fed back into the LLM context, so the user never received a file (reproduced on the algorithmic-art demo, where the interactive HTML only existed inside the model's reply). Two layers caused it. First, the python-tool executor closure and `CapBus.route()` each did `str()` on the result, so a dict could never reach the loop; both now pass results through unchanged (the loop is route()'s only consumer and does its own stringification). Second, the loop had no persistence path at all: `_execute_tool_calls()` now runs narrow artifact detection — dict, status=="ok", type=="artifact", a filename, and one string payload key — writes the payload under `./artifacts` (override with `AGENTHATCH_ARTIFACTS_DIR`), sanitizes the filename against path traversal, and hands the LLM a compact {"status": "saved", ..., "saved_to": ...} confirmation instead of the raw payload (also a large context saving). Failures are logged to the log channel only and the original result passes through, so a broken save never kills the tool loop. `tests/test_artifact_persistence.py` locks detection, passthrough, sanitization, write-failure behavior, both wiring paths, and the bus-level raw return. Verified end-to-end against a real hatched agent: the render tool's HTML now appears on disk.
+* **`hatch -o <fresh dir>` no longer fails on the first run** — `_resolve_yaml_path()` redirected the skill's agenthatch.yaml into the `-o` output directory, and step 11's mkdir pre-created that directory before Phase 3; the generator then saw an existing output dir and raised FileExistsError, so every first hatch into a new directory demanded `--force`. The resolver now always returns skill_dir/agenthatch.yaml — matching what `_register_skillhouse()` has always recorded, and finally letting the v1.0.1 Bug #6 KB-stats re-write hit the file it was written against. The output parameter is gone from the signature entirely, so the output directory can never be the yaml target again. Verified live: `hatch algorithmic-art -o <brand-new-dir>` exits 0 with no --force. `tests/test_yaml_path_resolution.py` pins the contract.
+
+### Added
+
+* **Qwen 2026-10-10 retirement wave verified — registry is clean** — Alibaba Cloud's official sunset notice (historical mainline and snapshot models, effective 2026-10-10) retires qwen3-max, qwen3-max-preview, qwen3.6-max-preview, qwen3-vl-flash, qwen3-coder-plus and the older qwen3-VL/Coder/open-source snapshots. None of the registry's qwen entries (qwen3.8-max, qwen3.8-flash, qwen3.7-max, qwen3.7-plus, qwen3.7-flash, qwen-plus) intersect that wave, and the flagship default (qwen3.8-max) is the current generation — so the registry ships unchanged, with the verification recorded as a dated comment next to the model list in `providers.py`.
+
+***
+
 ## \[v1.0.23] — 2026-10-02
 
 ### Changed

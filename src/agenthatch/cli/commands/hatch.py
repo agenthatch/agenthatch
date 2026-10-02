@@ -904,7 +904,7 @@ def hatch_command(
 
     # ── 11. Write agenthatch.yaml ───────────────────────────────────────
     if not dry_run:
-        yaml_output_path = _resolve_yaml_path(skill_dir, output)
+        yaml_output_path = _resolve_yaml_path(skill_dir)
         if yaml_output_path.exists() and not force:
             console.print(
                 f"[dim]agenthatch.yaml already exists at {yaml_output_path}, "
@@ -1119,7 +1119,7 @@ def hatch_command(
         # Re-dump here so both YAMLs agree — only when KB is enabled,
         # since non-KB agents have nothing to update.
         if ahs_spec.knowledge_base is not None:
-            yaml_output_path = _resolve_yaml_path(skill_dir, output)
+            yaml_output_path = _resolve_yaml_path(skill_dir)
             try:
                 fresh_yaml = yaml.dump(
                     ahs_spec.model_dump(
@@ -1357,11 +1357,20 @@ def _emit_hatch_report(
         console.print(report.to_terminal())
 
 
-def _resolve_yaml_path(skill_dir: Path, output: str | None) -> Path:
-    """Resolve where to write agenthatch.yaml."""
-    if output:
-        agent_output_dir = Path(output).expanduser().resolve()
-        return agent_output_dir / "agenthatch.yaml"
+def _resolve_yaml_path(skill_dir: Path) -> Path:
+    """Resolve where to write agenthatch.yaml.
+
+    v1.0.24: ALWAYS skill_dir/agenthatch.yaml, regardless of ``-o``.
+    The old behavior redirected the yaml into the output directory,
+    which pre-created that directory at step 11 (mkdir + write before
+    Phase 3) — the generator then saw an existing output dir and raised
+    FileExistsError, so ``hatch <skill> -o <fresh dir>`` failed on the
+    first run and demanded ``--force``. It also contradicted
+    ``_register_skillhouse()``, whose ahs_path has always pointed at
+    skill_dir/agenthatch.yaml, and silently broke the v1.0.1 Bug #6
+    KB-stats re-write (written against skill_dir, resolved to the
+    output dir under ``-o``).
+    """
     return skill_dir / "agenthatch.yaml"
 
 

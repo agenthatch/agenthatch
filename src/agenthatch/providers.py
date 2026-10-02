@@ -194,6 +194,11 @@ BUILTIN_PROVIDERS: dict[str, ProviderInfo] = {
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         default_model="qwen3.8-max",
         context_window=1048576,  # qwen3.8-max keeps the 1M context
+        # v1.0.24: verified against Alibaba Cloud's official sunset notice
+        # effective 2026-10-10 (retires qwen3-max, qwen3-max-preview,
+        # qwen3.6-max-preview, qwen3-vl-flash, qwen3-coder-plus and the
+        # older qwen3-VL/Coder/open-source snapshots). None of the models
+        # listed below intersect that wave — the registry stays unchanged.
         features=ProviderFeatures(
             supports_tools=True,
             supports_stream_tools=True,

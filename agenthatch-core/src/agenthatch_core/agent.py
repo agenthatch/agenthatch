@@ -635,7 +635,11 @@ class AHCoreAgent:
 
         self.capbus.register(
             name=tool.__name__,
-            executor=lambda args, _t=tool: str(_t(**args)),
+            # v1.0.24: return the tool's result unchanged. The old
+            # str() here stringified artifact dicts at the executor, so
+            # the loop could never detect and persist them (see
+            # CapBus.route() for the matching change).
+            executor=lambda args, _t=tool: _t(**args),
             schema={
                 "name": tool.__name__,
                 "description": (tool.__doc__ or "").strip().split("\n")[0],

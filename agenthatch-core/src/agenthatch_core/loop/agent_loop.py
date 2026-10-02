@@ -27,6 +27,68 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_RESULT_CHARS = 10000
 
+# v1.0.24: artifact persistence. Tools may return an artifact dict —
+# {"status": "ok", "type": "artifact", "filename": ..., <payload>} —
+# e.g. a generated agent's render/save capability. Before v1.0.24 the
+# whole payload was str()-ed into the LLM context and the user never
+# received a file on disk. Detection is deliberately narrow: only a dict
+# carrying the three artifact markers plus one string payload key is
+# treated as an artifact; everything else passes through untouched.
+_ARTIFACT_PAYLOAD_KEYS = ("html", "content", "text", "data", "body", "markdown")
+_ARTIFACTS_DIR_ENV = "AGENTHATCH_ARTIFACTS_DIR"
+
+
+def _persist_tool_artifact(result: Any) -> Any:
+    """Persist artifact-shaped tool results to disk; return a compact
+    confirmation for the LLM.
+
+    Artifacts are written under ``./artifacts`` (override with the
+    ``AGENTHATCH_ARTIFACTS_DIR`` environment variable), one file per
+    ``filename``, overwritten on regeneration. Persistence failures are
+    logged to the log channel only and the original result is returned
+    unchanged so a broken save never kills the tool loop.
+    """
+    try:
+        if not isinstance(result, dict):
+            return result
+        if result.get("status") != "ok" or result.get("type") != "artifact":
+            return result
+        filename = result.get("filename")
+        if not isinstance(filename, str) or not filename.strip():
+            return result
+        payload = None
+        for key in _ARTIFACT_PAYLOAD_KEYS:
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                payload = value
+                break
+        if payload is None:
+            return result
+
+        import os
+        from pathlib import Path
+
+        artifacts_dir = Path(
+            os.environ.get(_ARTIFACTS_DIR_ENV, "artifacts")
+        ).expanduser()
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = Path(filename.strip()).name or "artifact.txt"
+        dest = artifacts_dir / safe_name
+        dest.write_text(payload, encoding="utf-8")
+
+        logger.info(
+            "Artifact '%s' saved to %s (%d bytes)", safe_name, dest, len(payload)
+        )
+        return json.dumps({
+            "status": "saved",
+            "type": "artifact",
+            "filename": safe_name,
+            "saved_to": str(dest),
+        })
+    except Exception as e:
+        logger.warning("Artifact persistence failed: %s", e)
+        return result
+
 
 def _reasoning_of(response: Any) -> str | None:
     """Return a thinking-mode response's reasoning, if any (v1.0.19).
@@ -792,7 +854,13 @@ class ConversationLoop:
                     elapsed = time.time() - t0
                     logger.warning("Tool execution failed: %s (%.1fs)", e, elapsed)
                     result = f"Error: {e}"
-                results.append({"tc": tc, "result": str(result), "elapsed": elapsed})
+                # v1.0.24: persist artifact results before stringifying so
+                # the LLM sees a compact confirmation, not the raw payload.
+                results.append({
+                    "tc": tc,
+                    "result": str(_persist_tool_artifact(result)),
+                    "elapsed": elapsed,
+                })
             return results
 
         # v0.7.12: Parallel path with per-call timeout safety.
@@ -817,7 +885,12 @@ class ConversationLoop:
                 except Exception as e:
                     logger.warning("Parallel tool '%s' failed: %s", tc.name, e)
                     result = f"Error: {e}"
-                results_by_index[i] = {"tc": tc, "result": str(result), "elapsed": 0.0}
+                # v1.0.24: artifact persistence (see sequential path).
+                results_by_index[i] = {
+                    "tc": tc,
+                    "result": str(_persist_tool_artifact(result)),
+                    "elapsed": 0.0,
+                }
                 logger.info("  %s -> %d chars (parallel)", tc.name, len(str(result)))
 
         return [results_by_index[i] for i in range(len(tool_calls))]
