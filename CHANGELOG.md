@@ -10,6 +10,26 @@ No unreleased changes.
 
 ***
 
+## \[v1.0.26] — 2026-10-02
+
+### Fixed
+
+* **FTS5 queries with special characters silently fell back to naive LIKE** — `_escape_fts5_query` (in both the knowledge store and the memory search) escaped `* " ( ) : ^ \` with a backslash, but FTS5 does not support backslash escaping, so every such query raised `fts5: syntax error near "\"` and dropped to the LIKE fallback (score unrelated to relevance). The unicode61 tokenizer already splits those characters into separate tokens at *index* time, so the query now replaces them with spaces to match that tokenization — verified against a real FTS5 index, where `C:\Users` and `key:value` now match their indexed rows. `tests/test_kb_regressions.py` and `tests/test_memory_regressions.py` now assert the produced query actually MATCHES a live FTS5 table instead of only checking the string shape.
+
+* **PROMPT_ONLY agents still 400'd from turn two on thinking-mode providers** — v1.0.19 fixed `ConversationLoop` but missed `DirectLoop` (the PROMPT_ONLY archetype's loop engine), which used `LLMClient.chat()`/`chat_stream()` and never persisted `reasoning_content` into history. `chat()`/`chat_stream()` now stash the reasoning on `LLMClient.last_reasoning_content`, and `DirectLoop.run()`/`stream()` replay it via `add_to_history(..., reasoning_content=...)`. The streaming path also only accumulated text chunks (skipping `ThinkingDelta` objects), which previously crashed `"".join(text_parts)` on reasoning models. `tests/test_reasoning_content_regression.py` pins both paths.
+
+* **side-effect detection both missed aliased imports and mis-flagged local helpers** — `_has_side_effects` now builds an import map from the enclosing module (plus any in-function imports), so `import subprocess as sp; sp.run(...)` and `import os as o; o.remove(...)` are caught, while a bare `run(...)` is only flagged when actually imported from a side-effect module (`from subprocess import run`) — a locally-defined helper named `run`/`remove`/`rename` no longer skips the self-test. `os.*` calls now report the precise kind (`os.system`→subprocess, `os.remove`→file_io). `tests/test_postgen_review.py` locks alias resolution, source checks, and the kind mapping.
+
+* **`retrieve` tool still silently clamped `top_k` to 1-10** — v1.0.4 removed the template-layer clamp, but `RetrieveTool.execute` still applied `min(max(top_k, 1), 10)`, which (a) turned `top_k=0` into 1 (contradicting the store's `top_k <= 0 -> []` contract) and (b) capped a caller's `top_k=20` to 10. The tool now passes `top_k` through verbatim; the store already honors non-positive `top_k` and slices `fused[:top_k]`. `tests/test_kb_regressions.py` pins `top_k=0`/`top_k=20`/omitted forwarding.
+
+* **self-test mis-flagged required-argument tools as errors** — the zero-arg self-test call `fn()` raised `TypeError: missing required argument` on tools with required parameters, sending them into the B4 repair loop. The test script now inspects the signature first and emits `SKIP_REQUIRED_ARGS` for tools with no-default parameters; the reviewer records that as an INFO "self-test skipped" instead of an error. `tests/test_postgen_review.py` pins the skip behavior.
+
+### Removed
+
+* **Legacy `SkillAgent` runtime and its dead twin packages** — the v0.6.0 Agent Factory migration left `agenthatch.agent` (SkillAgent, offload, compact, builtins), `agenthatch.cap` (CapBus, marshal), and `agenthatch.base` (Sandbox) as a parallel implementation no production path imported (the generated agents run on `AHCoreAgent` and `agenthatch_core`). All three packages are deleted, along with the tests that only exercised them (`chat_test.py`, `v08_*`, `test_runtime.py`, `test_offload.py`). `test_loop.py` is migrated to the core `CapBus`/`Sandbox` (notably switching the legacy `source_skill=` kwarg to the core `source=`), which surfaced that the loop tests had been driving `ConversationLoop` with the wrong CapBus type.
+
+***
+
 ## \[v1.0.25] — 2026-10-02
 
 ### Fixed

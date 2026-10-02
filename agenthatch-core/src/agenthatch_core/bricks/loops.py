@@ -38,7 +38,14 @@ class DirectLoop:
         """Execute a single turn: build messages, call LLM, return result."""
         messages = self._ctx.build_messages(user_input)
         result = self._llm.chat(messages)
-        self._ctx.add_to_history("assistant", result)
+        # v1.0.26: persist reasoning_content so a thinking-mode provider
+        # (DeepSeek) does not 400 on the second turn.  chat() stores the
+        # reasoning on the client; ConversationLoop already does this, but
+        # DirectLoop (PROMPT_ONLY archetype) was missed in v1.0.19.
+        reasoning = getattr(self._llm, "last_reasoning_content", None)
+        self._ctx.add_to_history(
+            "assistant", result, reasoning_content=reasoning
+        )
         self._record_usage()
         return result
 
@@ -48,11 +55,18 @@ class DirectLoop:
         text_parts: list[str] = []
 
         for chunk in self._llm.chat_stream(messages):
-            text_parts.append(chunk)
+            # chat_stream yields ThinkingDelta objects alongside text for
+            # reasoning models; only accumulate the text for the history,
+            # but still forward every chunk to the caller (TUI).
+            if isinstance(chunk, str):
+                text_parts.append(chunk)
             yield chunk
 
         full_text = "".join(text_parts)
-        self._ctx.add_to_history("assistant", full_text)
+        reasoning = getattr(self._llm, "last_reasoning_content", None)
+        self._ctx.add_to_history(
+            "assistant", full_text, reasoning_content=reasoning
+        )
         self._record_usage()
         return full_text
 

@@ -752,6 +752,7 @@ def _detect_exception_antipatterns(
 # Python script template for testing a single tool in a subprocess
 _TOOL_TEST_SCRIPT = """\
 import importlib.util
+import inspect
 import sys
 import traceback
 
@@ -774,6 +775,28 @@ fn = getattr(mod, tool_name, None)
 if fn is None or not callable(fn):
     print("NOT_FOUND")
     sys.exit(4)
+
+# v1.0.26: a tool with required (no-default) parameters cannot be
+# exercised by a zero-arg call — calling fn() would raise
+# TypeError("missing required argument"), which is NOT a tool defect.
+# Skip those instead of flagging them as errors.
+try:
+    sig = inspect.signature(fn)
+except (TypeError, ValueError):
+    sig = None
+if sig is not None:
+    required = [
+        p for p in sig.parameters.values()
+        if p.default is inspect.Parameter.empty
+        and p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    ]
+    if required:
+        print("SKIP_REQUIRED_ARGS", len(required))
+        sys.exit(0)
 
 # Call with default args (no args = use defaults)
 try:
@@ -838,7 +861,7 @@ def test_tool_signatures(
             func_name = func_node.name
 
             # Skip tools with side effects (subprocess, network, file IO)
-            side_effect = _has_side_effects(func_node)
+            side_effect = _has_side_effects(func_node, module=tree)
             if side_effect:
                 report.findings.append(
                     PostGenFinding(
@@ -878,6 +901,25 @@ def test_tool_signatures(
                         message=(
                             f"Tool '{func_name}' timed out after {TOOL_TEST_TIMEOUT}s "
                             f"during self-test"
+                        ),
+                        tool_name=func_name,
+                    )
+                )
+                continue
+
+            # v1.0.26: a tool with required parameters can't be zero-arg
+            # self-tested; skip it (INFO) instead of flagging a spurious
+            # TypeError("missing required argument") as an error.
+            if stdout_stripped.startswith("SKIP_REQUIRED_ARGS"):
+                report.findings.append(
+                    PostGenFinding(
+                        severity=SEVERITY_INFO,
+                        file=rel_path,
+                        line=func_node.lineno,
+                        category=CATEGORY_TEST_FAILURE,
+                        message=(
+                            f"Tool '{func_name}' has required parameters, "
+                            f"self-test skipped (cannot call with default args)"
                         ),
                         tool_name=func_name,
                     )
@@ -998,7 +1040,10 @@ _SIDE_EFFECT_MODULES: dict[str, str] = {
 }
 
 
-def _has_side_effects(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+def _has_side_effects(
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef,
+    module: ast.Module | None = None,
+) -> str | None:
     """Detect if a function has side effects (subprocess, network, file IO).
 
     v1.0.11: Previously only ``ast.Attribute`` calls were checked
@@ -1011,52 +1056,117 @@ def _has_side_effects(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> str 
     2. ``os.system(...)``, ``os.remove(...)``, ``shutil.rmtree(...)``
        — the ``os``/``shutil`` modules were not in the module list.
 
-    Both are extremely common in LLM-generated tool code.  A missed
-    detection means the "safe to self-test" gate lets a destructive
-    call through and the sandbox executes it for real — e.g. an
-    ``os.system('rm -rf /tmp/x')`` tool would actually run during
-    post-generation review.
+    v1.0.26: two follow-up refinements to cut false positives/negatives.
+
+    * Alias tracking — ``import subprocess as sp`` / ``import os as o``
+      are resolved via the import map (built from ``module`` plus any
+      imports inside the function), so ``sp.run(...)`` is now caught
+      (previously ``attr.value.id == "sp"`` never matched a module).
+    * Bare-name source check — a bare call ``run(...)``/``remove(...)``
+      is only flagged when the name was *imported* from a side-effect
+      module (``from subprocess import run``); a locally-defined helper
+      with the same name no longer skips the self-test.  Builtins
+      (``open``/``exec``/``eval``/``input``) stay flagged unless locally
+      shadowed.
+
+    ``module`` is the enclosing module AST (tools.py); import statements
+    normally live at module level, outside any single function body, so
+    it is required for accurate alias/source resolution.
 
     Returns the side-effect kind as a string, or ``None`` if the function
     appears pure (safe to self-test).
     """
+    # Pre-scan: map imports and locally-bound names so call sites below
+    # can tell "from subprocess import run" apart from a helper named
+    # ``run``, and resolve ``import subprocess as sp`` aliases.
+    import_aliases: dict[str, str] = {}
+    from_imports: dict[str, str] = {}
+    local_names: set[str] = set()
+
+    # Module-level imports — ``import X as Y`` / ``from X import Y`` live at
+    # the top of tools.py, outside the function body, so walk the module too.
+    if module is not None:
+        for node in module.body:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    import_aliases[alias.asname or root] = root
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    from_imports[alias.asname or alias.name] = node.module or ""
+
+    for arg in (
+        func_node.args.posonlyargs + func_node.args.args + func_node.args.kwonlyargs
+    ):
+        local_names.add(arg.arg)
+    if func_node.args.vararg:
+        local_names.add(func_node.args.vararg.arg)
+    if func_node.args.kwarg:
+        local_names.add(func_node.args.kwarg.arg)
+
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                import_aliases[alias.asname or root] = root
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                from_imports[alias.asname or alias.name] = node.module or ""
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node is not func_node:
+                local_names.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            local_names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    local_names.add(target.id)
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name):
+                local_names.add(node.target.id)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            if isinstance(node.target, ast.Name):
+                local_names.add(node.target.id)
+
     for sub in ast.walk(func_node):
         # subprocess.run(...) / os.system(...) / shutil.rmtree(...) /
-        # requests.get(...) — module-prefixed attribute calls
+        # requests.get(...) — module-prefixed attribute calls, with alias
+        # resolution (import subprocess as sp → sp.run).
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
             attr = sub.func
             if isinstance(attr.value, ast.Name):
-                if attr.value.id == "os":
+                base = attr.value.id
+                real_mod = import_aliases.get(base, base)
+                if real_mod == "os":
                     # os.path.join / os.path.basename are pure path
-                    # arithmetic — only flag other os.* calls
-                    # (os.system, os.remove, os.mkdir, ...).
+                    # arithmetic — only flag other os.* calls.
                     if attr.attr != "path":
-                        return "subprocess"
+                        # precise kind: os.system→subprocess, os.remove→file_io
+                        return _FROM_IMPORT_DANGEROUS.get(attr.attr, "subprocess")
                 else:
-                    kind = _SIDE_EFFECT_MODULES.get(attr.value.id)
+                    kind = _SIDE_EFFECT_MODULES.get(real_mod)
                     if kind:
                         return kind
         # open(...) / run(...) / system(...) — bare name calls
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+            name = sub.func.id
             # ``open`` / ``exec`` / ``eval`` / ``input`` are builtins —
-            # flag unconditionally since they're always side-effectful
-            # (file IO / dynamic execution / blocking stdin read) when
-            # *called*.
-            if sub.func.id == "open":
-                return "file_io"
-            if sub.func.id in ("exec", "eval"):
-                return "subprocess"
-            if sub.func.id == "input":
-                return "file_io"
-            # Other bare names are only dangerous if imported from a
-            # side-effect module (``from subprocess import run``).
-            # Caveat: if the tool defines its own helper named e.g.
-            # ``run``/``call``, this is a false positive — acceptable,
-            # skipping the self-test is cheap; running a destructive
-            # call is not.
-            kind = _FROM_IMPORT_DANGEROUS.get(sub.func.id)
-            if kind:
-                return kind
+            # flag unconditionally (unless the tool locally shadows the name).
+            if name in ("open", "exec", "eval", "input"):
+                if name not in local_names:
+                    return _FROM_IMPORT_DANGEROUS[name]
+            else:
+                # Only dangerous if imported from a side-effect module
+                # (``from subprocess import run``).  A locally-defined helper
+                # named ``run``/``call``/``remove`` is NOT a side effect.
+                mod = from_imports.get(name)
+                if mod:
+                    root = mod.split(".")[0]
+                    kind = _SIDE_EFFECT_MODULES.get(root)
+                    if kind:
+                        return kind
+                    if root == "os":
+                        return _FROM_IMPORT_DANGEROUS.get(name, "subprocess")
         # ``from subprocess import run`` — the import itself proves
         # intent to call it; flag regardless of whether we saw the
         # call, so an unused dangerous import still skips the

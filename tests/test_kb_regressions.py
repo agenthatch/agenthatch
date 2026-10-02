@@ -924,6 +924,59 @@ class TestBug10RetrieveTopKNotSilentlyClamped:
         )
 
 
+class TestRetrieveToolTopKPassThrough:
+    """v1.0.26: RetrieveTool.execute must pass ``top_k`` through verbatim.
+
+    v1.0.4 removed the template-layer clamp, but the tool layer still
+    clamped ``top_k`` to 1-10 — contradicting the store's
+    ``top_k <= 0 -> []`` contract (``top_k=0`` returned 1) and silently
+    capping a caller's ``top_k=20`` to 10.
+    """
+
+    def test_top_k_20_passes_through(self) -> None:
+        from agenthatch_core.bricks.knowledge.tools import RetrieveTool
+
+        calls: list = []
+
+        def fake(query: str, top_k: int | None = None):
+            calls.append(top_k)
+            return [{"source": "x", "content": "c", "chunk_index": 0}]
+
+        RetrieveTool(fake).execute("q", top_k=20)
+        assert calls[-1] == 20, (
+            f"top_k=20 must reach retrieve() as 20, got {calls[-1]!r}"
+        )
+
+    def test_top_k_zero_passes_through(self) -> None:
+        from agenthatch_core.bricks.knowledge.tools import RetrieveTool
+
+        calls: list = []
+
+        def fake(query: str, top_k: int | None = None):
+            calls.append(top_k)
+            return []
+
+        RetrieveTool(fake).execute("q", top_k=0)
+        assert calls[-1] == 0, (
+            f"top_k=0 must reach retrieve() as 0 (store returns []), "
+            f"got {calls[-1]!r}"
+        )
+
+    def test_top_k_none_is_omitted(self) -> None:
+        from agenthatch_core.bricks.knowledge.tools import RetrieveTool
+
+        calls: list = []
+
+        def fake(query: str, top_k: int | None = None):
+            calls.append(top_k)
+            return [{"source": "x", "content": "c", "chunk_index": 0}]
+
+        RetrieveTool(fake).execute("q")
+        assert calls[-1] is None, (
+            "omitted top_k must forward with no top_k argument"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Helpers for Bug #11–#16 (undo TestBug10's sys.modules monkey-patching)
 # ---------------------------------------------------------------------------
@@ -948,13 +1001,16 @@ def _unpatch_agenthatch_core() -> None:
 # ---------------------------------------------------------------------------
 
 class TestBug11EscapeFts5Query:
-    """Bug #11: ``_escape_fts5_query`` must correctly escape FTS5 special chars.
+    """Bug #11 + v1.0.26: ``_escape_fts5_query`` must normalize FTS5 special
+    characters so user queries match the index.
 
-    FTS5 treats ``-`` as the NOT operator, ``*`` as a prefix wildcard,
-    ``"`` as a phrase delimiter, ``(``/``)`` as grouping, ``:`` as a
-    column prefix, ``^`` as a boost marker, and ``\\`` as an escape
-    prefix.  The escape function must neutralize all of these so user
-    queries don't accidentally trigger FTS5 syntax.
+    The unicode61 tokenizer splits ``- \\ : ^ * " ( )`` into separate tokens
+    at *index* time.  The query must split them the same way, so each is
+    replaced with a space (matching the index tokenization).  v1.0.26 changed
+    this from backslash-escaping — FTS5 does not support backslash escaping,
+    and the old ``re.sub(r'([*"():^\\\\])', r'\\\\\\1')`` produced queries that
+    raised ``fts5: syntax error near "\\"`` and silently fell through to the
+    naive LIKE fallback.
     """
 
     @pytest.fixture(autouse=True)
@@ -970,20 +1026,13 @@ class TestBug11EscapeFts5Query:
             f"hyphen should be replaced with space (OR semantics), got {result!r}"
         )
 
-    def test_special_chars_escaped(self) -> None:
-        """Colon and asterisk must be backslash-escaped for FTS5."""
+    def test_special_chars_split_to_space(self) -> None:
+        """Colon and asterisk split to spaces (match index tokenization)."""
         from agenthatch_core.bricks.knowledge.store import KnowledgeStore
 
         result = KnowledgeStore._escape_fts5_query("key:value*")
-        # Actual escape: "key\:value\*" with wildcard → "key\:value\**"
-        assert "\\:" in result, (
-            f"colon must be escaped, got {result!r}"
-        )
-        assert "\\*" in result, (
-            f"asterisk must be escaped, got {result!r}"
-        )
-        assert result.endswith("*"), (
-            f"should end with prefix wildcard, got {result!r}"
+        assert result == "key* OR value*", (
+            f"colon/asterisk should split into words, got {result!r}"
         )
 
     def test_empty_query_returns_empty(self) -> None:
@@ -1018,52 +1067,65 @@ class TestBug11EscapeFts5Query:
             f"multi-word should be OR-joined with wildcards, got {result!r}"
         )
 
-    def test_windows_path_escaped(self) -> None:
-        """Backslashes must be escaped so FTS5 doesn't interpret them."""
+    def test_windows_path_split_to_space(self) -> None:
+        """Backslashes and colon split to spaces — matches index tokenization."""
         from agenthatch_core.bricks.knowledge.store import KnowledgeStore
 
         result = KnowledgeStore._escape_fts5_query("C:\\path\\to\\file")
-        # Backslash doubled, colon escaped — no raw escaping prefix.
-        assert "\\\\" in result.replace("\\\\\\\\", "\\\\"), (
-            f"backslashes must be escaped, got {result!r}"
+        assert result == "C* OR path* OR to* OR file*", (
+            f"windows path should split on backslash/colon, got {result!r}"
         )
 
-    def test_parentheses_escaped(self) -> None:
-        """Parentheses must be backslash-escaped so FTS5 doesn't group."""
+    def test_parentheses_split_to_space(self) -> None:
+        """Parentheses split to spaces so FTS5 doesn't group."""
         from agenthatch_core.bricks.knowledge.store import KnowledgeStore
 
         result = KnowledgeStore._escape_fts5_query("test (value)")
-        assert "\\(" in result, (
-            f"opening paren must be escaped, got {result!r}"
-        )
-        assert "\\)" in result, (
-            f"closing paren must be escaped, got {result!r}"
-        )
-        assert "test*" in result, (
-            f"'test' should get wildcard, got {result!r}"
+        assert result == "test* OR value*", (
+            f"parens should split into words, got {result!r}"
         )
 
     def test_hyphen_and_special_mixed(self) -> None:
-        """Hyphen first splits words, then remaining special chars are escaped."""
+        """Hyphen first splits words, then remaining special chars split too."""
         from agenthatch_core.bricks.knowledge.store import KnowledgeStore
 
         result = KnowledgeStore._escape_fts5_query("wind-rider: test*")
-        # Hyphen "wind-rider" → "wind" "rider:" (split)
-        # Colon in "rider:" escaped → "rider\:"
-        # Asterisk in "test*" escaped → "test\*"
-        # Wildcards added → "wind* OR rider\:* OR test\**"
-        assert "wind*" in result, (
-            f"'wind' must be split and wildcarded, got {result!r}"
+        assert result == "wind* OR rider* OR test*", (
+            f"all separators should split into words, got {result!r}"
         )
-        assert "rider" in result, (
-            f"'rider' must be present, got {result!r}"
+
+    def test_real_fts5_match_no_syntax_error(self) -> None:
+        """v1.0.26: the produced query must actually MATCH a real FTS5 index.
+
+        The old backslash-escape output raised ``fts5: syntax error near
+        "\\"`` and fell through to LIKE.  A raised OperationalError here is
+        that bug resurfacing.
+        """
+        import sqlite3
+
+        from agenthatch_core.bricks.knowledge.store import KnowledgeStore
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE VIRTUAL TABLE t USING fts5(body)")
+        conn.execute("INSERT INTO t VALUES ('C:\\Users\\bob note')")
+        conn.execute("INSERT INTO t VALUES ('key:value literal')")
+
+        q = KnowledgeStore._escape_fts5_query("C:\\Users")
+        rows = conn.execute(
+            "SELECT body FROM t WHERE t MATCH ?", (q,)
+        ).fetchall()
+        assert ("C:\\Users\\bob note",) in rows, (
+            f"query {q!r} must match the indexed row, got {rows!r}"
         )
-        assert "test\\**" in result, (
-            f"asterisk in 'test*' must be escaped then wildcarded, got {result!r}"
+
+        q = KnowledgeStore._escape_fts5_query("key:value")
+        rows = conn.execute(
+            "SELECT body FROM t WHERE t MATCH ?", (q,)
+        ).fetchall()
+        assert ("key:value literal",) in rows, (
+            f"query {q!r} must match the indexed row, got {rows!r}"
         )
-        assert " OR " in result, (
-            f"words must be OR-joined, got {result!r}"
-        )
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

@@ -593,6 +593,95 @@ class TestHasSideEffects:
         side_effect = _has_side_effects(func_node)
         assert side_effect is None
 
+    def test_alias_import_detected(self):
+        """``import subprocess as sp; sp.run(...)`` must be caught (v1.0.26)."""
+        import ast
+
+        source = """
+            import subprocess as sp
+
+            def run_thing(cmd: str = "ls") -> str:
+                return sp.run(cmd.split(), capture_output=True).stdout
+        """
+        tree = ast.parse(textwrap.dedent(source))
+        func_node = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef)
+        )
+        assert _has_side_effects(func_node, module=tree) == "subprocess"
+
+    def test_os_alias_import_detected(self):
+        """``import os as o; o.remove(...)`` must resolve to file_io."""
+        import ast
+
+        source = """
+            import os as o
+
+            def delete(path: str = "/tmp/x") -> None:
+                o.remove(path)
+        """
+        tree = ast.parse(textwrap.dedent(source))
+        func_node = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef)
+        )
+        assert _has_side_effects(func_node, module=tree) == "file_io"
+
+    def test_local_helper_named_run_not_flagged(self):
+        """A module-level helper named ``run`` is NOT a side effect (v1.0.26)."""
+        import ast
+
+        source = '''
+            def run(cmd: str) -> str:
+                return f"ran {cmd}"
+
+            def orchestrate(name: str = "x") -> str:
+                return run(name)
+        '''
+        tree = ast.parse(textwrap.dedent(source))
+        func_node = next(
+            n for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "orchestrate"
+        )
+        assert _has_side_effects(func_node, module=tree) is None
+
+    def test_from_import_bare_name_detected(self):
+        """``from subprocess import run; run(...)`` must be caught."""
+        import ast
+
+        source = '''
+            from subprocess import run
+
+            def run_shell(cmd: str = "ls") -> str:
+                return run(cmd.split(), capture_output=True).stdout
+        '''
+        tree = ast.parse(textwrap.dedent(source))
+        func_node = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef)
+        )
+        assert _has_side_effects(func_node, module=tree) == "subprocess"
+
+    def test_os_remove_is_file_io(self):
+        """``os.remove`` reports file_io, ``os.system`` reports subprocess."""
+        import ast
+
+        source = """
+            import os
+
+            def delete(path: str = "/tmp/x") -> None:
+                os.remove(path)
+
+            def shell(cmd: str = "ls") -> int:
+                return os.system(cmd)
+        """
+        tree = ast.parse(textwrap.dedent(source))
+        delete = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "delete"
+        )
+        shell = next(
+            n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "shell"
+        )
+        assert _has_side_effects(delete, module=tree) == "file_io"
+        assert _has_side_effects(shell, module=tree) == "subprocess"
+
 
 class TestToolSignatureSelfTest:
     """Tool self-test runs each tool with default args in sandbox."""
@@ -637,6 +726,29 @@ class TestToolSignatureSelfTest:
         report = PostGenReport(verdict=VERDICT_READY)
         result = _run_tool_self_test(output_dir, report)
         assert result is report
+
+    def test_required_args_tool_skipped_not_error(self, output_dir: Path):
+        """v1.0.26: a tool with required params must be skipped (INFO),
+        not flagged as a TypeError("missing required argument") error."""
+        _make_tools_py(output_dir, '''
+            def convert(amount: float, from_currency: str, to_currency: str) -> dict:
+                return {"amount": amount}
+        ''')
+        report = inspect_generated_package(output_dir)
+        report = _run_tool_self_test(output_dir, report)
+
+        error_findings = [
+            f for f in report.findings if f.severity == SEVERITY_ERROR
+        ]
+        assert error_findings == [], (
+            f"required-args tool must not be an error, got {error_findings!r}"
+        )
+        skipped = [
+            f for f in report.findings
+            if f.tool_name == "convert" and f.severity == SEVERITY_INFO
+        ]
+        assert len(skipped) == 1
+        assert "required parameters" in skipped[0].message
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -108,6 +108,7 @@ class LLMClient:
         self._reasoning_effort = reasoning_effort
         self._effort = effort
         self.last_usage: Any = None
+        self.last_reasoning_content: str | None = None
 
         if self._features.requires_anthropic_adapter:
             from agenthatch_core.llm.anthropic_adapter import AnthropicAdapter
@@ -312,6 +313,9 @@ class LLMClient:
         )
         self.last_usage = getattr(response, "usage", None)
         choice = response.choices[0]
+        self.last_reasoning_content = (
+            getattr(choice.message, "reasoning_content", None) or None
+        )
         if choice.finish_reason == "length":
             logger.warning(
                 "Response truncated by max_tokens limit."
@@ -366,6 +370,7 @@ class LLMClient:
         if not text and reasoning_parts:
             text = "".join(reasoning_parts)
 
+        self.last_reasoning_content = "".join(reasoning_parts) or None
         return text
 
     # ── Structured output (Instructor pattern) ───────────────────────

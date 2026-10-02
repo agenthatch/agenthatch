@@ -10,8 +10,8 @@ from agenthatch_core.llm.client import LLMClient, ToolCallResponse
 from agenthatch_core.llm.types import StreamDelta, ToolCall
 from agenthatch_core.loop.agent_loop import ConversationLoop, RichToolCallEvent
 
-from agenthatch.base.sandbox import Sandbox
-from agenthatch.cap.bus import CapBus
+from agenthatch_core.sandbox.executor import Sandbox
+from agenthatch_core.tools.bus import CapBus
 from agenthatch.skill.spec import (
     AHSSpec,
     BaseSpec,
@@ -94,7 +94,7 @@ class TestRunSync:
             name="echo",
             cap_type="test",
             schema={"type": "object", "properties": {}},
-            source_skill="test",
+            source="test",
             executor=MagicMock(execute=lambda **kw: "echoed: " + kw.get("msg", "")),
         )
 
@@ -124,14 +124,14 @@ class TestRunSync:
             name="tool_a",
             cap_type="test",
             schema={},
-            source_skill="test",
+            source="test",
             executor=MagicMock(execute=lambda **kw: "result_a"),
         )
         capbus.register(
             name="tool_b",
             cap_type="test",
             schema={},
-            source_skill="test",
+            source="test",
             executor=MagicMock(execute=lambda **kw: "result_b"),
         )
 
@@ -174,7 +174,7 @@ class TestRunStream:
             name="fetch",
             cap_type="test",
             schema={},
-            source_skill="test",
+            source="test",
             executor=MagicMock(execute=lambda **kw: "data from fetch tool"),
         )
 
@@ -255,13 +255,17 @@ class TestDirectLoopC2:
 
         mock_llm = MagicMock()
         mock_llm.chat.return_value = "test response"
+        mock_llm.last_reasoning_content = None
         mock_ctx = MagicMock()
 
         loop = DirectLoop(mock_llm, mock_ctx)
         _ = loop.run("hello")
 
         # C2 fix: must use add_to_history, not add_assistant_message
-        mock_ctx.add_to_history.assert_called_with("assistant", "test response")
+        # v1.0.26: reasoning_content is also passed (None for non-thinking).
+        mock_ctx.add_to_history.assert_called_with(
+            "assistant", "test response", reasoning_content=None
+        )
         # Old broken call must NOT be made
         assert not hasattr(mock_ctx.add_assistant_message, 'called') or \
             not mock_ctx.add_assistant_message.called, (
@@ -278,6 +282,7 @@ class TestDirectLoopC2:
         mock_llm = MagicMock()
 
         mock_llm.chat_stream.return_value = iter(["Hello", " world"])
+        mock_llm.last_reasoning_content = None
         mock_ctx = MagicMock()
 
         loop = DirectLoop(mock_llm, mock_ctx)
@@ -285,4 +290,6 @@ class TestDirectLoopC2:
         result_text = "".join(chunks)
 
         assert result_text == "Hello world"
-        mock_ctx.add_to_history.assert_called_with("assistant", "Hello world")
+        mock_ctx.add_to_history.assert_called_with(
+            "assistant", "Hello world", reasoning_content=None
+        )

@@ -111,9 +111,14 @@ class RetrieveTool:
             if top_k is None:
                 chunks = self._retrieve_fn(query)
             else:
-                chunks = self._retrieve_fn(
-                    query, top_k=min(max(top_k, 1), 10)
-                )
+                # v1.0.26: pass top_k through verbatim.  v1.0.4 removed
+                # the template-layer clamp, but this tool layer still
+                # clamped to 1-10 — which (a) contradicted the store's
+                # ``top_k <= 0 -> []`` contract (``top_k=0`` returned 1)
+                # and (b) silently capped a caller's ``top_k=20`` to 10.
+                # The store already honors non-positive top_k and slices
+                # ``fused[:top_k]``, so no clamp is needed here.
+                chunks = self._retrieve_fn(query, top_k=top_k)
         except Exception as e:
             return f"Knowledge base retrieve failed: {e}"
 

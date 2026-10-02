@@ -37,6 +37,10 @@ class TestBug24MemoryEscapeFts5Query:
       - Hyphens escaped as literal (instead of replaced with spaces)
       - Prefix wildcard only on last word
       - Default space = AND join (too strict for RAG recall)
+
+    v1.0.26: the ``^``/``\\``/``*`` handling changed from backslash-escaping
+    to space-splitting — FTS5 does not support backslash escaping, and the
+    escaped output raised ``fts5: syntax error near "\\"``.
     """
 
     def _escape(self, query: str) -> str:
@@ -55,19 +59,19 @@ class TestBug24MemoryEscapeFts5Query:
             f"Hyphen should be replaced with space, not escaped; got {result!r}"
         )
 
-    def test_caret_escaped(self) -> None:
-        """``^`` (FTS5 column qualifier) must be escaped as literal."""
+    def test_caret_split_to_space(self) -> None:
+        """``^`` (FTS5 column qualifier) must split to space, not be escaped."""
         result = self._escape("title^hello")
-        assert "\\^" in result, (
-            f"^ must be escaped to prevent column qualifier interpretation; "
+        assert result == "title* OR hello*", (
+            f"^ should split into words (FTS5 has no backslash escape); "
             f"got {result!r}"
         )
 
-    def test_backslash_escaped(self) -> None:
-        """Backslash must be escaped (FTS5 escape prefix)."""
+    def test_backslash_split_to_space(self) -> None:
+        """Backslash must split to space, not be escaped (FTS5 has no escape)."""
         result = self._escape("C:\\Users")
-        assert "\\\\" in result, (
-            f"Backslash must be escaped to prevent silent query truncation; "
+        assert result == "C* OR Users*", (
+            f"Backslash should split into words (FTS5 has no backslash escape); "
             f"got {result!r}"
         )
 
@@ -98,11 +102,11 @@ class TestBug24MemoryEscapeFts5Query:
         result = self._escape("fireball")
         assert result == "fireball*", f"Single word should get *; got {result!r}"
 
-    def test_star_escaped(self) -> None:
-        """Literal ``*`` in query should be escaped (not interpreted as prefix)."""
+    def test_star_split_to_space(self) -> None:
+        """Literal ``*`` in query should split to space (not escape)."""
         result = self._escape("50*100")
-        assert "\\*" in result, (
-            f"Literal * must be escaped; got {result!r}"
+        assert result == "50* OR 100*", (
+            f"Literal * should split into words; got {result!r}"
         )
 
 

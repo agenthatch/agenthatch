@@ -130,3 +130,65 @@ class TestRecordAssistantFunnel:
 
         assert "reasoning_content" not in msg
         assert "reasoning_content" not in ctx.history[-1]
+
+
+class _DirectLLM:
+    """Mock LLM for DirectLoop: exposes ``last_reasoning_content`` like
+    LLMClient does (v1.0.26)."""
+
+    def __init__(self, text: str = "answer", reasoning: str | None = "why") -> None:
+        self._text = text
+        self.last_reasoning_content = reasoning
+        self.last_usage = None
+        self._stream_chunks: list = []
+
+    def chat(self, messages: list) -> str:
+        return self._text
+
+    def chat_stream(self, messages: list):
+        for c in self._stream_chunks:
+            yield c
+        return self._text
+
+
+class TestDirectLoopPersistsReasoning:
+    """v1.0.26: DirectLoop (PROMPT_ONLY archetype) was missed in v1.0.19.
+
+    It uses ``LLMClient.chat()`` / ``chat_stream()``, which drop
+    reasoning_content, so a thinking-mode provider 400'd on the second
+    turn.  ``chat``/``chat_stream`` now stash reasoning on
+    ``last_reasoning_content`` and DirectLoop replays it.
+    """
+
+    def test_run_records_reasoning(self, ctx: ContextManager) -> None:
+        from agenthatch_core.bricks.loops import DirectLoop
+
+        loop = DirectLoop(_DirectLLM(text="answer", reasoning="why"), ctx)
+        result = loop.run("question")
+
+        assert result == "answer"
+        assert ctx.history[-1]["reasoning_content"] == "why"
+
+    def test_run_without_reasoning_omits_key(self, ctx: ContextManager) -> None:
+        from agenthatch_core.bricks.loops import DirectLoop
+
+        loop = DirectLoop(_DirectLLM(text="answer", reasoning=None), ctx)
+        loop.run("question")
+
+        assert "reasoning_content" not in ctx.history[-1]
+
+    def test_stream_records_reasoning(self, ctx: ContextManager) -> None:
+        from agenthatch_core.bricks.loops import DirectLoop
+        from agenthatch_core.loop.token_counter import ThinkingDelta
+
+        llm = _DirectLLM(text="answer", reasoning="why")
+        llm._stream_chunks = ["ans", ThinkingDelta(content="thinking"), "wer"]
+        loop = DirectLoop(llm, ctx)
+
+        chunks = list(loop.stream("question"))
+
+        # Forward every chunk (including ThinkingDelta) to the caller ...
+        assert any(isinstance(c, ThinkingDelta) for c in chunks)
+        # ... but the recorded text must be only the string chunks.
+        assert ctx.history[-1]["content"] == "answer"
+        assert ctx.history[-1]["reasoning_content"] == "why"

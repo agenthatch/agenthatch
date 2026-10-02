@@ -245,26 +245,16 @@ class MemorySearch:
 
     @staticmethod
     def _escape_fts5_query(query: str) -> str:
-        """Escape special FTS5 characters and format for prefix matching.
+        """Normalize a query for FTS5 MATCH and format for prefix matching.
 
         Uses OR semantics for better recall (partial matches still scored).
         BM25 still ranks documents with more matching terms higher.
 
-        Hyphens are replaced with spaces *before* tokenization — FTS5 treats
-        ``-`` as the NOT operator in query syntax, so ``wind-rider*`` would
-        be parsed as ``wind NOT rider*`` and match nothing in documents that
-        contain both ``wind`` and ``rider``.  Since the unicode61 tokenizer
-        already splits hyphenated words at index time, splitting them at
-        query time keeps the query consistent with the index.
-
-        v1.0.11 (Bug 24): Also escape backslash and caret.  FTS5 treats
-        ``\\`` as an escape prefix, so an unescaped backslash (e.g. Windows
-        path ``C:\\Users``) silently truncates the query at the ``\\``.
-        ``^`` is the column qualifier (alternative to ``:``), so
-        ``title^hello`` is parsed as "search column ``title`` for ``hello``"
-        — usually wrong since most schemas don't have a ``title`` column on
-        ``memory_fts``.  Previously only ``* " - ( ) :`` were escaped;
-        missing ``^`` and ``\\`` caused silent query failures.
+        The unicode61 tokenizer already splits ``-``, ``\\``, ``:``, ``^``,
+        ``*``, ``"`` and parentheses into separate tokens at *index* time.
+        The query must split them the same way, or those terms can never
+        match.  Replacing each with a space keeps the query tokenization
+        consistent with the index.
 
         v1.0.11 (Bug 24): Add prefix wildcard to EVERY word (not just the
         last), and join with ``OR`` for better recall.  The previous
@@ -273,12 +263,18 @@ class MemorySearch:
         all four terms to match exactly, which is too strict for RAG
         recall.  KB store's v1.0.1 fix used this pattern; memory store
         was missed during the original refactor.
+
+        v1.0.26: Previously these characters were escaped with a backslash
+        (``re.sub(r'([*"():^\\\\])', r'\\\\\\1')``), but FTS5 does not
+        support backslash escaping — every such query raised
+        ``fts5: syntax error near "\\"`` and fell through to the naive LIKE
+        fallback.  Replacing with spaces (as was already done for ``-``)
+        makes them actually match the index.
         """
-        # Replace hyphens with spaces first — they are FTS5 NOT operators
-        # in query syntax AND separators in the unicode61 tokenizer.
-        # Also escape remaining special chars: * " ( ) : ^ \
+        # Replace separators with spaces — unicode61 already splits them at
+        # index time, so the query must match that tokenization.
         cleaned = query.replace("-", " ")
-        escaped = re.sub(r'([*"():^\\])', r'\\\1', cleaned)
+        escaped = re.sub(r'[*"():^\\]', ' ', cleaned)
         words = escaped.strip().split()
         if not words:
             return ""
