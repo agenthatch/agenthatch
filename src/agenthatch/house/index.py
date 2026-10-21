@@ -115,7 +115,7 @@ class SkillhouseIndex:
                 self._bm25_ids.append(sid)
 
         if self._bm25_docs:
-            self._bm25 = BM25Okapi([doc.split() for doc in self._bm25_docs])
+            self._bm25 = BM25Okapi([doc.lower().split() for doc in self._bm25_docs])
         else:
             self._bm25 = None
 

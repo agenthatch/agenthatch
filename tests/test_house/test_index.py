@@ -392,6 +392,41 @@ class TestBM25Search:
         for r in results:
             assert r.score <= 0.0
 
+    @pytest.mark.parametrize("trigger", ["weather", "Weather", "WEATHER"])
+    @pytest.mark.parametrize("query", ["weather", "Weather", "WEATHER"])
+    def test_search_trigger_case(self, idx: SkillhouseIndex, trigger: str, query: str):
+        """Index triggers and queries with the same case normalization."""
+        for skill_id, terms in [
+            ("finance", ["budget"]),
+            ("cooking", ["recipe"]),
+            ("weather", [trigger]),
+        ]:
+            idx.add_entry(
+                skill_id, make_spec(skill_id=skill_id, triggers=terms), f"{skill_id}.yaml"
+            )
+
+        results = idx.search(query, top_k=1)
+        assert results[0].skill_id == "weather"
+        assert results[0].score > 0
+        assert results[0].match_source == "keyword"
+        assert idx.get_entry("weather")["intent"]["triggers"] == [trigger]
+
+    def test_search_trigger_case_after_reload(self, idx: SkillhouseIndex):
+        """Rebuild the normalized BM25 index without changing stored triggers."""
+        for skill_id, trigger in [
+            ("finance", "budget"), ("cooking", "recipe"), ("weather", "MÜNCHEN")
+        ]:
+            idx.add_entry(
+                skill_id, make_spec(skill_id=skill_id, triggers=[trigger]), f"{skill_id}.yaml"
+            )
+
+        reloaded = SkillhouseIndex(idx.path)
+        reloaded._embedder_disabled = True
+        results = reloaded.search("münchen", top_k=1)
+        assert results[0].skill_id == "weather"
+        assert results[0].score > 0
+        assert reloaded.get_entry("weather")["intent"]["triggers"] == ["MÜNCHEN"]
+
     def test_search_top_k_limit(self, idx: SkillhouseIndex):
         for i in range(5):
             spec = make_spec(
