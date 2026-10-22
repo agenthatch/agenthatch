@@ -308,11 +308,26 @@ Anyone who maintains more than 3 SKILL.md files and feels the friction. Claude
 Code users, Codex CLI users, OpenClaw users — if you've ever thought "I wish
 this skill was a real program," this is for you.
 
-### Can I use this with Claude Code / Codex / OpenClaw?
+### Can I use an AgentHatch skill in Claude Code?
 
-Yes. The hatched agent is a standalone Python package. You can run it as a CLI,
-import it as a library, or wrap it as an MCP server. It doesn't depend on any
-specific agent platform.
+Yes. Claude Code loads project skills from `.claude/skills/<name>/SKILL.md` and
+invokes them as `/<name>`. The directory name, or the `name` in the skill's
+frontmatter when present, sets that command. Put your skill at that path, start
+`claude` in the project, and invoke it by name. See the
+[Claude Code skills guide](https://code.claude.com/docs/en/skills) for other
+skill locations and options.
+
+You can also use the same file as AgentHatch input:
+
+```bash
+agenthatch skill add ./.claude/skills/weather-reporter --name weather-reporter
+agenthatch hatch weather-reporter
+agenthatch run weather-reporter
+```
+
+These are separate execution paths: Claude Code reads the skill instructions,
+while AgentHatch builds and runs a standalone Python agent. AgentHatch does not
+install that generated agent as a native Claude Code extension.
 
 ### What MCP servers are supported?
 
