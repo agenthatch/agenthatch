@@ -4,6 +4,16 @@ All notable changes to agenthatch will be documented in this file.
 
 ***
 
+## \[v1.0.29] — 2026-11-17
+
+### Fixed
+
+* **Python ScriptAnalyzer returned no public functions at all** — in both `extract_python_signatures()` and `analyze_scripts_from_manifest()` the extraction block was indented under the private-function guard, right after its unconditional `continue`, so it was unreachable: every skill script came back with an empty `python_functions` list, file-based and in-memory alike. Dedented back into the top-level loop; private functions, class methods, nested functions, malformed Python and shell scripts keep their behaviour. `tests/test_script_signatures.py` pins sync/async, annotated/unannotated, docstrings, source paths and the skill-directory entry point. (#7, #8 — thanks @sugarzzzcccsss)
+
+* **keyword search missed capitalized triggers** — `search()` lowercases the query but `_ensure_bm25()` built the BM25 corpus from triggers as stored, so a skill whose trigger was `Weather` scored `0.0` for `weather` / `Weather` / `WEATHER` and lost to whatever was indexed first. The corpus is now lowercased at index time; stored triggers and embedding inputs are untouched. `tests/test_house/test_index.py::TestBM25Search::test_search_ignores_trigger_case` covers all three spellings. (#5 — thanks @developerjillur for the report and the original fix in #6)
+
+***
+
 ## \[v1.0.28] — 2026-10-07
 
 ### Fixed

@@ -403,6 +403,22 @@ class TestBM25Search:
         results = idx.search("commonKeyword", top_k=2)
         assert len(results) <= 2
 
+    @pytest.mark.parametrize("query", ["weather", "Weather", "WEATHER"])
+    def test_search_ignores_trigger_case(self, idx: SkillhouseIndex, query: str):
+        """#5: a capitalized trigger must still match, whatever the query case."""
+        idx.add_entry("finance", make_spec(skill_id="finance", triggers=["budget"]), "/tmp/f.yaml")
+        idx.add_entry("cooking", make_spec(skill_id="cooking", triggers=["recipe"]), "/tmp/c.yaml")
+        idx.add_entry("weather", make_spec(skill_id="weather", triggers=["Weather"]), "/tmp/w.yaml")
+
+        results = idx.search(query, top_k=1)
+        assert results[0].skill_id == "weather"
+        assert results[0].score > 0.0
+
+    def test_search_keeps_stored_trigger_case(self, idx: SkillhouseIndex):
+        idx.add_entry("weather", make_spec(skill_id="weather", triggers=["Weather"]), "/tmp/w.yaml")
+        idx.search("weather")
+        assert idx.get_entry("weather")["intent"]["triggers"] == ["Weather"]
+
     def test_search_result_fields(self, idx: SkillhouseIndex):
         spec = make_spec(
             skill_id="test",
