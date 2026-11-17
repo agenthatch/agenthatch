@@ -276,30 +276,30 @@ def extract_python_signatures(file_path: Path) -> list[ToolSchema]:
         if node.name.startswith("_"):
             continue
         # Process this top-level function (not nested in class/function)
-            args: list[dict[str, str | None]] = []
-            for arg in node.args.args:
-                arg_type: str | None = None
-                if arg.annotation:
-                    try:
-                        arg_type = _ast.unparse(arg.annotation)
-                    except Exception:
-                        arg_type = None
-                args.append({"name": arg.arg, "type": arg_type})
-
-            returns: str | None = None
-            if node.returns:
+        args: list[dict[str, str | None]] = []
+        for arg in node.args.args:
+            arg_type: str | None = None
+            if arg.annotation:
                 try:
-                    returns = _ast.unparse(node.returns)
+                    arg_type = _ast.unparse(arg.annotation)
                 except Exception:
-                    returns = None
+                    arg_type = None
+            args.append({"name": arg.arg, "type": arg_type})
 
-            functions.append(ToolSchema(
-                name=node.name,
-                args=args,
-                returns=returns,
-                docstring=_ast.get_docstring(node),
-                source_file=str(file_path),
-            ))
+        returns: str | None = None
+        if node.returns:
+            try:
+                returns = _ast.unparse(node.returns)
+            except Exception:
+                returns = None
+
+        functions.append(ToolSchema(
+            name=node.name,
+            args=args,
+            returns=returns,
+            docstring=_ast.get_docstring(node),
+            source_file=str(file_path),
+        ))
     return functions
 
 
@@ -376,28 +376,28 @@ def analyze_scripts_from_manifest(file_manifest: FileManifest) -> ScriptManifest
                     continue
                 if node.name.startswith("_"):
                     continue
-                    args: list[dict[str, str | None]] = []
-                    for arg in node.args.args:
-                        arg_type: str | None = None
-                        if arg.annotation:
-                            try:
-                                arg_type = _ast.unparse(arg.annotation)
-                            except Exception:
-                                arg_type = None
-                        args.append({"name": arg.arg, "type": arg_type})
-                    returns: str | None = None
-                    if node.returns:
+                args: list[dict[str, str | None]] = []
+                for arg in node.args.args:
+                    arg_type: str | None = None
+                    if arg.annotation:
                         try:
-                            returns = _ast.unparse(node.returns)
+                            arg_type = _ast.unparse(arg.annotation)
                         except Exception:
-                            returns = None
-                    manifest.python_functions.append(ToolSchema(
-                        name=node.name,
-                        args=args,
-                        returns=returns,
-                        docstring=_ast.get_docstring(node),
-                        source_file=entry.path,
-                    ))
+                            arg_type = None
+                    args.append({"name": arg.arg, "type": arg_type})
+                returns: str | None = None
+                if node.returns:
+                    try:
+                        returns = _ast.unparse(node.returns)
+                    except Exception:
+                        returns = None
+                manifest.python_functions.append(ToolSchema(
+                    name=node.name,
+                    args=args,
+                    returns=returns,
+                    docstring=_ast.get_docstring(node),
+                    source_file=entry.path,
+                ))
         elif suffix == ".sh":
             pattern = _re.compile(r'^(?:function\s+)?(\w+)\s*\(\s*\)', _re.MULTILINE)
             for match in pattern.finditer(entry.content):
